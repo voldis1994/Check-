@@ -15,6 +15,7 @@ from engine.core.config import load_system_config
 from engine.core.instance import Instance
 from engine.core.lifecycle import build_system_paths, discover_instances, validate_root_path
 from engine.core.paths import SystemPaths
+from engine.deployment.path_contract import run_path_contract_validation
 from engine.protocol.constants import (
     TIMEFRAME_M1,
     UNIVERSE_FORBIDDEN_FIELDS,
@@ -149,6 +150,26 @@ def validate_mql4_ea_files(root: Path) -> tuple[ValidationCheck, ...]:
             )
         )
     return tuple(checks)
+
+
+def validate_path_contract(
+    paths: SystemPaths,
+    *,
+    require_mt4_exports: bool = False,
+) -> tuple[ValidationCheck, ...]:
+    report = run_path_contract_validation(
+        paths.root,
+        require_mt4_exports=require_mt4_exports,
+    )
+    return tuple(
+        _check(
+            f"path_contract_{item.check_id}",
+            item.name,
+            item.passed,
+            item.message,
+        )
+        for item in report.checks
+    )
 
 
 def validate_config_file(config_path: Path, paths: SystemPaths) -> tuple[ValidationCheck, ...]:
@@ -473,6 +494,7 @@ def run_live_validation(
     checks.extend(validate_directory_layout(paths))
     checks.extend(validate_runtime_entry_points(paths.root))
     checks.extend(validate_mql4_ea_files(paths.root))
+    checks.extend(validate_path_contract(paths, require_mt4_exports=require_mt4_exports))
     checks.extend(validate_config_file(resolved_config_path, paths))
     checks.extend(validate_instance_isolation(paths, instances))
     checks.extend(validate_rules_compliance(paths.root, config, config_text=resolved_config_path.read_text(encoding="utf-8")))

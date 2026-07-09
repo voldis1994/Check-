@@ -10,6 +10,7 @@ import pytest
 from engine.core.instance import Instance
 from engine.core.lifecycle import build_system_paths
 from engine.core.paths import SystemPaths
+from engine.deployment.path_contract import sync_deployment_paths
 from engine.protocol.constants import PROTOCOL_SCHEMA_VERSION, TIMEFRAME_M1
 from tests.core.config_payload import valid_system_config_payload
 from tools.validate_live import (
@@ -89,6 +90,7 @@ def _prepare_live_root(tmp_path: Path, *, with_exports: bool = True) -> tuple[Pa
     shutil.copytree(mql4_src, tmp_path / "mql4")
     engine_src = ROOT / "engine"
     shutil.copytree(engine_src, tmp_path / "engine")
+    sync_deployment_paths(tmp_path)
     return config_path, paths, instance
 
 
