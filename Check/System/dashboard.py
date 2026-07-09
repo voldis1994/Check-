@@ -6,16 +6,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 from engine.core.config import load_system_config
-from engine.core.lifecycle import build_system_paths, validate_root_path
+from engine.core.lifecycle import build_system_paths, validate_config_root_path, validate_root_path
 from engine.core.logging_setup import log_event, setup_system_logger
 from engine.core.paths import SystemPaths
 from engine.dashboard.console import render_dashboard
 from engine.dashboard.reader import load_dashboard_snapshot
+from engine.deployment.path_contract import prepare_deployment_root
 from engine.protocol.errors import ConfigurationError
 from engine.protocol.models import SystemConfig
 MODULE_NAME = 'dashboard.runtime'
 STARTUP_EXIT_CODE = 0
 STARTUP_ERROR_EXIT_CODE = 1
+CONFIG_RELATIVE_PATH = Path('config') / 'system.json'
+
+
+def _resolve_project_root() -> Path:
+    return Path(__file__).resolve().parent
+
 
 @dataclass
 class DashboardRuntime:
@@ -23,11 +30,13 @@ class DashboardRuntime:
     config: SystemConfig
     shutdown_requested: bool = False
 
-def startup_dashboard(*, root_path: str | Path | None=None, config_path: str | Path | None=None) -> DashboardRuntime:
+
+def startup_dashboard(*, root_path: str | Path | None = None, config_path: str | Path | None = None) -> DashboardRuntime:
     bootstrap_paths = SystemPaths(root_path)
     validate_root_path(bootstrap_paths)
     resolved_config_path = Path(config_path) if config_path is not None else bootstrap_paths.config_path
     config = load_system_config(resolved_config_path, system_paths=bootstrap_paths)
+    validate_config_root_path(config, bootstrap_paths)
     paths = build_system_paths(config)
     validate_root_path(paths)
     paths.ensure_directories()
@@ -35,14 +44,17 @@ def startup_dashboard(*, root_path: str | Path | None=None, config_path: str | P
     log_event(system_logger, level='INFO', module=MODULE_NAME, message='dashboard startup complete')
     return DashboardRuntime(paths=paths, config=config)
 
+
 def request_dashboard_shutdown(runtime: DashboardRuntime) -> None:
     runtime.shutdown_requested = True
 
-def refresh_dashboard(runtime: DashboardRuntime, *, timestamp_utc: str | None=None, output: Callable[[str], None] | None=None) -> str:
+
+def refresh_dashboard(runtime: DashboardRuntime, *, timestamp_utc: str | None = None, output: Callable[[str], None] | None = None) -> str:
     snapshot = load_dashboard_snapshot(runtime.config, runtime.paths, timestamp_utc=timestamp_utc)
     return render_dashboard(snapshot, output=output)
 
-def run_dashboard_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[DashboardRuntime], None] | None=None, sleep_fn: Callable[[float], None]=time.sleep, output: Callable[[str], None] | None=None) -> int:
+
+def run_dashboard_main(*, root_path: str | Path | None = None, config_path: str | Path | None = None, wait_for_shutdown: Callable[[DashboardRuntime], None] | None = None, sleep_fn: Callable[[float], None] = time.sleep, output: Callable[[str], None] | None = None) -> int:
     try:
         runtime = startup_dashboard(root_path=root_path, config_path=config_path)
     except ConfigurationError as exc:
@@ -65,7 +77,16 @@ def run_dashboard_main(*, root_path: str | Path | None=None, config_path: str | 
         refresh_dashboard(runtime, output=output)
     return STARTUP_EXIT_CODE
 
+
 def main() -> int:
-    return run_dashboard_main()
+    project_root = _resolve_project_root()
+    config_path = project_root / CONFIG_RELATIVE_PATH
+    if not config_path.is_file():
+        print(f'dashboard startup failed: config file not found at {config_path}', file=sys.stderr)
+        return STARTUP_ERROR_EXIT_CODE
+    prepare_deployment_root(project_root)
+    return run_dashboard_main(root_path=project_root, config_path=config_path)
+
+
 if __name__ == '__main__':
     sys.exit(main())

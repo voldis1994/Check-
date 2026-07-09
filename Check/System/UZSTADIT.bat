@@ -34,7 +34,7 @@ if not exist "%ROOT%\run_live.py" (
   goto :fail
 )
 
-echo [1/5] Python vide...
+echo [1/4] Python vide...
 if not exist "%ROOT%\.venv\Scripts\python.exe" (
   if defined PYTHON_LAUNCHER (
     %PYTHON_LAUNCHER% -m venv "%ROOT%\.venv"
@@ -46,24 +46,18 @@ if not exist "%ROOT%\.venv\Scripts\python.exe" (
 )
 set "PYTHON_CMD=%ROOT%\.venv\Scripts\python.exe"
 
-echo [2/5] Bibliotēkas...
+echo [2/4] Bibliotēkas...
 "%PYTHON_CMD%" -m pip install --upgrade pip -q
 "%PYTHON_CMD%" -m pip install -r "%ROOT%\requirements.txt" -q
 if errorlevel 1 goto :fail
 
-echo [3/5] Datu mapes...
+echo [3/4] Datu mapes...
 for %%D in (data\clients data\logs data\cache data\history data\universe) do (
   if not exist "%ROOT%\%%D" mkdir "%ROOT%\%%D"
 )
 
-echo [4/5] Config root_path...
-"%PYTHON_CMD%" "%ROOT%\run_live.py" --setup-only 2>nul
-if errorlevel 1 (
-  "%PYTHON_CMD%" -c "import json;from pathlib import Path;r=Path(r'%ROOT%');c=r/'config'/'system.json';p=json.loads(c.read_text(encoding='utf-8'));p.setdefault('system',{})['root_path']=str(r).replace('\\','\\\\');c.write_text(json.dumps(p,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')"
-)
-
-echo [5/5] MT4 ceļš...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\generate_mql4_root.ps1" -RootPath "%ROOT%"
+echo [4/4] Sinhronizē ceļus...
+"%PYTHON_CMD%" "%ROOT%\scripts\sync_paths.py" --root "%ROOT%"
 if errorlevel 1 goto :fail
 
 echo.

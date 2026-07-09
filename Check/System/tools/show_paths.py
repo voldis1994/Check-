@@ -63,11 +63,13 @@ def _instance_file_rows(paths: SystemPaths, instance: Instance) -> list[str]:
     return rows
 
 def _mql4_join(*parts: str) -> str:
-    cleaned: list[str] = []
-    for part in parts:
-        text = part.replace('/', '\\').strip('\\')
-        if text:
-            cleaned.append(text)
+    if not parts:
+        return ''
+    root = parts[0]
+    if root.startswith('/') or (len(root) >= 2 and root[1] != ':'):
+        cleaned = [part.replace('\\', '/').strip('/') for part in parts if part]
+        return '/'.join(cleaned)
+    cleaned = [part.replace('/', '\\').strip('\\') for part in parts if part]
     return '\\'.join(cleaned)
 
 def _mql4_clients_dir(mql4_root: str, clients_relative: str) -> str:

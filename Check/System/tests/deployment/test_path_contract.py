@@ -3,7 +3,7 @@ import json
 import shutil
 from pathlib import Path
 import pytest
-from engine.deployment.path_contract import read_config_root_path, read_mql4_compiled_root, resolve_deployment_root, run_path_contract_validation, sync_deployment_paths, validate_config_matches_runtime_root, validate_mql4_root_matches_config, validate_no_competing_deployment_trees, validate_relative_path_segments, write_config_root_path, write_mql4_root_config
+from engine.deployment.path_contract import prepare_deployment_root, read_config_root_path, read_mql4_compiled_root, resolve_deployment_root, run_path_contract_validation, sync_config_instances_from_clients, sync_deployment_paths, validate_config_matches_runtime_root, validate_mql4_root_matches_config, validate_no_competing_deployment_trees, validate_relative_path_segments, write_config_root_path, write_mql4_root_config
 from tests.core.config_payload import valid_system_config_payload
 
 def _install_minimal_deployment(root: Path) -> None:
@@ -81,3 +81,28 @@ def test_repo_path_contract_fails_before_sync() -> None:
         pytest.skip('repository paths already aligned on this host')
     failed_ids = {check.check_id for check in report.failed_checks}
     assert 'config_runtime_root' in failed_ids or 'mql4_config_root' in failed_ids
+
+
+def test_prepare_deployment_root_aligns_config_mql4_and_directories(tmp_path: Path) -> None:
+    _install_minimal_deployment(tmp_path)
+    write_config_root_path(tmp_path / 'other', config_path=tmp_path / 'config' / 'system.json')
+    write_mql4_root_config(tmp_path / 'other', output_path=tmp_path / 'mql4' / 'Include' / 'SYSTEM_RootConfig.mqh')
+    root = prepare_deployment_root(tmp_path)
+    report = run_path_contract_validation(root)
+    assert report.passed
+    assert (tmp_path / 'data' / 'clients').is_dir()
+    assert (tmp_path / 'data' / 'logs').is_dir()
+    assert read_config_root_path(tmp_path / 'config' / 'system.json') == str(tmp_path)
+    assert read_mql4_compiled_root(tmp_path) == str(tmp_path)
+
+
+def test_sync_config_instances_from_clients_updates_account_id(tmp_path: Path) -> None:
+    _install_minimal_deployment(tmp_path)
+    sync_deployment_paths(tmp_path)
+    account_dir = tmp_path / 'data' / 'clients' / '999888'
+    account_dir.mkdir(parents=True, exist_ok=True)
+    (account_dir / 'market_EURUSD_100001.csv').write_text('time_utc,open,high,low,close,volume\n', encoding='utf-8')
+    changed = sync_config_instances_from_clients(tmp_path)
+    assert changed
+    payload = json.loads((tmp_path / 'config' / 'system.json').read_text(encoding='utf-8'))
+    assert payload['instances'][0]['account_id'] == '999888'

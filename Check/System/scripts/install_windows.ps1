@@ -200,11 +200,11 @@ $venvPython = Join-Path $venvPath "Scripts\python.exe"
 & $venvPython -m pip install --upgrade pip
 & $venvPython -m pip install -r (Join-Path $InstallPath "requirements.txt")
 
-Write-Step "Sinhronizē MT4 root config"
-& $venvPython (Join-Path $InstallPath "run_live.py") --setup-only
-$generateScript = Join-Path $InstallPath "scripts\generate_mql4_root.ps1"
-if (Test-Path $generateScript) {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $generateScript -RootPath $InstallPath
+Write-Step "Sinhronizē ceļus"
+$syncPaths = Join-Path $InstallPath "scripts\sync_paths.py"
+& $venvPython $syncPaths --root $InstallPath
+if ($LASTEXITCODE -ne 0) {
+    throw "sync_paths neizdevās (exit code $LASTEXITCODE)"
 }
 
 if (-not $SkipMt4 -and $Mt4DataPath) {

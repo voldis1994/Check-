@@ -9,7 +9,10 @@ Deploy root: `C:\Check\System`
 ```bat
 cd C:\Check\System
 UZSTADIT.bat
+PALAID.bat
 ```
+
+`UZSTADIT.bat` and `PALAID.bat` automatically run `scripts\sync_paths.py` so Python config, MQL4 root, and runtime root stay aligned.
 
 Or install from GitHub:
 

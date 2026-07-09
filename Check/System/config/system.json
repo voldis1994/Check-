@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "system": {
     "name": "SYSTEM",
-    "root_path": "/workspace/Check/System",
+    "root_path": "C:\\Check\\System",
     "timeframe": "M1"
   },
   "paths": {

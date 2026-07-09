@@ -28,7 +28,12 @@ if not exist "%ROOT%\.venv\Scripts\python.exe" (
 )
 
 set "PY=%ROOT%\.venv\Scripts\python.exe"
-"%PY%" -m pip install -r "%ROOT%\requirements-runtime.txt" -q
+"%PY%" -m pip install -r "%ROOT%\requirements.txt" -q
+if errorlevel 1 goto :fail
+
+echo Sinhronizē ceļus...
+"%PY%" "%ROOT%\scripts\sync_paths.py" --root "%ROOT%"
+if errorlevel 1 goto :fail
 
 echo SYSTEM root: %ROOT%
 echo.
@@ -41,3 +46,9 @@ echo.
 echo Exit code: %EXIT_CODE%
 pause
 exit /b %EXIT_CODE%
+
+:fail
+echo.
+echo Palaišana neizdevās.
+pause
+exit /b 1

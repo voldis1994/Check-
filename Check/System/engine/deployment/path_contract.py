@@ -3,7 +3,15 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from engine.core.paths import DEFAULT_CACHE_PATH, DEFAULT_CLIENTS_PATH, DEFAULT_HISTORY_PATH, DEFAULT_LOGS_PATH, DEFAULT_UNIVERSE_PATH, CONFIG_RELATIVE_PATH
+from engine.core.paths import (
+    DEFAULT_CACHE_PATH,
+    DEFAULT_CLIENTS_PATH,
+    DEFAULT_HISTORY_PATH,
+    DEFAULT_LOGS_PATH,
+    DEFAULT_UNIVERSE_PATH,
+    CONFIG_RELATIVE_PATH,
+    SystemPaths,
+)
 MODULE_NAME = 'deployment.path_contract'
 MQL4_ROOT_CONFIG = Path('mql4') / 'Include' / 'SYSTEM_RootConfig.mqh'
 MQL4_PATHS_MQH = Path('mql4') / 'Include' / 'SYSTEM_Paths.mqh'
@@ -173,4 +181,65 @@ def sync_deployment_paths(root: str | Path | None=None) -> Path:
     deployment_root = normalize_path(root) if root is not None else resolve_deployment_root()
     write_config_root_path(deployment_root)
     write_mql4_root_config(deployment_root)
+    return deployment_root
+
+
+def sync_config_instances_from_clients(root: str | Path, *, config_path: Path | None=None) -> bool:
+    from engine.core.config import load_system_config
+    from engine.core.lifecycle import build_system_paths, parse_market_filename
+
+    deployment_root = normalize_path(root)
+    resolved_config_path = config_path if config_path is not None else deployment_root / CONFIG_RELATIVE_PATH
+    bootstrap_paths = SystemPaths(deployment_root)
+    config = load_system_config(resolved_config_path, system_paths=bootstrap_paths)
+    paths = build_system_paths(config)
+    clients_dir = paths.clients_dir
+    if not clients_dir.is_dir():
+        return False
+    account_dirs = sorted(entry for entry in clients_dir.iterdir() if entry.is_dir())
+    if not account_dirs:
+        return False
+    payload = json.loads(resolved_config_path.read_text(encoding='utf-8'))
+    instances = payload.get('instances')
+    if not isinstance(instances, list) or not instances:
+        return False
+    primary_account = account_dirs[0].name
+    discovered_symbol: str | None = None
+    discovered_magic: int | None = None
+    for entry in account_dirs[0].iterdir():
+        if not entry.is_file():
+            continue
+        parsed = parse_market_filename(entry.name)
+        if parsed is not None:
+            discovered_symbol, discovered_magic = parsed
+            break
+    changed = False
+    first = instances[0]
+    if not isinstance(first, dict):
+        return False
+    if len(account_dirs) == 1 and first.get('account_id') != primary_account:
+        first['account_id'] = primary_account
+        changed = True
+    if discovered_symbol is not None and first.get('symbol') != discovered_symbol:
+        first['symbol'] = discovered_symbol
+        changed = True
+    if discovered_magic is not None and first.get('magic') != discovered_magic:
+        first['magic'] = discovered_magic
+        changed = True
+    if not changed:
+        return False
+    resolved_config_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    return True
+
+
+def prepare_deployment_root(root: str | Path) -> Path:
+    from engine.core.config import load_system_config
+    from engine.core.lifecycle import build_system_paths
+
+    deployment_root = sync_deployment_paths(root)
+    bootstrap_paths = SystemPaths(deployment_root)
+    config = load_system_config(deployment_root / CONFIG_RELATIVE_PATH, system_paths=bootstrap_paths)
+    paths = build_system_paths(config)
+    paths.ensure_directories()
+    sync_config_instances_from_clients(deployment_root)
     return deployment_root
