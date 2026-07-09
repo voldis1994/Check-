@@ -1,0 +1,17 @@
+{
+  "account_id": "231054",
+  "cycle_count": 0,
+  "day_start_balance": 30.85,
+  "instrument_digits": 0,
+  "instrument_pip": 0.0,
+  "instrument_point": 0.0,
+  "last_ack_status": "",
+  "last_command_id": "",
+  "last_cycle_utc": "",
+  "last_decision": "WAIT",
+  "last_reason": "INIT",
+  "magic": 100001,
+  "peak_equity": 30.85,
+  "schema_version": "1.0.0",
+  "symbol": "EURUSD"
+}

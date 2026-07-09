@@ -1,0 +1,30 @@
+================================================================================
+  SYSTEM — KĀ PALAIST (Windows, 2 soļi)
+================================================================================
+
+Tu esi šeit:  C:\VS_READER_ENGINE_V2\SYSTEM
+
+1) UZSTĀDĪŠANA (vienreiz)
+   Dubultklikšķis:  UZSTADIT.bat
+
+2) LIVE
+   Dubultklikšķis:  PALAID.bat
+
+--------------------------------------------------------------------------------
+MT4 (vienreiz)
+--------------------------------------------------------------------------------
+Atver CMD šeit un palaid:
+
+  scripts\copy_mql4_to_mt4.bat "C:\VS1\VS_STAGE_02_MT4_MANAGER\mt4_template\MQL4"
+
+MetaEditor → atver SYSTEM_EA.mq4 → F7 Compile
+Chart → pievieno EA → AutoTrading ON
+EA lauks SystemRootPath = C:\VS_READER_ENGINE_V2\SYSTEM
+
+--------------------------------------------------------------------------------
+Ja git nestrādā
+--------------------------------------------------------------------------------
+Lejupielādē ZIP no GitHub (main) un aizvieto mapi.
+Tad tikai UZSTADIT.bat un PALAID.bat.
+
+================================================================================

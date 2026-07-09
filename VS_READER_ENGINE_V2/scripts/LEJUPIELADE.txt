@@ -1,0 +1,42 @@
+SYSTEM — LEJUPIELĀDE UZREIZ (VIENS FAILS)
+=========================================
+
+VARIANTS 1 — VIENS FAILS, DUBULTKLIKŠĶIS (VIENKĀRŠĀKAIS)
+---------------------------------------------------------
+1. Atveriet pārlūkā:
+   https://github.com/voldis1994/VS_READER_ENGINE_V2/raw/main/SYSTEM/scripts/LEJUPIELADE_UZREIZ.bat
+
+2. Labā poga → Save As / Saglabāt kā → Desktop
+
+3. Dubultklikšķis uz LEJUPIELADE_UZREIZ.bat
+
+   → Lejupielādē VISU projektu uz C:\SYSTEM automātiski.
+
+
+VARIANTS 2 — POWERSHELL (KOPIĒT UN IELĪMĒT)
+--------------------------------------------
+Atveriet PowerShell un ielīmējiet:
+
+  iwr -useb https://raw.githubusercontent.com/voldis1994/VS_READER_ENGINE_V2/main/SYSTEM/scripts/lejupielade_uzreiz.ps1 | iex
+
+VAI:
+
+  Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/voldis1994/VS_READER_ENGINE_V2/main/SYSTEM/scripts/lejupielade_uzreiz.ps1'))
+
+
+PRASĪBAS
+--------
+- Windows 10/11
+- Python 3.11+ (https://www.python.org/downloads/) ar "Add to PATH"
+- Internets
+
+
+PĒC LEJUPIELĀDES
+-----------------
+  C:\SYSTEM\                    — viss projekts
+  C:\SYSTEM\config\system.json  — jūsu konts/symbol/magic
+  C:\SYSTEM\mql4\               — kopēt uz MT4
+
+  cd C:\SYSTEM
+  .venv\Scripts\activate
+  python run_live.py
