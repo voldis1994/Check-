@@ -1,1 +1,0 @@
-{"account_id": "231054", "ack_latency_ms": null, "cycle_latency_ms": 26160084, "data_freshness_ms": 26160084, "error_count": 1, "error_rate_per_min": 1.0, "instance_health": "ERROR", "magic": 100001, "schema_version": "1.0.0", "symbol": "EURUSD", "timestamp_utc": "2026-07-09T04:32:17.084Z"}

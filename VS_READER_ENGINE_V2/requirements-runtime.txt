@@ -1,2 +1,0 @@
-# Runtime dependencies for live trading (no pytest).
-psutil>=5.9.0,<7.0.0

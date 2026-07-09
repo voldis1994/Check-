@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.mypy_cache/
+data/clients/*
+!data/clients/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+data/cache/*
+!data/cache/.gitkeep
+data/history/*
+!data/history/.gitkeep
+data/universe/*
+!data/universe/.gitkeep
