@@ -21,6 +21,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 
 ```bat
 python scripts\sync_paths.py
+python tools\show_paths.py
 python tools\validate_live.py
 PALAID.bat
 ```
