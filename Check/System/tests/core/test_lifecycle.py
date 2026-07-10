@@ -282,3 +282,13 @@ def test_run_live_main_completes_startup_and_shutdown(tmp_path: Path) -> None:
     root, config_path = _prepare_runtime_root(tmp_path)
     exit_code = run_live_main(root_path=root, config_path=config_path, wait_for_shutdown=lambda runtime: request_shutdown(runtime))
     assert exit_code == STARTUP_EXIT_CODE
+
+def test_run_live_main_prints_startup_banner(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, config_path = _prepare_runtime_root(tmp_path)
+    paths = SystemPaths(root)
+    paths.ensure_account_directories('12345')
+    (paths.account_dir('12345') / 'market_EURUSD_100001.csv').write_text('time_utc,open,high,low,close,volume,symbol,timeframe,digits,point\n2026-07-07T06:02:00.000Z,1.1,1.2,1.0,1.15,1,EURUSD,M1,5,0.00001\n', encoding='utf-8')
+    exit_code = run_live_main(root_path=root, config_path=config_path, require_mt4_exports=True, wait_for_shutdown=lambda runtime: request_shutdown(runtime))
+    captured = capsys.readouterr()
+    assert exit_code == STARTUP_EXIT_CODE
+    assert 'SYSTEM live started' in captured.out

@@ -260,10 +260,11 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     from engine.core.monitoring import compute_data_freshness_ms, is_data_stale
     market_data_utc = format_utc_timestamp(market_bars[-1].time_utc)
     sensor_data_utc = sensor_reading.time_utc
-    market_freshness_ms = compute_data_freshness_ms(market_data_utc, resolved_timestamp)
-    sensor_freshness_ms = compute_data_freshness_ms(sensor_data_utc, resolved_timestamp)
+    market_freshness_ms = compute_data_freshness_ms(loaded.market_raw.modified_utc, resolved_timestamp)
+    sensor_freshness_ms = compute_data_freshness_ms(loaded.sensor_raw.modified_utc, resolved_timestamp)
+    bar_freshness_ms = compute_data_freshness_ms(market_data_utc, resolved_timestamp)
     if is_data_stale(market_freshness_ms, stale_threshold_ms) or is_data_stale(sensor_freshness_ms, stale_threshold_ms):
-        _log_stale_data_skip(runtime.paths, instance, market_freshness_ms=market_freshness_ms, sensor_freshness_ms=sensor_freshness_ms, threshold_ms=stale_threshold_ms)
+        _log_stale_data_skip(runtime.paths, instance, market_freshness_ms=bar_freshness_ms, sensor_freshness_ms=sensor_freshness_ms, threshold_ms=stale_threshold_ms)
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, market_data_utc=market_data_utc)
     universe_result = validate_universe_for_cycle(loaded.universe_raw)
     if isinstance(universe_result, ValidationResult):

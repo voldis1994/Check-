@@ -267,12 +267,38 @@ def shutdown(runtime: LiveRuntime) -> int:
     close_runtime_logging(runtime)
     return STARTUP_EXIT_CODE
 
+def print_live_startup_banner(runtime: LiveRuntime, instances: tuple[Instance, ...]) -> None:
+    print(f'SYSTEM live started: root={runtime.paths.root}', flush=True)
+    print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms}', flush=True)
+    print(f'logs={runtime.paths.logs_dir}', flush=True)
+    for instance in instances:
+        market_path = runtime.paths.account_dir(instance.account_id) / instance.market_filename()
+        print(f'  {instance.account_id} {instance.symbol} magic={instance.magic} market={"OK" if market_path.is_file() else "MISSING"}', flush=True)
+    print('Ctrl+C to stop. Cycle status prints below.', flush=True)
+
+def print_live_cycle_summary(result: object) -> None:
+    from engine.core.orchestrator import OrchestratorCycleResult
+    if not isinstance(result, OrchestratorCycleResult):
+        return
+    for item in result.instance_results:
+        decision = item.decision_result.decision if item.decision_result is not None else '-'
+        reason = item.decision_result.reason if item.decision_result is not None else ''
+        if item.completed:
+            status = 'OK'
+        elif item.error_logged:
+            status = 'SKIP'
+        else:
+            status = 'FAIL'
+        print(f'cycle {item.instance.account_id} {item.instance.symbol} {status} decision={decision} reason={reason}', flush=True)
+
 def run_live_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[LiveRuntime], None] | None=None, require_mt4_exports: bool=False, wait_for_mt4_seconds: float=0.0) -> int:
     try:
         runtime = startup(root_path=root_path, config_path=config_path, require_mt4_exports=require_mt4_exports, wait_for_mt4_seconds=wait_for_mt4_seconds)
     except ConfigurationError as exc:
         print(f'startup failed: {exc.message}', file=sys.stderr)
         return STARTUP_ERROR_EXIT_CODE
+    instances = discover_instances(runtime.config, runtime.paths)
+    print_live_startup_banner(runtime, instances)
 
     def _handle_shutdown_signal(_signum: int, _frame: object | None) -> None:
         request_shutdown(runtime)
@@ -285,8 +311,10 @@ def run_live_main(*, root_path: str | Path | None=None, config_path: str | Path 
         interval_seconds = runtime.config.runtime.cycle_interval_ms / 1000.0
         while not runtime.shutdown_requested:
             try:
-                run_runtime_cycles(runtime)
+                cycle_result = run_runtime_cycles(runtime)
+                print_live_cycle_summary(cycle_result)
             except Exception as exc:
+                print(f'runtime cycle crashed: {exc}', flush=True)
                 log_runtime_event(runtime, level='ERROR', module='core.lifecycle', message=f'runtime cycle crashed: {exc}')
             time.sleep(interval_seconds)
     return shutdown(runtime)

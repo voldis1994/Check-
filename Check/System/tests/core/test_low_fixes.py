@@ -29,12 +29,18 @@ def _write_config(root: Path, *, runtime_overrides: dict | None=None) -> Path:
     return config_path
 
 def test_run_instance_cycle_skips_stale_market_data(tmp_path: Path) -> None:
+    import os
+    import time
     config_path = _write_config(tmp_path, runtime_overrides={'data_stale_threshold_ms': 1000})
     instance = Instance(account_id='12345', symbol='EURUSD', magic=100001)
     paths = SystemPaths(tmp_path)
     _install_valid_fixtures(paths, instance)
+    stale_mtime = time.time() - 60
+    for filename in (instance.market_filename(), instance.sensor_filename()):
+        export_path = paths.account_dir(instance.account_id) / filename
+        os.utime(export_path, (stale_mtime, stale_mtime))
     runtime = startup(root_path=tmp_path, config_path=config_path)
-    result = run_instance_cycle(runtime, instance, use_global_universe=False, timestamp_utc='2026-07-07T06:05:00.000Z')
+    result = run_instance_cycle(runtime, instance, use_global_universe=False)
     assert result.completed is False
     assert result.error_logged is True
     assert result.market_data_utc is not None

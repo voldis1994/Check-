@@ -17,7 +17,7 @@
     "ack_timeout_ms": 5000,
     "retry_max": 3,
     "retry_delay_ms": 200,
-    "data_stale_threshold_ms": 15000,
+    "data_stale_threshold_ms": 90000,
     "cycle_max_duration_ms": 30000,
     "metrics_interval_ms": 60000,
     "auto_discover_instances": true

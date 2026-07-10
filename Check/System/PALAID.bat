@@ -40,7 +40,7 @@ echo.
 echo Palaižu engine... ^(Ctrl+C lai apturētu^)
 echo.
 
-"%PY%" "%ROOT%\run_live.py"
+"%PY%" -u "%ROOT%\run_live.py"
 set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 echo Exit code: %EXIT_CODE%
