@@ -30,8 +30,77 @@ STARTUP_ERROR_EXIT_CODE = 1
 def _config_error(message: str, **context: object) -> ConfigurationError:
     return ConfigurationError(message, module=MODULE_NAME, context=dict(context))
 
-def build_system_paths(config: SystemConfig) -> SystemPaths:
-    return SystemPaths(config.system.root_path, clients_path=config.paths.clients, logs_path=config.paths.logs, cache_path=config.paths.cache, history_path=config.paths.history, universe_path=config.paths.universe)
+def build_system_paths(config: SystemConfig, runtime_root: str | Path | None=None) -> SystemPaths:
+    resolved_root = runtime_root if runtime_root is not None else config.system.root_path
+    return SystemPaths(resolved_root, clients_path=config.paths.clients, logs_path=config.paths.logs, cache_path=config.paths.cache, history_path=config.paths.history, universe_path=config.paths.universe)
+
+def ensure_runtime_paths_aligned(bootstrap_paths: SystemPaths, config: SystemConfig, *, config_path: Path) -> SystemConfig:
+    configured_root = Path(config.system.root_path).expanduser().resolve()
+    bootstrap_root = bootstrap_paths.root
+    if configured_root == bootstrap_root:
+        return config
+    from engine.deployment.path_contract import sync_config_instances_from_clients, sync_deployment_paths
+    sync_deployment_paths(bootstrap_root)
+    sync_config_instances_from_clients(bootstrap_root, config_path=config_path)
+    return load_system_config(config_path, system_paths=bootstrap_paths)
+
+def format_mt4_missing_exports_message(paths: SystemPaths, instances: Iterable[Instance]) -> str:
+    instance_list = tuple(instances)
+    missing: list[str] = []
+    for instance in instance_list:
+        market_path = paths.account_dir(instance.account_id) / instance.market_filename()
+        if not market_path.is_file():
+            missing.append(str(market_path))
+    lines = ['MT4 export files not found. Python reads market data from:', *('  ' + path for path in missing), '', f'deployment root: {paths.root}', f'clients_dir: {paths.clients_dir}']
+    if paths.clients_dir.is_dir():
+        account_dirs = sorted(entry for entry in paths.clients_dir.iterdir() if entry.is_dir())
+        if account_dirs:
+            lines.append('')
+            lines.append('account folders found on disk:')
+            for account_dir in account_dirs:
+                market_files = sorted(p.name for p in account_dir.glob('market_*.csv'))
+                if market_files:
+                    lines.append(f'  {account_dir.name}: {", ".join(market_files)}')
+                else:
+                    lines.append(f'  {account_dir.name}: no market_*.csv')
+        else:
+            lines.append('')
+            lines.append(f'no account folders under {paths.clients_dir}')
+    if instance_list:
+        configured_accounts = sorted({instance.account_id for instance in instance_list})
+        lines.append('')
+        lines.append(f'configured account_id(s): {", ".join(configured_accounts)}')
+    lines.extend(['', 'Fix:', '  1. Start MT4 with SYSTEM_EA attached', f'  2. Set EA SystemRootPath to {paths.root}', '  3. Recompile EA after path changes (scripts/sync_paths.py)', '  4. Run: python tools/show_paths.py'])
+    return '\n'.join(lines)
+
+def validate_mt4_runtime_ready(paths: SystemPaths, instances: Iterable[Instance]) -> None:
+    instance_list = tuple(instances)
+    if not instance_list:
+        raise _config_error('no trading instances configured or discovered', clients_dir=str(paths.clients_dir))
+    missing = False
+    for instance in instance_list:
+        market_path = paths.account_dir(instance.account_id) / instance.market_filename()
+        if not market_path.is_file():
+            missing = True
+            break
+    if missing:
+        raise _config_error(format_mt4_missing_exports_message(paths, instance_list), clients_dir=str(paths.clients_dir))
+
+def wait_for_mt4_exports(paths: SystemPaths, instances: Iterable[Instance], *, wait_seconds: float, poll_interval_seconds: float=2.0) -> None:
+    if wait_seconds <= 0:
+        validate_mt4_runtime_ready(paths, instances)
+        return
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            validate_mt4_runtime_ready(paths, instances)
+            return
+        except ConfigurationError:
+            if time.monotonic() >= deadline:
+                validate_mt4_runtime_ready(paths, instances)
+            print(format_mt4_missing_exports_message(paths, instances), file=sys.stderr)
+            print(f'waiting for MT4 exports ({int(max(0.0, deadline - time.monotonic()))}s remaining)...', file=sys.stderr)
+            time.sleep(poll_interval_seconds)
 
 def validate_root_path(paths: SystemPaths) -> None:
     if not paths.root.exists():
@@ -146,18 +215,21 @@ def log_runtime_event(runtime: LiveRuntime, *, level: str, module: str, message:
     if account_id:
         log_event(ensure_account_logger(runtime, account_id), level=level, module=module, message=message, account_id=account_id, symbol=symbol, magic=magic)
 
-def startup(*, root_path: str | Path | None=None, config_path: str | Path | None=None) -> LiveRuntime:
+def startup(*, root_path: str | Path | None=None, config_path: str | Path | None=None, require_mt4_exports: bool=False, wait_for_mt4_seconds: float=0.0) -> LiveRuntime:
     bootstrap_paths = SystemPaths(root_path)
     validate_root_path(bootstrap_paths)
     resolved_config_path = Path(config_path) if config_path is not None else bootstrap_paths.config_path
     config = load_system_config(resolved_config_path, system_paths=bootstrap_paths)
+    config = ensure_runtime_paths_aligned(bootstrap_paths, config, config_path=resolved_config_path)
     validate_config_root_path(config, bootstrap_paths)
-    paths = build_system_paths(config)
+    paths = build_system_paths(config, runtime_root=bootstrap_paths.root)
     validate_root_path(paths)
     paths.ensure_directories()
     system_logger = setup_system_logger(paths, level=config.logging.level, format_name=config.logging.format)
     log_event(system_logger, level='INFO', module=MODULE_NAME, message='startup begin')
     instances = discover_instances(config, paths)
+    if require_mt4_exports:
+        wait_for_mt4_exports(paths, instances, wait_seconds=wait_for_mt4_seconds)
     memory = load_runtime_memory(paths, instances, lookback_bars=config.analysis.lookback_bars)
     spread_models = build_spread_models(memory)
     removed_hashes = invalidate_runtime_cache(paths, instances)
@@ -195,9 +267,9 @@ def shutdown(runtime: LiveRuntime) -> int:
     close_runtime_logging(runtime)
     return STARTUP_EXIT_CODE
 
-def run_live_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[LiveRuntime], None] | None=None) -> int:
+def run_live_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[LiveRuntime], None] | None=None, require_mt4_exports: bool=False, wait_for_mt4_seconds: float=0.0) -> int:
     try:
-        runtime = startup(root_path=root_path, config_path=config_path)
+        runtime = startup(root_path=root_path, config_path=config_path, require_mt4_exports=require_mt4_exports, wait_for_mt4_seconds=wait_for_mt4_seconds)
     except ConfigurationError as exc:
         print(f'startup failed: {exc.message}', file=sys.stderr)
         return STARTUP_ERROR_EXIT_CODE

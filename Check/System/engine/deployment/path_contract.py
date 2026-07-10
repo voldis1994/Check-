@@ -192,7 +192,7 @@ def sync_config_instances_from_clients(root: str | Path, *, config_path: Path | 
     resolved_config_path = config_path if config_path is not None else deployment_root / CONFIG_RELATIVE_PATH
     bootstrap_paths = SystemPaths(deployment_root)
     config = load_system_config(resolved_config_path, system_paths=bootstrap_paths)
-    paths = build_system_paths(config)
+    paths = build_system_paths(config, runtime_root=deployment_root)
     clients_dir = paths.clients_dir
     if not clients_dir.is_dir():
         return False
@@ -239,7 +239,7 @@ def prepare_deployment_root(root: str | Path) -> Path:
     deployment_root = sync_deployment_paths(root)
     bootstrap_paths = SystemPaths(deployment_root)
     config = load_system_config(deployment_root / CONFIG_RELATIVE_PATH, system_paths=bootstrap_paths)
-    paths = build_system_paths(config)
+    paths = build_system_paths(config, runtime_root=deployment_root)
     paths.ensure_directories()
     sync_config_instances_from_clients(deployment_root)
     return deployment_root

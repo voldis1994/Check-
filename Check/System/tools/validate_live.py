@@ -167,7 +167,7 @@ def run_live_validation(*, root_path: str | Path | None=None, config_path: str |
     validate_root_path(bootstrap_paths)
     resolved_config_path = Path(config_path) if config_path is not None else bootstrap_paths.config_path
     config = load_system_config(resolved_config_path, system_paths=bootstrap_paths)
-    paths = build_system_paths(config)
+    paths = build_system_paths(config, runtime_root=bootstrap_paths.root)
     validate_root_path(paths)
     instances = discover_instances(config, paths)
     checks: list[ValidationCheck] = []

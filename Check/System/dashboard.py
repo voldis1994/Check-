@@ -36,8 +36,10 @@ def startup_dashboard(*, root_path: str | Path | None = None, config_path: str |
     validate_root_path(bootstrap_paths)
     resolved_config_path = Path(config_path) if config_path is not None else bootstrap_paths.config_path
     config = load_system_config(resolved_config_path, system_paths=bootstrap_paths)
+    from engine.core.lifecycle import ensure_runtime_paths_aligned
+    config = ensure_runtime_paths_aligned(bootstrap_paths, config, config_path=resolved_config_path)
     validate_config_root_path(config, bootstrap_paths)
-    paths = build_system_paths(config)
+    paths = build_system_paths(config, runtime_root=bootstrap_paths.root)
     validate_root_path(paths)
     paths.ensure_directories()
     system_logger = setup_system_logger(paths, level=config.logging.level, format_name=config.logging.format)

@@ -67,10 +67,10 @@ def _mql4_join(*parts: str) -> str:
         return ''
     root = parts[0]
     if root.startswith('/') or (len(root) >= 2 and root[1] != ':'):
-        cleaned = [part.replace('\\', '/').strip('/') for part in parts if part]
-        return '/'.join(cleaned)
-    cleaned = [part.replace('/', '\\').strip('\\') for part in parts if part]
-    return '\\'.join(cleaned)
+        cleaned = [part.replace('\\', '/').strip('/') for part in parts[1:] if part]
+        return '/'.join([root.rstrip('/'), *cleaned]) if cleaned else root.rstrip('/')
+    cleaned = [part.replace('/', '\\').strip('\\') for part in parts[1:] if part]
+    return '\\'.join([root.rstrip('\\'), *cleaned]) if cleaned else root.rstrip('\\')
 
 def _mql4_clients_dir(mql4_root: str, clients_relative: str) -> str:
     return _mql4_join(mql4_root, clients_relative)
@@ -84,7 +84,7 @@ def build_paths_report(*, root_path: str | Path | None=None, config_path: str | 
     validate_root_path(bootstrap_paths)
     resolved_config_path = Path(config_path) if config_path is not None else bootstrap_paths.config_path
     config = load_system_config(resolved_config_path, system_paths=bootstrap_paths)
-    paths = build_system_paths(config)
+    paths = build_system_paths(config, runtime_root=deployment_root)
     validate_root_path(paths)
     instances = discover_instances(config, paths)
     account_scans = _scan_clients_dir(paths)

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from engine.core.config import load_system_config, parse_config_payload
 from engine.core.instance import Instance
-from engine.core.lifecycle import STARTUP_ERROR_EXIT_CODE, STARTUP_EXIT_CODE, LiveRuntime, build_spread_models, build_system_paths, close_runtime_logging, discover_instances, discover_instances_from_account, instances_from_config, invalidate_runtime_cache, load_runtime_memory, parse_market_filename, persist_runtime_state, read_status_connected, request_shutdown, run_live_main, shutdown, spread_snapshot_from_record, startup, validate_config_root_path, validate_root_path
+from engine.core.lifecycle import STARTUP_ERROR_EXIT_CODE, STARTUP_EXIT_CODE, LiveRuntime, build_spread_models, build_system_paths, close_runtime_logging, discover_instances, discover_instances_from_account, ensure_runtime_paths_aligned, format_mt4_missing_exports_message, instances_from_config, invalidate_runtime_cache, load_runtime_memory, parse_market_filename, persist_runtime_state, read_status_connected, request_shutdown, run_live_main, shutdown, spread_snapshot_from_record, startup, validate_config_root_path, validate_mt4_runtime_ready, validate_root_path
 from engine.core.paths import SystemPaths
 from engine.normalizer.spread_model import update_spread_model
 from engine.protocol.constants import PROTOCOL_SCHEMA_VERSION
@@ -32,6 +32,56 @@ def test_build_system_paths_uses_config_paths() -> None:
     assert paths.clients_dir == paths.root / 'data/clients'
     assert paths.logs_dir == paths.root / 'data/logs'
     assert paths.config_path == paths.root / 'config/system.json'
+
+def test_build_system_paths_runtime_root_overrides_config_root(tmp_path: Path) -> None:
+    payload = valid_system_config_payload()
+    payload['system']['root_path'] = str(tmp_path / 'stale')
+    config = parse_config_payload(payload)
+    runtime_root = tmp_path / 'actual'
+    runtime_root.mkdir()
+    paths = build_system_paths(config, runtime_root=runtime_root)
+    assert paths.root == runtime_root.resolve()
+    assert paths.clients_dir == runtime_root.resolve() / 'data/clients'
+
+def test_ensure_runtime_paths_aligned_syncs_stale_config_root(tmp_path: Path) -> None:
+    root, config_path = _prepare_runtime_root(tmp_path)
+    payload = valid_system_config_payload()
+    payload['system']['root_path'] = str(tmp_path / 'wrong')
+    config_path.write_text(json.dumps(payload), encoding='utf-8')
+    bootstrap_paths = SystemPaths(root)
+    config = load_system_config(config_path, system_paths=bootstrap_paths)
+    aligned = ensure_runtime_paths_aligned(bootstrap_paths, config, config_path=config_path)
+    assert Path(aligned.system.root_path).resolve() == root.resolve()
+
+def test_validate_mt4_runtime_ready_reports_missing_market_file(tmp_path: Path) -> None:
+    root, config_path = _prepare_runtime_root(tmp_path)
+    paths = SystemPaths(root)
+    config = load_system_config(config_path, system_paths=paths)
+    instances = discover_instances(config, paths)
+    with pytest.raises(ConfigurationError, match='MT4 export files not found'):
+        validate_mt4_runtime_ready(paths, instances)
+
+def test_format_mt4_missing_exports_message_lists_expected_paths(tmp_path: Path) -> None:
+    root, config_path = _prepare_runtime_root(tmp_path)
+    paths = SystemPaths(root)
+    config = load_system_config(config_path, system_paths=paths)
+    instances = discover_instances(config, paths)
+    message = format_mt4_missing_exports_message(paths, instances)
+    assert 'market_EURUSD_100001.csv' in message
+    assert str(paths.clients_dir) in message
+
+def test_startup_with_require_mt4_exports_fails_when_exports_missing(tmp_path: Path) -> None:
+    root, config_path = _prepare_runtime_root(tmp_path)
+    with pytest.raises(ConfigurationError, match='MT4 export files not found'):
+        startup(root_path=root, config_path=config_path, require_mt4_exports=True)
+
+def test_startup_with_require_mt4_exports_succeeds_when_exports_present(tmp_path: Path) -> None:
+    root, config_path = _prepare_runtime_root(tmp_path)
+    paths = SystemPaths(root)
+    paths.ensure_account_directories('12345')
+    (paths.account_dir('12345') / 'market_EURUSD_100001.csv').write_text('time_utc,open,high,low,close,volume\n', encoding='utf-8')
+    runtime = startup(root_path=root, config_path=config_path, require_mt4_exports=True)
+    assert isinstance(runtime, LiveRuntime)
 
 def test_validate_root_path_requires_existing_directory(tmp_path: Path) -> None:
     paths = SystemPaths(tmp_path)
