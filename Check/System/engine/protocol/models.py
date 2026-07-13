@@ -224,6 +224,9 @@ class AnalysisConfig:
     volatility_relative_threshold: float
     block_high_impact_news: bool
     stop_loss_buffer: float
+    block_ranging_chase_entries: bool
+    ranging_extreme_threshold: float
+    ranging_recent_momentum_bars: int
     weights: AnalysisWeights
 
     def __post_init__(self) -> None:
@@ -245,11 +248,20 @@ class AnalysisConfig:
         if stop_loss_buffer < 0:
             raise ValidationError('analysis.stop_loss_buffer must be >= 0', module='protocol.models', context={'value': stop_loss_buffer})
         object.__setattr__(self, 'stop_loss_buffer', stop_loss_buffer)
+        object.__setattr__(self, 'block_ranging_chase_entries', _require_bool(self.block_ranging_chase_entries, 'analysis.block_ranging_chase_entries'))
+        ranging_extreme_threshold = _require_number(self.ranging_extreme_threshold, 'analysis.ranging_extreme_threshold')
+        if ranging_extreme_threshold <= 0 or ranging_extreme_threshold >= 1:
+            raise ValidationError('analysis.ranging_extreme_threshold must be between 0 and 1', module='protocol.models', context={'value': ranging_extreme_threshold})
+        object.__setattr__(self, 'ranging_extreme_threshold', ranging_extreme_threshold)
+        ranging_recent_momentum_bars = _require_int(self.ranging_recent_momentum_bars, 'analysis.ranging_recent_momentum_bars', minimum=1)
+        if ranging_recent_momentum_bars > self.lookback_bars:
+            raise ValidationError('analysis.ranging_recent_momentum_bars must be <= analysis.lookback_bars', module='protocol.models', context={'ranging_recent_momentum_bars': ranging_recent_momentum_bars, 'lookback_bars': self.lookback_bars})
+        object.__setattr__(self, 'ranging_recent_momentum_bars', ranging_recent_momentum_bars)
         if not isinstance(self.weights, AnalysisWeights):
             raise ValidationError('analysis.weights must be an AnalysisWeights instance', module='protocol.models', context={'value_type': type(self.weights).__name__})
 
     def to_dict(self) -> dict[str, int | float | bool | dict[str, float]]:
-        return {'lookback_bars': self.lookback_bars, 'structure_lookback_bars': self.structure_lookback_bars, 'spread_relative_threshold': self.spread_relative_threshold, 'volatility_relative_threshold': self.volatility_relative_threshold, 'block_high_impact_news': self.block_high_impact_news, 'stop_loss_buffer': self.stop_loss_buffer, 'weights': self.weights.to_dict()}
+        return {'lookback_bars': self.lookback_bars, 'structure_lookback_bars': self.structure_lookback_bars, 'spread_relative_threshold': self.spread_relative_threshold, 'volatility_relative_threshold': self.volatility_relative_threshold, 'block_high_impact_news': self.block_high_impact_news, 'stop_loss_buffer': self.stop_loss_buffer, 'block_ranging_chase_entries': self.block_ranging_chase_entries, 'ranging_extreme_threshold': self.ranging_extreme_threshold, 'ranging_recent_momentum_bars': self.ranging_recent_momentum_bars, 'weights': self.weights.to_dict()}
 
 @dataclass(frozen=True)
 class TradeManagementSettings:

@@ -6,7 +6,7 @@ from engine.protocol.models import AckRecord, AIConfig, AnalysisConfig, Analysis
 
 def _analysis_config(**overrides: object) -> AnalysisConfig:
     weights = AnalysisWeights(momentum=1.0, trend=1.0, structure=1.0, pressure=1.0, behavior=1.0, impact=1.0, context=1.0)
-    values: dict[str, object] = {'lookback_bars': 120, 'structure_lookback_bars': 15, 'spread_relative_threshold': 1.5, 'volatility_relative_threshold': 1.5, 'block_high_impact_news': True, 'stop_loss_buffer': 0.0002, 'weights': weights}
+    values: dict[str, object] = {'lookback_bars': 120, 'structure_lookback_bars': 15, 'spread_relative_threshold': 1.5, 'volatility_relative_threshold': 1.5, 'block_high_impact_news': True, 'stop_loss_buffer': 0.0002, 'block_ranging_chase_entries': False, 'ranging_extreme_threshold': 0.65, 'ranging_recent_momentum_bars': 3, 'weights': weights}
     values.update(overrides)
     return AnalysisConfig(**values)
 

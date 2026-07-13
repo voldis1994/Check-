@@ -55,7 +55,7 @@ def test_valid_sell_candidate_contains_all_fields() -> None:
     bars = _bearish_bars()
     analysis = run_analysis_engine(_universe(), bars)
     spread_filter, volatility_filter, news_filter = _passing_filters()
-    candidate = calculate_sell_candidate(analysis=_analysis_with_spread_filter(analysis, spread_filter), market_bars=bars, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=news_filter, instance_state=_instance_state(), weights=_weights(), stop_loss_buffer=0.0002, reward_ratio=2.0, structure_lookback_bars=3)
+    candidate = calculate_sell_candidate(analysis=_analysis_with_spread_filter(analysis, spread_filter), market_bars=bars, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=news_filter, instance_state=_instance_state(), weights=_weights(), stop_loss_buffer=0.0002, reward_ratio=2.0, structure_lookback_bars=3, block_ranging_chase_entries=False, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
     assert candidate.valid
     assert candidate.invalid_reason is None
     assert candidate.entry_price > 0
@@ -69,7 +69,7 @@ def test_invalid_sell_candidate_requires_invalid_reason() -> None:
     analysis = run_analysis_engine(_universe(), bars)
     spread_filter, volatility_filter, _ = _passing_filters()
     spread_filter = evaluate_spread_filter(relative_spread=2.0, threshold=1.5)
-    candidate = calculate_sell_candidate(analysis=_analysis_with_spread_filter(analysis, spread_filter), market_bars=bars, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=evaluate_news_filter(_universe(), block_high_impact_news=True), instance_state=_instance_state(), weights=_weights(), stop_loss_buffer=0.0002, reward_ratio=2.0, structure_lookback_bars=3)
+    candidate = calculate_sell_candidate(analysis=_analysis_with_spread_filter(analysis, spread_filter), market_bars=bars, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=evaluate_news_filter(_universe(), block_high_impact_news=True), instance_state=_instance_state(), weights=_weights(), stop_loss_buffer=0.0002, reward_ratio=2.0, structure_lookback_bars=3, block_ranging_chase_entries=False, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
     assert isinstance(candidate, SellCandidate)
     assert not candidate.valid
     assert candidate.invalid_reason is not None
@@ -79,7 +79,7 @@ def test_sell_is_calculated_even_when_buy_is_valid() -> None:
     bars = _bullish_bars()
     analysis = run_analysis_engine(_universe(), bars)
     spread_filter, volatility_filter, news_filter = _passing_filters()
-    kwargs = {'analysis': _analysis_with_spread_filter(analysis, spread_filter), 'market_bars': bars, 'spread_filter': spread_filter, 'volatility_filter': volatility_filter, 'news_filter': news_filter, 'instance_state': _instance_state(), 'weights': _weights(), 'stop_loss_buffer': 0.0002, 'reward_ratio': 2.0, 'structure_lookback_bars': 3}
+    kwargs = {'analysis': _analysis_with_spread_filter(analysis, spread_filter), 'market_bars': bars, 'spread_filter': spread_filter, 'volatility_filter': volatility_filter, 'news_filter': news_filter, 'instance_state': _instance_state(), 'weights': _weights(), 'stop_loss_buffer': 0.0002, 'reward_ratio': 2.0, 'structure_lookback_bars': 3, 'block_ranging_chase_entries': False, 'ranging_extreme_threshold': 0.65, 'ranging_recent_momentum_bars': 3}
     buy_candidate = calculate_buy_candidate(**kwargs)
     sell_candidate = calculate_sell_candidate(**kwargs)
     assert buy_candidate.valid
