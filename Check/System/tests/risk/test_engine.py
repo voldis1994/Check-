@@ -41,7 +41,7 @@ def _trade_params() -> RiskEngineTradeParams:
 
 def _system_config(**analysis_overrides: Any) -> object:
     payload = valid_system_config_payload()
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, **analysis_overrides}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3, **analysis_overrides}
     return parse_config_payload(payload)
 
 def _buy_decision_result() -> DecisionResult:

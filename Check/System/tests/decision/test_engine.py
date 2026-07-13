@@ -37,7 +37,7 @@ def _instance_state() -> InstanceState:
 
 def _system_config(*, analysis: dict[str, Any] | None=None, risk: dict[str, Any] | None=None) -> SystemConfig:
     payload = valid_system_config_payload()
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, **(analysis or {})}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3, **(analysis or {})}
     if risk is not None:
         payload['risk'] = {**payload['risk'], **risk}
     return parse_config_payload(payload)

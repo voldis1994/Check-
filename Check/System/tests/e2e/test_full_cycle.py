@@ -27,7 +27,7 @@ FIXED_COMMAND_ID = 'cmd-e2e-full-cycle-1'
 def _write_config(root: Path, *, instances: list[dict[str, Any]] | None=None, analysis_overrides: dict[str, Any] | None=None) -> Path:
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
-    analysis = {**payload['analysis'], 'lookback_bars': 3}
+    analysis = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     if analysis_overrides is not None:
         analysis = {**analysis, **analysis_overrides}
     payload['analysis'] = analysis

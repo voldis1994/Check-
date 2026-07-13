@@ -22,7 +22,7 @@ from tests.protocol.test_writer import required_fields_present
 
 def _system_config():
     payload = valid_system_config_payload()
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     return parse_config_payload(payload)
 
 def _bar(index: int, open_: float, high: float, low: float, close: float) -> NormalizedMarketBar:

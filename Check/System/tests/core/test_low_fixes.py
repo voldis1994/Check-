@@ -19,7 +19,7 @@ from tests.core.test_orchestrator import _startup_runtime as startup_orchestrato
 def _write_config(root: Path, *, runtime_overrides: dict | None=None) -> Path:
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     if runtime_overrides:
         payload['runtime'] = {**payload['runtime'], **runtime_overrides}
     config_dir = root / 'config'

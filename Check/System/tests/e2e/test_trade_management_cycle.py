@@ -24,6 +24,7 @@ def _startup_runtime_for_trade_management(tmp_path: Path, *, trade_management_ov
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(tmp_path)
     payload['analysis']['lookback_bars'] = 3
+    payload['analysis']['structure_lookback_bars'] = 3
     if trade_management_overrides is not None:
         payload['trade_management'] = {**payload['trade_management'], **trade_management_overrides}
     config_dir = tmp_path / 'config'

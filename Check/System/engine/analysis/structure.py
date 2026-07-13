@@ -35,3 +35,11 @@ def analyze_structure(bars: tuple[NormalizedMarketBar, ...]) -> StructureAnalysi
     latest_close = closes[-1]
     bos = latest_close > prior_high or latest_close < prior_low
     return StructureAnalysis(swing_high=swing_high, swing_low=swing_low, structure_bias=bias, break_of_structure=bos, support_level=support, resistance_level=resistance)
+
+def analyze_structure_window(bars: tuple[NormalizedMarketBar, ...], *, structure_lookback_bars: int) -> StructureAnalysis:
+    if structure_lookback_bars <= 0:
+        raise ValueError('structure_lookback_bars must be positive')
+    if not bars:
+        return analyze_structure(bars)
+    window = bars[-structure_lookback_bars:] if len(bars) > structure_lookback_bars else bars
+    return analyze_structure(window)

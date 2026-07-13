@@ -18,7 +18,7 @@ def _write_live_config(root: Path, *, instances: list[dict] | None=None) -> Path
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
     payload['system']['timeframe'] = TIMEFRAME_M1
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     if instances is not None:
         payload['instances'] = instances
     config_dir = root / 'config'

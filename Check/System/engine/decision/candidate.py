@@ -64,17 +64,19 @@ def evaluate_filter_chain(*, analysis: AnalysisEngineResult, spread_filter: Spre
         return build_reason(REASON_DATA_INVALID, f'market bars required for {side} setup')
     return None
 
-def calculate_trade_levels(*, analysis: AnalysisEngineResult, market_bars: tuple[NormalizedMarketBar, ...], instance_state: InstanceState, stop_loss_buffer: float, reward_ratio: float, side: TradeSide) -> tuple[float, float, float] | str:
+def calculate_trade_levels(*, analysis: AnalysisEngineResult, market_bars: tuple[NormalizedMarketBar, ...], instance_state: InstanceState, stop_loss_buffer: float, reward_ratio: float, side: TradeSide, structure_lookback_bars: int) -> tuple[float, float, float] | str:
+    from engine.analysis.structure import analyze_structure_window
     digits = instance_state.instrument_digits
     entry_price = round_price(market_bars[-1].close, digits)
+    structure = analyze_structure_window(market_bars, structure_lookback_bars=structure_lookback_bars)
     if side == 'buy':
-        stop_loss = round_price(analysis.structure.swing_low - stop_loss_buffer, digits)
+        stop_loss = round_price(structure.swing_low - stop_loss_buffer, digits)
         if stop_loss >= entry_price:
             return build_reason(REASON_DATA_INVALID, 'buy stop loss must be below entry price', entry_price=entry_price, stop_loss=stop_loss)
         stop_loss_distance = entry_price - stop_loss
         take_profit = round_price(entry_price + stop_loss_distance * reward_ratio, digits)
         return (entry_price, stop_loss, take_profit)
-    stop_loss = round_price(analysis.structure.swing_high + stop_loss_buffer, digits)
+    stop_loss = round_price(structure.swing_high + stop_loss_buffer, digits)
     if stop_loss <= entry_price:
         return build_reason(REASON_DATA_INVALID, 'sell stop loss must be above entry price', entry_price=entry_price, stop_loss=stop_loss)
     stop_loss_distance = stop_loss - entry_price

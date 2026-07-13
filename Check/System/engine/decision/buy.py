@@ -28,13 +28,13 @@ def calculate_buy_score(component_scores: Mapping[str, float], weights: Mapping[
 def _invalid_candidate(*, invalid_reason: str, component_scores: dict[str, float], buy_score: float) -> BuyCandidate:
     return BuyCandidate(valid=False, invalid_reason=invalid_reason, entry_price=0.0, stop_loss=0.0, take_profit=0.0, component_scores=component_scores, buy_score=buy_score)
 
-def calculate_buy_candidate(*, analysis: AnalysisEngineResult, market_bars: tuple[NormalizedMarketBar, ...], spread_filter: SpreadFilterResult, volatility_filter: VolatilityFilterResult, news_filter: NewsFilterResult, instance_state: InstanceState, weights: Mapping[str, float], stop_loss_buffer: float, reward_ratio: float) -> BuyCandidate:
+def calculate_buy_candidate(*, analysis: AnalysisEngineResult, market_bars: tuple[NormalizedMarketBar, ...], spread_filter: SpreadFilterResult, volatility_filter: VolatilityFilterResult, news_filter: NewsFilterResult, instance_state: InstanceState, weights: Mapping[str, float], stop_loss_buffer: float, reward_ratio: float, structure_lookback_bars: int) -> BuyCandidate:
     component_scores = build_buy_component_scores(analysis)
     buy_score = calculate_buy_score(component_scores, weights)
     invalid_reason = evaluate_filter_chain(analysis=analysis, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=news_filter, market_bars=market_bars, side='buy')
     if invalid_reason is not None:
         return _invalid_candidate(invalid_reason=invalid_reason, component_scores=component_scores, buy_score=buy_score)
-    levels = calculate_trade_levels(analysis=analysis, market_bars=market_bars, instance_state=instance_state, stop_loss_buffer=stop_loss_buffer, reward_ratio=reward_ratio, side='buy')
+    levels = calculate_trade_levels(analysis=analysis, market_bars=market_bars, instance_state=instance_state, stop_loss_buffer=stop_loss_buffer, reward_ratio=reward_ratio, side='buy', structure_lookback_bars=structure_lookback_bars)
     if isinstance(levels, str):
         return _invalid_candidate(invalid_reason=levels, component_scores=component_scores, buy_score=buy_score)
     entry_price, stop_loss, take_profit = levels

@@ -219,6 +219,7 @@ class RiskConfig:
 @dataclass(frozen=True)
 class AnalysisConfig:
     lookback_bars: int
+    structure_lookback_bars: int
     spread_relative_threshold: float
     volatility_relative_threshold: float
     block_high_impact_news: bool
@@ -227,6 +228,10 @@ class AnalysisConfig:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'lookback_bars', _require_int(self.lookback_bars, 'analysis.lookback_bars', minimum=1))
+        structure_lookback_bars = _require_int(self.structure_lookback_bars, 'analysis.structure_lookback_bars', minimum=1)
+        if structure_lookback_bars > self.lookback_bars:
+            raise ValidationError('analysis.structure_lookback_bars must be <= analysis.lookback_bars', module='protocol.models', context={'structure_lookback_bars': structure_lookback_bars, 'lookback_bars': self.lookback_bars})
+        object.__setattr__(self, 'structure_lookback_bars', structure_lookback_bars)
         spread_relative_threshold = _require_number(self.spread_relative_threshold, 'analysis.spread_relative_threshold')
         if spread_relative_threshold <= 0:
             raise ValidationError('analysis.spread_relative_threshold must be > 0', module='protocol.models', context={'value': spread_relative_threshold})
@@ -244,7 +249,7 @@ class AnalysisConfig:
             raise ValidationError('analysis.weights must be an AnalysisWeights instance', module='protocol.models', context={'value_type': type(self.weights).__name__})
 
     def to_dict(self) -> dict[str, int | float | bool | dict[str, float]]:
-        return {'lookback_bars': self.lookback_bars, 'spread_relative_threshold': self.spread_relative_threshold, 'volatility_relative_threshold': self.volatility_relative_threshold, 'block_high_impact_news': self.block_high_impact_news, 'stop_loss_buffer': self.stop_loss_buffer, 'weights': self.weights.to_dict()}
+        return {'lookback_bars': self.lookback_bars, 'structure_lookback_bars': self.structure_lookback_bars, 'spread_relative_threshold': self.spread_relative_threshold, 'volatility_relative_threshold': self.volatility_relative_threshold, 'block_high_impact_news': self.block_high_impact_news, 'stop_loss_buffer': self.stop_loss_buffer, 'weights': self.weights.to_dict()}
 
 @dataclass(frozen=True)
 class TradeManagementSettings:

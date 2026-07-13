@@ -19,7 +19,7 @@ FIXTURES_DIR = Path(__file__).parent.parent / 'loader' / 'fixtures'
 def _write_config(root: Path) -> Path:
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     config_dir = root / 'config'
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / 'system.json'

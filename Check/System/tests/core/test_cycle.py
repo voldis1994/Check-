@@ -28,7 +28,7 @@ FIXTURES_DIR = Path(__file__).parent.parent / 'loader' / 'fixtures'
 def _write_config(root: Path) -> Path:
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     config_dir = root / 'config'
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / 'system.json'
@@ -158,7 +158,7 @@ def test_resolve_structure_levels_returns_swing_high_and_low(tmp_path: Path) -> 
     loaded = load_instance_cycle_data(runtime.paths, instance, use_global_universe=False)
     market_bars = validate_market_for_cycle(loaded.market_raw)
     assert isinstance(market_bars, tuple)
-    structure = resolve_structure_levels(market_bars)
+    structure = resolve_structure_levels(market_bars, structure_lookback_bars=runtime.config.analysis.structure_lookback_bars)
     assert structure.swing_high >= structure.swing_low
 
 def test_run_instance_decision_phase_calculates_buy_and_sell_candidates(tmp_path: Path) -> None:

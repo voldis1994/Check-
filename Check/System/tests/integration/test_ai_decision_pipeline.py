@@ -82,6 +82,7 @@ def test_required_mode_blocks_without_api_key(tmp_path: Path, monkeypatch: pytes
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(tmp_path)
     payload['analysis']['lookback_bars'] = 3
+    payload['analysis']['structure_lookback_bars'] = 3
     payload['ai'] = {'mode': 'required', 'fail_closed': True, 'reject_action': 'BLOCK', 'timeout_ms': 10000, 'retry_max': 2, 'retry_delay_ms': 500}
     config_dir = tmp_path / 'config'
     config_dir.mkdir(parents=True, exist_ok=True)

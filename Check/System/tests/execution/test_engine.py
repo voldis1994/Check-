@@ -45,7 +45,7 @@ def _instance_state() -> InstanceState:
 
 def _system_config():
     payload = valid_system_config_payload()
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     return parse_config_payload(payload)
 
 def _runtime_config(*, ack_timeout_ms: int=5000) -> RuntimeConfig:

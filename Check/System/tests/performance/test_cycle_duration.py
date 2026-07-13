@@ -16,7 +16,7 @@ CYCLE_MAX_DURATION_MS = 30000
 def _write_config(root: Path, *, instances: list[dict[str, Any]] | None=None, cycle_max_duration_ms: int=CYCLE_MAX_DURATION_MS) -> Path:
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     payload['runtime'] = {**payload['runtime'], 'cycle_max_duration_ms': cycle_max_duration_ms, 'metrics_interval_ms': 1, 'ack_timeout_ms': 100}
     if instances is not None:
         payload['instances'] = instances

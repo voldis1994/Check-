@@ -22,7 +22,7 @@ FIXTURES_DIR = Path(__file__).parent.parent / 'loader' / 'fixtures'
 def _write_config(root: Path, *, instances: list[dict] | None=None) -> Path:
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
-    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3}
+    payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     if instances is not None:
         payload['instances'] = instances
     config_dir = root / 'config'

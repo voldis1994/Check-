@@ -31,7 +31,7 @@ class DecisionPipelineResult:
 def _write_config(root: Path, *, analysis_overrides: dict[str, Any] | None=None) -> Path:
     payload = valid_system_config_payload()
     payload['system']['root_path'] = str(root)
-    analysis = {**payload['analysis'], 'lookback_bars': 3}
+    analysis = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3}
     if analysis_overrides is not None:
         analysis = {**analysis, **analysis_overrides}
     payload['analysis'] = analysis

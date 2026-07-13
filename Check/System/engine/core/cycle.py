@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, MutableMapping
 import time
-from engine.analysis.structure import StructureAnalysis, analyze_structure
+from engine.analysis.structure import StructureAnalysis, analyze_structure, analyze_structure_window
 from engine.core.clock import format_utc_timestamp, now_utc
 from engine.core.instance import Instance
 from engine.core.lifecycle import LiveRuntime
@@ -99,7 +99,7 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     if instance_memory.instance_state.open_ticket is not None:
         instance_memory.instance_state.increment_position_bars()
     position = resolve_open_position_from_state(instance_memory.instance_state)
-    structure = resolve_structure_levels(market_bars)
+    structure = resolve_structure_levels(market_bars, structure_lookback_bars=runtime.config.analysis.structure_lookback_bars)
     digits = instance_memory.instance_state.instrument_digits
     if digits <= 0 and market_bars:
         digits = market_bars[-1].digits
@@ -184,14 +184,14 @@ def update_instance_spread_model(*, instance_memory: InstanceMemory, spread_mode
     instance_memory.spread_state.update_from_snapshot(snapshot, timestamp_utc)
     return snapshot
 
-def resolve_structure_levels(market_bars: tuple[NormalizedMarketBar, ...]) -> StructureAnalysis:
-    return analyze_structure(market_bars)
+def resolve_structure_levels(market_bars: tuple[NormalizedMarketBar, ...], *, structure_lookback_bars: int) -> StructureAnalysis:
+    return analyze_structure_window(market_bars, structure_lookback_bars=structure_lookback_bars)
 
 def run_instance_decision_phase(*, universe: UniverseRecord, market_bars: tuple[NormalizedMarketBar, ...], instance_memory: InstanceMemory, relative_spread: float, runtime: LiveRuntime, block_reason: str | None=None) -> DecisionResult:
     return run_decision_engine(universe=universe, market_bars=market_bars, instance_state=instance_memory.instance_state, relative_spread=relative_spread, system_config=runtime.config, block_reason=block_reason, paths=runtime.paths)
 
 def run_instance_risk_phase(*, decision_result: DecisionResult, instance_memory: InstanceMemory, status: StatusRecord, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None) -> RiskEngineResult:
-    structure = resolve_structure_levels(market_bars)
+    structure = resolve_structure_levels(market_bars, structure_lookback_bars=runtime.config.analysis.structure_lookback_bars)
     return run_risk_engine(decision_result=decision_result, risk_config=runtime.config.risk, instance_state=instance_memory.instance_state, status=status, trade_params=trade_params or build_risk_trade_params(runtime), swing_low=structure.swing_low, swing_high=structure.swing_high, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
 
 def should_execute_trade(*, runtime: LiveRuntime, decision_result: DecisionResult, risk_engine_result: RiskEngineResult) -> bool:
