@@ -297,7 +297,7 @@ class LoggingConfig:
 
     def to_dict(self) -> dict[str, str]:
         return {'level': self.level, 'format': self.format}
-_AI_MODES = frozenset({'advisory', 'required'})
+_AI_MODES = frozenset({'advisory', 'required', 'off'})
 _AI_REJECT_ACTIONS = frozenset({'BLOCK', 'WAIT'})
 
 @dataclass(frozen=True)

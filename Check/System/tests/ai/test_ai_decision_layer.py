@@ -48,6 +48,24 @@ def test_ai_avoid_final_block() -> None:
     decision, _reason, _meta = decide_final_decision(system_signal=Decision.BUY.value, system_reason='BUY: test', ai_query=_ai_query(ai), risk_engine_result=_risk_allow(), ai_config=_advisory_config())
     assert decision == Decision.BLOCK.value
 
+def test_ai_avoid_on_wait_stays_wait() -> None:
+    ai = _ai(bias='AVOID', allow_buy=False, allow_sell=False, reason='market unclear')
+    decision, reason, _fallback, _ai_reason = apply_ai_advisory_decision(system_decision=Decision.WAIT.value, system_reason='WAIT: both invalid', ai_result=ai, ai_error=None, config=_advisory_config())
+    assert decision == Decision.WAIT.value
+    assert reason == 'WAIT: both invalid'
+
+def test_ai_mode_off_skips_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
+
+    def _should_not_call(*_args, **_kwargs):
+        raise AssertionError('OpenAI must not be called when ai.mode is off')
+    monkeypatch.setattr('engine.ai_decision_layer._call_openai', _should_not_call)
+    config = AIConfig(mode='off', fail_closed=False, reject_action='BLOCK', timeout_ms=10000, retry_max=2, retry_delay_ms=500)
+    ai_query = get_ai_decision(system_signal=Decision.BUY.value, market_context={}, ai_config=config)
+    assert ai_query.error_type == 'disabled'
+    decision, reason, _fallback, _ai_reason = apply_ai_advisory_decision(system_decision=Decision.BUY.value, system_reason='BUY: test', ai_result=ai_query.decision, ai_error=ai_query.error_type, config=config)
+    assert decision == Decision.BUY.value
+
 def test_advisory_timeout_falls_back_to_system_buy() -> None:
     decision, reason, meta = decide_final_decision(system_signal=Decision.BUY.value, system_reason='BUY: system signal', ai_query=_ai_query(None, error_type='timeout'), risk_engine_result=_risk_allow(), ai_config=_advisory_config())
     assert decision == Decision.BUY.value

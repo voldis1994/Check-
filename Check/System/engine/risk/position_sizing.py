@@ -54,5 +54,6 @@ def calculate_position_size(*, equity: float, max_risk_per_trade_percent: float,
     raw_volume = risk_amount / (stop_loss_distance_points * point_value_per_lot)
     volume = normalize_volume_to_step(volume=raw_volume, volume_step=volume_step)
     if volume <= 0:
-        return PositionSizingResult(allowed=False, volume=0.0, reason=build_reason(REASON_INVALID_VOLUME, 'position volume rounded to zero', raw_volume=raw_volume, volume_step=volume_step))
+        min_equity_for_min_lot = volume_step * stop_loss_distance_points * point_value_per_lot / (max_risk_per_trade_percent / 100.0)
+        return PositionSizingResult(allowed=False, volume=0.0, reason=build_reason(REASON_INVALID_VOLUME, 'position volume rounded to zero — account too small for min lot at current risk and stop loss', raw_volume=raw_volume, volume_step=volume_step, equity=equity, min_equity_for_min_lot=round(min_equity_for_min_lot, 2), max_risk_per_trade_percent=max_risk_per_trade_percent))
     return PositionSizingResult(allowed=True, volume=volume, reason=None)

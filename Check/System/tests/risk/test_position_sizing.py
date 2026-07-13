@@ -55,6 +55,7 @@ def test_calculate_position_size_blocks_when_volume_rounds_to_zero() -> None:
     assert result.volume == 0.0
     assert result.reason is not None
     assert REASON_INVALID_VOLUME in result.reason
+    assert 'min_equity_for_min_lot' in result.reason
 
 def test_calculate_position_size_blocks_when_stop_loss_distance_is_zero() -> None:
     result = calculate_position_size(equity=10000.0, max_risk_per_trade_percent=1.0, entry_price=1.1, stop_loss=1.1, point=1e-05, pip=0.0001, volume_step=0.01)

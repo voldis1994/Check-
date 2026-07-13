@@ -35,14 +35,14 @@
     "max_daily_loss_percent": 2.0,
     "max_drawdown_percent": 10.0,
     "reward_ratio": 2.0,
-    "max_risk_per_trade_percent": 1.0,
-    "max_stop_loss_pips": 100.0,
+    "max_risk_per_trade_percent": 5.0,
+    "max_stop_loss_pips": 50.0,
     "volume_step": 0.01
   },
   "analysis": {
     "lookback_bars": 120,
-    "spread_relative_threshold": 1.5,
-    "volatility_relative_threshold": 1.5,
+    "spread_relative_threshold": 2.0,
+    "volatility_relative_threshold": 2.5,
     "block_high_impact_news": true,
     "stop_loss_buffer": 0.0002,
     "weights": {
@@ -73,7 +73,7 @@
     "format": "standard"
   },
   "ai": {
-    "mode": "advisory",
+    "mode": "off",
     "fail_closed": false,
     "reject_action": "BLOCK",
     "timeout_ms": 10000,

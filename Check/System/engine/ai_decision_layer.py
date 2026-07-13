@@ -116,6 +116,8 @@ def _timeout_seconds(ai_config: AIConfig | None) -> int:
     return max(1, int(ai_config.timeout_ms / 1000))
 
 def get_ai_decision(*, system_signal: str, market_context: dict[str, Any], ai_config: AIConfig | None=None, skip_reason: str | None=None) -> AIQueryResult:
+    if ai_config is not None and ai_config.mode == 'off':
+        return AIQueryResult(decision=None, error_type='disabled')
     if skip_reason is not None:
         return AIQueryResult(decision=None, error_type=skip_reason)
     api_key = os.getenv('OPENAI_API_KEY')
@@ -151,7 +153,7 @@ def _fallback_reason(error_type: str | None) -> str:
 
 def apply_ai_advisory_decision(*, system_decision: str, system_reason: str, ai_result: AIDecision | None, ai_error: str | None, config: AIConfig) -> tuple[str, str, bool, str | None]:
     if ai_result is None:
-        if ai_error == 'skipped_risk_precheck':
+        if ai_error in {'skipped_risk_precheck', 'disabled'}:
             return (system_decision, system_reason, False, None)
         if _is_fail_closed(config):
             return (Decision.BLOCK.value, 'ai_required_missing_block', False, None)
@@ -163,6 +165,8 @@ def apply_ai_advisory_decision(*, system_decision: str, system_reason: str, ai_r
             return (system_decision, f'{fallback_code}: {system_reason}', fallback_used, None)
         return (system_decision, fallback_code, fallback_used, None)
     if ai_result.bias == 'AVOID':
+        if system_decision in {Decision.WAIT.value, Decision.BLOCK.value}:
+            return (system_decision, system_reason, False, ai_result.reason)
         return (Decision.BLOCK.value, f'ai_veto_avoid: {ai_result.reason}', False, ai_result.reason)
     if system_decision == Decision.BUY.value and (not ai_result.allow_buy):
         reject = config.reject_action
