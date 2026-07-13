@@ -35,10 +35,13 @@
     "max_open_positions_per_instance": 1,
     "max_daily_loss_percent": 2.0,
     "max_drawdown_percent": 10.0,
+    "daily_loss_limit_enabled": false,
+    "drawdown_limit_enabled": false,
     "reward_ratio": 2.0,
     "max_risk_per_trade_percent": 8.0,
     "max_stop_loss_pips": 50.0,
-    "volume_step": 0.01
+    "volume_step": 0.01,
+    "fixed_lot_volume": 0.01
   },
   "analysis": {
     "lookback_bars": 120,

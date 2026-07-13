@@ -14,7 +14,7 @@ from engine.core.instance import Instance, ensure_unique_instance_keys
 from engine.core.logging_setup import log_event, setup_account_logger, setup_system_logger
 from engine.core.paths import SystemPaths
 from engine.normalizer.spread_model import SpreadModelSnapshot
-from engine.protocol.constants import FILENAME_STATUS
+from engine.protocol.constants import FILENAME_STATUS, RiskResult
 from engine.protocol.errors import ConfigurationError
 from engine.protocol.identity import validate_account_id
 from engine.protocol.models import SpreadStateRecord, SystemConfig
@@ -282,9 +282,14 @@ def print_live_cycle_summary(result: object) -> None:
         return
     for item in result.instance_results:
         decision = item.decision_result.decision if item.decision_result is not None else '-'
-        reason = item.decision_result.reason if item.decision_result is not None else ''
+        decision_reason = item.decision_result.reason if item.decision_result is not None else ''
         risk = item.risk_engine_result.result if item.risk_engine_result is not None else '-'
+        risk_reason = item.risk_engine_result.reason if item.risk_engine_result is not None else ''
         action = item.execution_result.order_command.action if item.execution_result is not None else '-'
+        if risk == RiskResult.BLOCK.value and risk_reason:
+            reason = risk_reason
+        else:
+            reason = decision_reason
         if item.completed:
             status = 'OK'
         elif item.error_logged:

@@ -178,15 +178,20 @@ class RiskConfig:
     max_open_positions_per_instance: int
     max_daily_loss_percent: float
     max_drawdown_percent: float
+    daily_loss_limit_enabled: bool
+    drawdown_limit_enabled: bool
     reward_ratio: float
     max_risk_per_trade_percent: float
     max_stop_loss_pips: float
     volume_step: float
+    fixed_lot_volume: float
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'max_open_positions_per_instance', _require_int(self.max_open_positions_per_instance, 'risk.max_open_positions_per_instance', minimum=0))
         object.__setattr__(self, 'max_daily_loss_percent', _require_number(self.max_daily_loss_percent, 'risk.max_daily_loss_percent'))
         object.__setattr__(self, 'max_drawdown_percent', _require_number(self.max_drawdown_percent, 'risk.max_drawdown_percent'))
+        object.__setattr__(self, 'daily_loss_limit_enabled', _require_bool(self.daily_loss_limit_enabled, 'risk.daily_loss_limit_enabled'))
+        object.__setattr__(self, 'drawdown_limit_enabled', _require_bool(self.drawdown_limit_enabled, 'risk.drawdown_limit_enabled'))
         reward_ratio = _require_number(self.reward_ratio, 'risk.reward_ratio')
         if reward_ratio <= 0:
             raise ValidationError('risk.reward_ratio must be > 0', module='protocol.models', context={'value': reward_ratio})
@@ -203,9 +208,13 @@ class RiskConfig:
         if volume_step <= 0:
             raise ValidationError('risk.volume_step must be > 0', module='protocol.models', context={'value': volume_step})
         object.__setattr__(self, 'volume_step', volume_step)
+        fixed_lot_volume = _require_number(self.fixed_lot_volume, 'risk.fixed_lot_volume')
+        if fixed_lot_volume < 0:
+            raise ValidationError('risk.fixed_lot_volume must be >= 0', module='protocol.models', context={'value': fixed_lot_volume})
+        object.__setattr__(self, 'fixed_lot_volume', fixed_lot_volume)
 
-    def to_dict(self) -> dict[str, int | float]:
-        return {'max_open_positions_per_instance': self.max_open_positions_per_instance, 'max_daily_loss_percent': self.max_daily_loss_percent, 'max_drawdown_percent': self.max_drawdown_percent, 'reward_ratio': self.reward_ratio, 'max_risk_per_trade_percent': self.max_risk_per_trade_percent, 'max_stop_loss_pips': self.max_stop_loss_pips, 'volume_step': self.volume_step}
+    def to_dict(self) -> dict[str, int | float | bool]:
+        return {'max_open_positions_per_instance': self.max_open_positions_per_instance, 'max_daily_loss_percent': self.max_daily_loss_percent, 'max_drawdown_percent': self.max_drawdown_percent, 'daily_loss_limit_enabled': self.daily_loss_limit_enabled, 'drawdown_limit_enabled': self.drawdown_limit_enabled, 'reward_ratio': self.reward_ratio, 'max_risk_per_trade_percent': self.max_risk_per_trade_percent, 'max_stop_loss_pips': self.max_stop_loss_pips, 'volume_step': self.volume_step, 'fixed_lot_volume': self.fixed_lot_volume}
 
 @dataclass(frozen=True)
 class AnalysisConfig:

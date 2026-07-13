@@ -36,11 +36,15 @@ def check_max_open_positions(*, instance_state: InstanceState, risk_config: Risk
     return _blocked(build_reason(REASON_RISK_MAX_POSITIONS, 'open position limit reached', open_position_count=current_count, max_open_positions_per_instance=risk_config.max_open_positions_per_instance))
 
 def check_max_daily_loss(*, risk_config: RiskConfig, daily_loss_percent: float) -> RiskRuleResult:
+    if not risk_config.daily_loss_limit_enabled:
+        return _allowed()
     if daily_loss_percent < risk_config.max_daily_loss_percent:
         return _allowed()
     return _blocked(build_reason(REASON_RISK_DAILY_LOSS, 'daily loss limit reached', daily_loss_percent=daily_loss_percent, max_daily_loss_percent=risk_config.max_daily_loss_percent))
 
 def check_max_drawdown(*, risk_config: RiskConfig, drawdown_percent: float) -> RiskRuleResult:
+    if not risk_config.drawdown_limit_enabled:
+        return _allowed()
     if drawdown_percent < risk_config.max_drawdown_percent:
         return _allowed()
     return _blocked(build_reason(REASON_RISK_MAX_DRAWDOWN, 'drawdown limit reached', drawdown_percent=drawdown_percent, max_drawdown_percent=risk_config.max_drawdown_percent))
