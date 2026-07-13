@@ -30,12 +30,12 @@ def test_should_skip_ai_when_risk_rules_block_buy() -> None:
     decision = _manual_decision_result()
     assert not should_call_ai_layer(decision_result=decision, status=status, instance_state=state, risk_config=config.risk)
 
-def test_ai_allow_close_blocks_trade_management_close() -> None:
+def test_trade_management_close_disabled_blocks_time_stop_close() -> None:
     position = OpenPosition(ticket=1001, side='BUY', entry_price=1.1, stop_loss=1.095, take_profit=1.11, volume=0.1, bars_open=200, partial_close_applied=False)
     config = TradeManagementConfig(breakeven_progress_ratio=0.5, trailing_buffer=0.0002, partial_close_progress_ratio=0.75, partial_close_volume_ratio=0.5, time_stop_max_bars=120, volume_step=0.01)
     result = evaluate_trade_management(position=position, current_price=1.105, swing_low=1.09, swing_high=1.11, config=config, digits=5, allow_close=False)
     assert result.action == OrderAction.NONE.value
-    assert 'ai_veto_close' in result.reason
+    assert 'exit only via SL/TP' in result.reason
 
 def test_get_ai_decision_honors_skip_reason() -> None:
     result = get_ai_decision(system_signal='BUY', market_context={}, ai_config=_advisory_config(), skip_reason='skipped_risk_precheck')

@@ -90,7 +90,7 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     digits = instance_memory.instance_state.instrument_digits
     if digits <= 0 and market_bars:
         digits = market_bars[-1].digits
-    return evaluate_trade_management(position=position, current_price=market_bars[-1].close, swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management), digits=digits, allow_close=ai_allow_close)
+    return evaluate_trade_management(position=position, current_price=market_bars[-1].close, swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close)
 
 def _build_ai_market_context(*, decision_result: DecisionResult, spread_snapshot: SpreadModelSnapshot, market_bars: tuple[NormalizedMarketBar, ...]) -> dict[str, object]:
     return {'relative_spread': spread_snapshot.relative_spread, 'last_close': market_bars[-1].close, 'last_time_utc': str(market_bars[-1].time_utc), 'system_reason': decision_result.reason, 'buy_score': decision_result.buy_score, 'sell_score': decision_result.sell_score}

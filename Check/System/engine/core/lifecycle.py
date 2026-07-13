@@ -269,7 +269,7 @@ def shutdown(runtime: LiveRuntime) -> int:
 
 def print_live_startup_banner(runtime: LiveRuntime, instances: tuple[Instance, ...]) -> None:
     print(f'SYSTEM live started: root={runtime.paths.root}', flush=True)
-    print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms} closed_bar_entries={runtime.config.runtime.execute_entries_on_closed_bar_only}', flush=True)
+    print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms} closed_bar_entries={runtime.config.runtime.execute_entries_on_closed_bar_only} python_close={runtime.config.trade_management.allow_close}', flush=True)
     print(f'logs={runtime.paths.logs_dir}', flush=True)
     for instance in instances:
         market_path = runtime.paths.account_dir(instance.account_id) / instance.market_filename()

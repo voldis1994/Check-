@@ -44,7 +44,7 @@ def _no_action() -> TradeManagementResult:
 
 def _gate_close_action(result: TradeManagementResult, *, allow_close: bool) -> TradeManagementResult:
     if result.action == OrderAction.CLOSE.value and (not allow_close):
-        return TradeManagementResult(action=OrderAction.NONE.value, reason='ai_veto_close: AI disallow_close')
+        return TradeManagementResult(action=OrderAction.NONE.value, reason='trade_management_close_disabled: exit only via SL/TP')
     return result
 
 def compute_progress_to_take_profit(*, side: str, entry_price: float, take_profit: float, current_price: float) -> float:
