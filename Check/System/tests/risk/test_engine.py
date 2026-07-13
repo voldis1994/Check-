@@ -52,8 +52,8 @@ def _manual_decision_result(*, decision: str, preferred_side: str, buy_candidate
     default_sell = SellCandidate(valid=False, invalid_reason='sell invalid', entry_price=0.0, stop_loss=0.0, take_profit=0.0, component_scores={}, sell_score=0.0)
     return DecisionResult(decision_id='test-decision-id', decision=decision, reason=reason, preferred_side=preferred_side, buy_candidate=buy_candidate or default_buy, sell_candidate=sell_candidate or default_sell, buy_score=1.0, sell_score=0.0, analysis_context=_buy_decision_result().analysis_context)
 
-def _run_with_decision(decision_result: DecisionResult, *, status: StatusRecord | None=None, instance_state: InstanceState | None=None, trade_params: RiskEngineTradeParams | None=None, risk_config: RiskConfig | None=None) -> RiskEngineResult:
-    return run_risk_engine(decision_result=decision_result, risk_config=risk_config or _risk_config(), instance_state=instance_state or _instance_state(), status=status or _status(), trade_params=trade_params or _trade_params(), swing_low=1.099, swing_high=1.104)
+def _run_with_decision(decision_result: DecisionResult, *, status: StatusRecord | None=None, instance_state: InstanceState | None=None, trade_params: RiskEngineTradeParams | None=None, risk_config: RiskConfig | None=None, use_fixed_take_profit: bool=True) -> RiskEngineResult:
+    return run_risk_engine(decision_result=decision_result, risk_config=risk_config or _risk_config(), instance_state=instance_state or _instance_state(), status=status or _status(), trade_params=trade_params or _trade_params(), swing_low=1.099, swing_high=1.104, use_fixed_take_profit=use_fixed_take_profit)
 
 def test_risk_engine_never_returns_wait_for_wait_decision() -> None:
     decision_result = _manual_decision_result(decision=Decision.WAIT.value, preferred_side=Side.BUY.value, reason='WAIT: equal scores')
@@ -122,6 +122,12 @@ def test_risk_engine_blocks_when_stop_loss_exceeds_max_pips() -> None:
     result = _run_with_decision(decision_result, trade_params=tight_params)
     assert result.result == RiskResult.BLOCK.value
     assert 'max_stop_loss_pips' in result.reason
+
+def test_risk_engine_uses_zero_take_profit_when_fixed_take_profit_disabled() -> None:
+    decision_result = _buy_decision_result()
+    result = _run_with_decision(decision_result, use_fixed_take_profit=False)
+    assert result.result == RiskResult.ALLOW.value
+    assert result.take_profit == pytest.approx(0.0)
 
 def test_risk_engine_uses_fixed_lot_volume_when_configured() -> None:
     decision_result = _buy_decision_result()

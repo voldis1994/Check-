@@ -68,7 +68,7 @@ def validate_take_profit_direction(*, side: str, entry_price: float, take_profit
         return build_reason(REASON_DATA_INVALID, 'sell take profit must be below entry price', entry_price=entry_price, take_profit=take_profit)
     return None
 
-def validate_sl_tp(*, side: str, entry_price: float, stop_loss: float, take_profit: float | None, swing_low: float, swing_high: float, pip: float, max_stop_loss_pips: float) -> SlTpValidationResult:
+def validate_sl_tp(*, side: str, entry_price: float, stop_loss: float, take_profit: float | None, swing_low: float, swing_high: float, pip: float, max_stop_loss_pips: float, require_fixed_take_profit: bool=True) -> SlTpValidationResult:
     if side == Side.BUY.value:
         placement_reason = validate_buy_stop_loss_placement(entry_price=entry_price, stop_loss=stop_loss, swing_low=swing_low)
     elif side == Side.SELL.value:
@@ -80,10 +80,12 @@ def validate_sl_tp(*, side: str, entry_price: float, stop_loss: float, take_prof
     max_pips_reason = validate_stop_loss_within_max_pips(entry_price=entry_price, stop_loss=stop_loss, pip=pip, max_stop_loss_pips=max_stop_loss_pips)
     if max_pips_reason is not None:
         return SlTpValidationResult(allowed=False, stop_loss=stop_loss, take_profit=take_profit or 0.0, reason=max_pips_reason)
-    tp_reason = validate_take_profit_present(take_profit=take_profit)
+    tp_reason = validate_take_profit_present(take_profit=take_profit) if require_fixed_take_profit else None
     if tp_reason is not None:
         return SlTpValidationResult(allowed=False, stop_loss=stop_loss, take_profit=0.0, reason=tp_reason)
-    direction_reason = validate_take_profit_direction(side=side, entry_price=entry_price, take_profit=take_profit)
-    if direction_reason is not None:
-        return SlTpValidationResult(allowed=False, stop_loss=stop_loss, take_profit=take_profit, reason=direction_reason)
-    return SlTpValidationResult(allowed=True, stop_loss=stop_loss, take_profit=take_profit, reason=None)
+    if take_profit is not None and take_profit > 0:
+        direction_reason = validate_take_profit_direction(side=side, entry_price=entry_price, take_profit=take_profit)
+        if direction_reason is not None:
+            return SlTpValidationResult(allowed=False, stop_loss=stop_loss, take_profit=take_profit, reason=direction_reason)
+    resolved_take_profit = take_profit if take_profit is not None and take_profit > 0 else 0.0
+    return SlTpValidationResult(allowed=True, stop_loss=stop_loss, take_profit=resolved_take_profit, reason=None)

@@ -52,12 +52,25 @@ def resolve_entry_price_for_open(decision_result: DecisionResult, order_command:
         return decision_result.sell_candidate.entry_price
     return None
 
-def apply_ack_to_instance_state(instance_state: InstanceState, order_command: OrderCommand, ack_record: AckRecord, *, entry_price: float | None=None) -> None:
+def resolve_reference_take_profit_for_open(decision_result: DecisionResult, order_command: OrderCommand) -> float | None:
+    if order_command.action != OrderAction.OPEN.value:
+        return None
+    if order_command.take_profit is not None and order_command.take_profit > 0:
+        return None
+    if order_command.side == Side.BUY.value and decision_result.buy_candidate.valid:
+        return decision_result.buy_candidate.take_profit
+    if order_command.side == Side.SELL.value and decision_result.sell_candidate.valid:
+        return decision_result.sell_candidate.take_profit
+    return None
+
+def apply_ack_to_instance_state(instance_state: InstanceState, order_command: OrderCommand, ack_record: AckRecord, *, entry_price: float | None=None, reference_take_profit: float | None=None) -> None:
     instance_state.update_execution(command_id=ack_record.command_id, ack_status=ack_record.status)
     if ack_record.status != AckStatus.SUCCESS.value:
         return
     if order_command.action == OrderAction.OPEN.value and ack_record.ticket is not None and (order_command.side is not None) and (order_command.volume is not None):
         instance_state.update_position(open_ticket=ack_record.ticket, position_side=order_command.side, position_volume=order_command.volume, entry_price=entry_price, stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
+        if reference_take_profit is not None and reference_take_profit > 0:
+            instance_state.position_reference_take_profit = reference_take_profit
         return
     if order_command.action == OrderAction.MODIFY.value and order_command.stop_loss is not None and (order_command.take_profit is not None):
         instance_state.update_position_levels(stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
@@ -119,7 +132,7 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
     interpretation = interpret_ack(ack_record)
     log_ack_failure(paths, instance, ack_record)
     resolved_entry_price = resolve_entry_price_for_open(decision_result, order_command)
-    apply_ack_to_instance_state(instance_state, order_command, ack_record, entry_price=resolved_entry_price)
+    apply_ack_to_instance_state(instance_state, order_command, ack_record, entry_price=resolved_entry_price, reference_take_profit=resolve_reference_take_profit_for_open(decision_result, order_command))
     trade_entry = log_trade_ack(paths, instance, ack_record, timestamp_utc=resolved_timestamp, price=resolved_entry_price if order_command.action == OrderAction.OPEN.value else None)
     archive_processed_control(paths, instance)
     archive_processed_ack(paths, instance)

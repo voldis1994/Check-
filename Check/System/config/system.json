@@ -65,6 +65,7 @@
   "trade_management": {
     "enabled": true,
     "allow_close": false,
+    "use_fixed_take_profit": false,
     "breakeven_progress_ratio": 0.5,
     "partial_close_progress_ratio": 0.75,
     "partial_close_volume_ratio": 0.5,

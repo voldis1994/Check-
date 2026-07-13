@@ -29,7 +29,7 @@ def test_compute_progress_to_take_profit_rejects_invalid_side() -> None:
 
 def test_evaluate_breakeven_generates_modify_for_buy() -> None:
     position = _buy_position(stop_loss=1.098)
-    result = evaluate_breakeven(position=position, current_price=1.102, breakeven_progress_ratio=0.5, digits=5)
+    result = evaluate_breakeven(position=position, current_price=1.102, breakeven_progress_ratio=0.5, digits=5, modify_take_profit=position.take_profit)
     assert result is not None
     assert result.action == OrderAction.MODIFY.value
     assert result.stop_loss == pytest.approx(1.1)
@@ -38,7 +38,7 @@ def test_evaluate_breakeven_generates_modify_for_buy() -> None:
 
 def test_evaluate_breakeven_generates_modify_for_sell() -> None:
     position = _sell_position(stop_loss=1.107)
-    result = evaluate_breakeven(position=position, current_price=1.103, breakeven_progress_ratio=0.5, digits=5)
+    result = evaluate_breakeven(position=position, current_price=1.103, breakeven_progress_ratio=0.5, digits=5, modify_take_profit=position.take_profit)
     assert result is not None
     assert result.action == OrderAction.MODIFY.value
     assert result.stop_loss == pytest.approx(1.105)
@@ -46,17 +46,17 @@ def test_evaluate_breakeven_generates_modify_for_sell() -> None:
 
 def test_evaluate_breakeven_skips_when_progress_not_reached() -> None:
     position = _buy_position()
-    result = evaluate_breakeven(position=position, current_price=1.101, breakeven_progress_ratio=0.5, digits=5)
+    result = evaluate_breakeven(position=position, current_price=1.101, breakeven_progress_ratio=0.5, digits=5, modify_take_profit=position.take_profit)
     assert result is None
 
 def test_evaluate_breakeven_skips_when_stop_loss_already_at_entry() -> None:
     position = _buy_position(stop_loss=1.1)
-    result = evaluate_breakeven(position=position, current_price=1.102, breakeven_progress_ratio=0.5, digits=5)
+    result = evaluate_breakeven(position=position, current_price=1.102, breakeven_progress_ratio=0.5, digits=5, modify_take_profit=position.take_profit)
     assert result is None
 
 def test_evaluate_trailing_stop_generates_modify_for_buy() -> None:
     position = _buy_position(stop_loss=1.098)
-    result = evaluate_trailing_stop(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, trailing_buffer=0.0002, digits=5)
+    result = evaluate_trailing_stop(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, trailing_buffer=0.0002, digits=5, modify_take_profit=position.take_profit)
     assert result is not None
     assert result.action == OrderAction.MODIFY.value
     assert result.stop_loss == pytest.approx(1.1008)
@@ -64,7 +64,7 @@ def test_evaluate_trailing_stop_generates_modify_for_buy() -> None:
 
 def test_evaluate_trailing_stop_generates_modify_for_sell() -> None:
     position = _sell_position(stop_loss=1.107)
-    result = evaluate_trailing_stop(position=position, current_price=1.102, swing_low=1.1, swing_high=1.104, trailing_buffer=0.0002, digits=5)
+    result = evaluate_trailing_stop(position=position, current_price=1.102, swing_low=1.1, swing_high=1.104, trailing_buffer=0.0002, digits=5, modify_take_profit=position.take_profit)
     assert result is not None
     assert result.action == OrderAction.MODIFY.value
     assert result.stop_loss == pytest.approx(1.1042)
@@ -72,7 +72,7 @@ def test_evaluate_trailing_stop_generates_modify_for_sell() -> None:
 
 def test_evaluate_trailing_stop_skips_when_structure_stop_is_not_better() -> None:
     position = _buy_position(stop_loss=1.1009)
-    result = evaluate_trailing_stop(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, trailing_buffer=0.0002, digits=5)
+    result = evaluate_trailing_stop(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, trailing_buffer=0.0002, digits=5, modify_take_profit=position.take_profit)
     assert result is None
 
 def test_evaluate_partial_close_generates_close_with_partial_volume() -> None:
@@ -119,12 +119,19 @@ def test_evaluate_trade_management_can_return_breakeven_modify() -> None:
     assert result.action == OrderAction.MODIFY.value
     assert 'BREAKEVEN' in result.reason
 
+def test_evaluate_trailing_stop_uses_zero_take_profit_in_trailing_only_mode() -> None:
+    position = _buy_position(stop_loss=1.098)
+    result = evaluate_trailing_stop(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, trailing_buffer=0.0002, digits=5, modify_take_profit=0.0)
+    assert result is not None
+    assert result.take_profit == pytest.approx(0.0)
+
 def test_evaluate_trade_management_can_return_trailing_modify() -> None:
     config = TradeManagementConfig(breakeven_progress_ratio=0.95, trailing_buffer=0.0002, partial_close_progress_ratio=0.95, partial_close_volume_ratio=0.5, time_stop_max_bars=0, volume_step=0.01)
     position = _buy_position(bars_open=5, stop_loss=1.098)
-    result = evaluate_trade_management(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, config=config, digits=5)
+    result = evaluate_trade_management(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, config=config, digits=5, use_fixed_take_profit=False)
     assert result.action == OrderAction.MODIFY.value
     assert 'TRAILING' in result.reason
+    assert result.take_profit == pytest.approx(0.0)
 
 def test_trade_management_never_outputs_buy_or_sell_actions() -> None:
     scenarios: list[TradeManagementResult] = []

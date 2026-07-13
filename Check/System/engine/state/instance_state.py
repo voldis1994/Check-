@@ -24,6 +24,7 @@ class InstanceState:
     position_entry_price: float | None = None
     position_stop_loss: float | None = None
     position_take_profit: float | None = None
+    position_reference_take_profit: float | None = None
     position_bars_open: int = 0
     partial_close_applied: bool = False
     last_command_id: str = ''
@@ -94,6 +95,7 @@ class InstanceState:
         self.position_entry_price = None
         self.position_stop_loss = None
         self.position_take_profit = None
+        self.position_reference_take_profit = None
         self.position_bars_open = 0
         self.partial_close_applied = False
 
@@ -126,6 +128,8 @@ class InstanceState:
             data['position_stop_loss'] = self.position_stop_loss
         if self.position_take_profit is not None:
             data['position_take_profit'] = self.position_take_profit
+        if self.position_reference_take_profit is not None:
+            data['position_reference_take_profit'] = self.position_reference_take_profit
         if self.open_ticket is not None:
             data['position_bars_open'] = self.position_bars_open
             if self.partial_close_applied:
@@ -169,6 +173,9 @@ class InstanceState:
         position_take_profit = payload.get('position_take_profit')
         if position_take_profit is not None:
             state.position_take_profit = float(position_take_profit)
+        position_reference_take_profit = payload.get('position_reference_take_profit')
+        if position_reference_take_profit is not None:
+            state.position_reference_take_profit = float(position_reference_take_profit)
         position_bars_open = payload.get('position_bars_open')
         if position_bars_open is not None:
             state.position_bars_open = int(position_bars_open)

@@ -250,6 +250,7 @@ class AnalysisConfig:
 class TradeManagementSettings:
     enabled: bool
     allow_close: bool
+    use_fixed_take_profit: bool
     breakeven_progress_ratio: float
     partial_close_progress_ratio: float
     partial_close_volume_ratio: float
@@ -258,6 +259,7 @@ class TradeManagementSettings:
     def __post_init__(self) -> None:
         object.__setattr__(self, 'enabled', _require_bool(self.enabled, 'trade_management.enabled'))
         object.__setattr__(self, 'allow_close', _require_bool(self.allow_close, 'trade_management.allow_close'))
+        object.__setattr__(self, 'use_fixed_take_profit', _require_bool(self.use_fixed_take_profit, 'trade_management.use_fixed_take_profit'))
         breakeven_progress_ratio = _require_number(self.breakeven_progress_ratio, 'trade_management.breakeven_progress_ratio')
         if not 0 < breakeven_progress_ratio <= 1:
             raise ValidationError('trade_management.breakeven_progress_ratio must be in (0, 1]', module='protocol.models', context={'value': breakeven_progress_ratio})
@@ -273,7 +275,7 @@ class TradeManagementSettings:
         object.__setattr__(self, 'time_stop_max_bars', _require_int(self.time_stop_max_bars, 'trade_management.time_stop_max_bars', minimum=1))
 
     def to_dict(self) -> dict[str, int | float | bool]:
-        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars}
+        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'use_fixed_take_profit': self.use_fixed_take_profit, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars}
 
 @dataclass(frozen=True)
 class JournalConfig:

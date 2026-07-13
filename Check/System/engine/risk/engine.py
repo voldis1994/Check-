@@ -41,7 +41,7 @@ def _selected_candidate(*, preferred_side: str, buy_candidate: BuyCandidate, sel
         return sell_candidate
     return None
 
-def run_risk_engine(*, decision_result: DecisionResult, risk_config: RiskConfig, instance_state: InstanceState, status: StatusRecord, trade_params: RiskEngineTradeParams, swing_low: float, swing_high: float) -> RiskEngineResult:
+def run_risk_engine(*, decision_result: DecisionResult, risk_config: RiskConfig, instance_state: InstanceState, status: StatusRecord, trade_params: RiskEngineTradeParams, swing_low: float, swing_high: float, use_fixed_take_profit: bool=True) -> RiskEngineResult:
     if decision_result.decision in {Decision.WAIT.value, Decision.BLOCK.value}:
         return _block(decision_result.reason or f'decision is {decision_result.decision}')
     if decision_result.decision not in {Decision.BUY.value, Decision.SELL.value}:
@@ -59,9 +59,10 @@ def run_risk_engine(*, decision_result: DecisionResult, risk_config: RiskConfig,
     pip = instance_state.instrument_pip
     if point <= 0 or pip <= 0:
         return _block(build_reason(REASON_DATA_INVALID, 'instrument point and pip must be configured', point=point, pip=pip))
-    sl_tp_result = validate_sl_tp(side=decision_result.preferred_side, entry_price=candidate.entry_price, stop_loss=candidate.stop_loss, take_profit=candidate.take_profit, swing_low=swing_low, swing_high=swing_high, pip=pip, max_stop_loss_pips=trade_params.max_stop_loss_pips)
+    sl_tp_result = validate_sl_tp(side=decision_result.preferred_side, entry_price=candidate.entry_price, stop_loss=candidate.stop_loss, take_profit=candidate.take_profit, swing_low=swing_low, swing_high=swing_high, pip=pip, max_stop_loss_pips=trade_params.max_stop_loss_pips, require_fixed_take_profit=use_fixed_take_profit)
     if not sl_tp_result.allowed:
         return _block(sl_tp_result.reason or 'stop loss or take profit validation failed')
+    broker_take_profit = sl_tp_result.take_profit if use_fixed_take_profit else 0.0
     if risk_config.fixed_lot_volume > 0:
         volume = normalize_volume_to_step(volume=risk_config.fixed_lot_volume, volume_step=trade_params.volume_step)
         if volume <= 0:
@@ -71,4 +72,4 @@ def run_risk_engine(*, decision_result: DecisionResult, risk_config: RiskConfig,
         if not sizing_result.allowed:
             return _block(sizing_result.reason or 'position sizing blocked trade')
         volume = sizing_result.volume
-    return _allow(position_size=volume, stop_loss=sl_tp_result.stop_loss, take_profit=sl_tp_result.take_profit)
+    return _allow(position_size=volume, stop_loss=sl_tp_result.stop_loss, take_profit=broker_take_profit)

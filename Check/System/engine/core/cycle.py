@@ -75,11 +75,24 @@ def build_trade_management_config(trade_params: RiskEngineTradeParams, *, traili
     return TradeManagementConfig(breakeven_progress_ratio=settings.breakeven_progress_ratio, trailing_buffer=trailing_buffer, partial_close_progress_ratio=settings.partial_close_progress_ratio, partial_close_volume_ratio=settings.partial_close_volume_ratio, time_stop_max_bars=settings.time_stop_max_bars, volume_step=trade_params.volume_step)
 
 def resolve_open_position_from_state(instance_state: InstanceState) -> OpenPosition | None:
-    if instance_state.open_ticket is None or instance_state.position_side is None or instance_state.position_volume is None or (instance_state.position_entry_price is None) or (instance_state.position_stop_loss is None) or (instance_state.position_take_profit is None):
+    if instance_state.open_ticket is None or instance_state.position_side is None or instance_state.position_volume is None or (instance_state.position_entry_price is None) or (instance_state.position_stop_loss is None):
         return None
-    return OpenPosition(ticket=instance_state.open_ticket, side=instance_state.position_side, entry_price=instance_state.position_entry_price, stop_loss=instance_state.position_stop_loss, take_profit=instance_state.position_take_profit, volume=instance_state.position_volume, bars_open=instance_state.position_bars_open, partial_close_applied=instance_state.partial_close_applied)
+    broker_take_profit = instance_state.position_take_profit or 0.0
+    management_take_profit = broker_take_profit if broker_take_profit > 0 else instance_state.position_reference_take_profit
+    if management_take_profit is None or management_take_profit <= 0:
+        return None
+    return OpenPosition(ticket=instance_state.open_ticket, side=instance_state.position_side, entry_price=instance_state.position_entry_price, stop_loss=instance_state.position_stop_loss, take_profit=management_take_profit, volume=instance_state.position_volume, bars_open=instance_state.position_bars_open, partial_close_applied=instance_state.partial_close_applied)
 
-def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None, ai_allow_close: bool=True) -> TradeManagementResult:
+def resolve_trade_management_price(*, position_side: str, sensor_reading: SensorReading | None, market_bars: tuple[NormalizedMarketBar, ...]) -> float:
+    market_close = market_bars[-1].close
+    if sensor_reading is None:
+        return market_close
+    sensor_price = sensor_reading.bid if position_side == Side.BUY.value else sensor_reading.ask
+    if position_side == Side.BUY.value:
+        return max(sensor_price, market_close)
+    return min(sensor_price, market_close)
+
+def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None, ai_allow_close: bool=True, sensor_reading: SensorReading | None=None) -> TradeManagementResult:
     if not runtime.config.trade_management.enabled:
         return TradeManagementResult(action=OrderAction.NONE.value, reason='')
     resolved_trade_params = trade_params or build_risk_trade_params(runtime)
@@ -90,7 +103,7 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     digits = instance_memory.instance_state.instrument_digits
     if digits <= 0 and market_bars:
         digits = market_bars[-1].digits
-    return evaluate_trade_management(position=position, current_price=market_bars[-1].close, swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close)
+    return evaluate_trade_management(position=position, current_price=resolve_trade_management_price(position_side=instance_memory.instance_state.position_side or Side.BUY.value, sensor_reading=sensor_reading, market_bars=market_bars), swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
 
 def _build_ai_market_context(*, decision_result: DecisionResult, spread_snapshot: SpreadModelSnapshot, market_bars: tuple[NormalizedMarketBar, ...]) -> dict[str, object]:
     return {'relative_spread': spread_snapshot.relative_spread, 'last_close': market_bars[-1].close, 'last_time_utc': str(market_bars[-1].time_utc), 'system_reason': decision_result.reason, 'buy_score': decision_result.buy_score, 'sell_score': decision_result.sell_score}
@@ -179,7 +192,7 @@ def run_instance_decision_phase(*, universe: UniverseRecord, market_bars: tuple[
 
 def run_instance_risk_phase(*, decision_result: DecisionResult, instance_memory: InstanceMemory, status: StatusRecord, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None) -> RiskEngineResult:
     structure = resolve_structure_levels(market_bars)
-    return run_risk_engine(decision_result=decision_result, risk_config=runtime.config.risk, instance_state=instance_memory.instance_state, status=status, trade_params=trade_params or build_risk_trade_params(runtime), swing_low=structure.swing_low, swing_high=structure.swing_high)
+    return run_risk_engine(decision_result=decision_result, risk_config=runtime.config.risk, instance_state=instance_memory.instance_state, status=status, trade_params=trade_params or build_risk_trade_params(runtime), swing_low=structure.swing_low, swing_high=structure.swing_high, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
 
 def should_execute_trade(*, runtime: LiveRuntime, decision_result: DecisionResult, risk_engine_result: RiskEngineResult) -> bool:
     if not runtime.allow_control_writes:
@@ -321,7 +334,7 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
         return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
     resolved_trade_params = trade_params or build_risk_trade_params(runtime)
-    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, trade_params=resolved_trade_params, ai_allow_close=resolve_ai_allow_close(ai_query) if ai_query is not None else True)
+    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, trade_params=resolved_trade_params, ai_allow_close=resolve_ai_allow_close(ai_query) if ai_query is not None else True, sensor_reading=sensor_reading)
     execution_result: ExecutionResult | None = None
     trade_executed = False
     if runtime.allow_control_writes:

@@ -66,6 +66,11 @@ def test_validate_sl_tp_allows_valid_buy_levels() -> None:
     assert result.take_profit == 1.1154
     assert result.reason is None
 
+def test_validate_sl_tp_allows_valid_buy_levels_without_fixed_take_profit() -> None:
+    result = validate_sl_tp(side=Side.BUY.value, entry_price=1.105, stop_loss=1.0998, take_profit=1.1154, swing_low=1.1, swing_high=1.106, pip=0.0001, max_stop_loss_pips=60.0, require_fixed_take_profit=False)
+    assert result.allowed
+    assert result.take_profit == pytest.approx(1.1154)
+
 def test_validate_sl_tp_blocks_missing_take_profit() -> None:
     result = validate_sl_tp(side=Side.BUY.value, entry_price=1.105, stop_loss=1.0998, take_profit=None, swing_low=1.1, swing_high=1.106, pip=0.0001, max_stop_loss_pips=60.0)
     assert not result.allowed
