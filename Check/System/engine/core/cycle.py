@@ -23,7 +23,7 @@ from engine.loader.universe_loader import RawUniverseData, load_universe_data
 from engine.normalizer.instrument_params import derive_instrument_params, detect_params_change
 from engine.normalizer.market_normalizer import NormalizedMarketBar, normalize_market_csv
 from engine.normalizer.spread_model import SpreadModelSnapshot, update_spread_model_from_sensor
-from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, RiskResult, Side
+from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, RiskResult, Side
 from engine.protocol.errors import DataIOError, SystemError
 from engine.protocol.models import SensorReading, StatusRecord, TradeManagementSettings, UniverseRecord
 from engine.protocol.parser import parse_sensor_csv, parse_universe
@@ -188,6 +188,19 @@ def should_execute_trade(*, runtime: LiveRuntime, decision_result: DecisionResul
         return False
     return risk_engine_result.result == RiskResult.ALLOW.value
 
+def apply_closed_bar_entry_gate(*, runtime: LiveRuntime, instance_state: InstanceState, decision_result: DecisionResult, risk_engine_result: RiskEngineResult, market_bar_time_utc: str | None) -> RiskEngineResult:
+    if not runtime.config.runtime.execute_entries_on_closed_bar_only:
+        return risk_engine_result
+    if not market_bar_time_utc:
+        return risk_engine_result
+    previous_bar = instance_state.last_seen_market_bar_utc
+    instance_state.last_seen_market_bar_utc = market_bar_time_utc
+    if not should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=risk_engine_result):
+        return risk_engine_result
+    if previous_bar == market_bar_time_utc:
+        return RiskEngineResult(result=RiskResult.BLOCK.value, reason=build_reason(REASON_ENTRY_DEFERRED, 'open entry deferred until next closed M1 bar', market_bar_time_utc=market_bar_time_utc), position_size=None, stop_loss=None, take_profit=None)
+    return risk_engine_result
+
 def _log_cycle_error(paths: SystemPaths, instance: Instance, *, message: str, context: dict[str, object] | None=None) -> None:
     log_error(paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message=message, context=context)
 
@@ -280,7 +293,8 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         spread_snapshot = update_instance_spread_model(instance_memory=instance_memory, spread_models=runtime.spread_models, sensor_reading=sensor_reading, lookback_bars=runtime.config.analysis.lookback_bars, timestamp_utc=resolved_timestamp)
         decision_result = run_instance_decision_phase(universe=universe, market_bars=market_bars, instance_memory=instance_memory, relative_spread=spread_snapshot.relative_spread, runtime=runtime, block_reason=block_reason)
         decision_result, risk_engine_result, ai_meta, ai_query = run_instance_ai_risk_pipeline(decision_result=decision_result, instance_memory=instance_memory, status=placeholder_status, market_bars=market_bars, runtime=runtime, spread_snapshot=spread_snapshot, trade_params=trade_params)
-        log_decision(runtime.paths, instance, decision_result, risk_engine_result, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
+        effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, market_bar_time_utc=market_data_utc)
+        log_decision(runtime.paths, instance, decision_result, effective_risk, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
         _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, decision_result=decision_result, risk_engine_result=risk_engine_result, decision_journal_logged=True, market_data_utc=market_data_utc)
     status = status_result.record
@@ -301,7 +315,8 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     except SystemError:
         analysis_duration_ms = monotonic_elapsed_ms(analysis_started)
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True)
-    log_decision(runtime.paths, instance, decision_result, risk_engine_result, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
+    effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, market_bar_time_utc=market_data_utc)
+    log_decision(runtime.paths, instance, decision_result, effective_risk, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
     if timeout_guard.is_exceeded():
         _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
         return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
@@ -314,9 +329,9 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
             _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
             return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
         execution_started = time.monotonic()
-        execution_result = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='execution io'))
+        execution_result = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='execution io'))
         ack_latency_ms = int((time.monotonic() - execution_started) * 1000)
-        trade_executed = should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=risk_engine_result) or (execution_result is not None and should_execute_management_action(execution_result.order_command.action) and execution_result.trade_intent_logged)
+        trade_executed = should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=effective_risk) or (execution_result is not None and should_execute_management_action(execution_result.order_command.action) and execution_result.trade_intent_logged)
     else:
         execution_result = None
         ack_latency_ms = None
@@ -324,4 +339,4 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
     timings = _build_cycle_timings(cycle_started=cycle_started, load_duration_ms=load_duration_ms, analysis_duration_ms=analysis_duration_ms, decision_duration_ms=decision_duration_ms)
     cycle_timeout_logged = _enforce_cycle_duration_limit(runtime=runtime, instance=instance, cycle_duration_ms=timings.cycle_duration_ms)
-    return InstanceCycleResult(instance=instance, timestamp_utc=resolved_timestamp, completed=not cycle_timeout_logged, error_logged=cycle_timeout_logged, decision_result=decision_result, risk_engine_result=risk_engine_result, decision_journal_logged=True, execution_result=execution_result, trade_executed=trade_executed, ack_latency_ms=ack_latency_ms, performance_timings=timings, market_data_utc=market_data_utc)
+    return InstanceCycleResult(instance=instance, timestamp_utc=resolved_timestamp, completed=not cycle_timeout_logged, error_logged=cycle_timeout_logged, decision_result=decision_result, risk_engine_result=effective_risk, decision_journal_logged=True, execution_result=execution_result, trade_executed=trade_executed, ack_latency_ms=ack_latency_ms, performance_timings=timings, market_data_utc=market_data_utc)

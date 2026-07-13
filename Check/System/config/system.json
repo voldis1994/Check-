@@ -20,7 +20,8 @@
     "data_stale_threshold_ms": 90000,
     "cycle_max_duration_ms": 30000,
     "metrics_interval_ms": 60000,
-    "auto_discover_instances": true
+    "auto_discover_instances": true,
+    "execute_entries_on_closed_bar_only": true
   },
   "instances": [
     {
@@ -35,7 +36,7 @@
     "max_daily_loss_percent": 2.0,
     "max_drawdown_percent": 10.0,
     "reward_ratio": 2.0,
-    "max_risk_per_trade_percent": 5.0,
+    "max_risk_per_trade_percent": 8.0,
     "max_stop_loss_pips": 50.0,
     "volume_step": 0.01
   },

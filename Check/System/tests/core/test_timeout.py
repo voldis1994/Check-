@@ -8,7 +8,7 @@ from engine.protocol.models import RuntimeConfig
 from engine.protocol.parser import parse_error_journal_line
 
 def _runtime_config(*, ack_timeout_ms: int=5000) -> RuntimeConfig:
-    return RuntimeConfig(cycle_interval_ms=1000, ack_timeout_ms=ack_timeout_ms, retry_max=3, retry_delay_ms=200, data_stale_threshold_ms=15000, cycle_max_duration_ms=30000, metrics_interval_ms=60000, auto_discover_instances=True)
+    return RuntimeConfig(cycle_interval_ms=1000, ack_timeout_ms=ack_timeout_ms, retry_max=3, retry_delay_ms=200, data_stale_threshold_ms=15000, cycle_max_duration_ms=30000, metrics_interval_ms=60000, auto_discover_instances=True, execute_entries_on_closed_bar_only=True)
 
 def test_build_ack_timeout_config_uses_runtime_value() -> None:
     config = build_ack_timeout_config(_runtime_config(ack_timeout_ms=7500))

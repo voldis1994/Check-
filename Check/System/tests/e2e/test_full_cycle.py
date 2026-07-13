@@ -87,8 +87,8 @@ def _assert_phase_outcomes(result: InstanceCycleResult, paths: SystemPaths, inst
         assert archived_control_text is not None
         control = parse_control(archived_control_text)
     else:
-        assert control_path.exists()
-        control = parse_control(control_path.read_text(encoding='utf-8'))
+        assert not control_path.exists()
+        control = None
     if expect_trade:
         assert result.decision_result.decision in {Decision.BUY.value, Decision.SELL.value}
         assert result.risk_engine_result.result == RiskResult.ALLOW.value
@@ -106,7 +106,7 @@ def _assert_phase_outcomes(result: InstanceCycleResult, paths: SystemPaths, inst
         assert reloaded_state.last_ack_status == AckStatus.SUCCESS.value
     else:
         assert not result.trade_executed
-        assert control.action == OrderAction.NONE.value
+        assert control is None
         assert not build_trade_journal_path(paths, instance).exists()
 
 def test_build_market_csv_supports_bullish_and_bearish_scenarios() -> None:

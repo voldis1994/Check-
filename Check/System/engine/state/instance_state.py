@@ -35,6 +35,7 @@ class InstanceState:
     peak_equity: float | None = None
     cycle_count: int = 0
     last_cycle_utc: str = ''
+    last_seen_market_bar_utc: str = ''
 
     def path(self, paths: SystemPaths) -> Path:
         return paths.account_state_dir(self.instance.account_id) / self.instance.instance_state_filename()
@@ -133,6 +134,8 @@ class InstanceState:
             data['day_start_balance'] = self.day_start_balance
         if self.peak_equity is not None:
             data['peak_equity'] = self.peak_equity
+        if self.last_seen_market_bar_utc:
+            data['last_seen_market_bar_utc'] = self.last_seen_market_bar_utc
         return data
 
     def save(self, paths: SystemPaths) -> None:
@@ -183,4 +186,5 @@ class InstanceState:
             state.peak_equity = float(peak_equity)
         state.cycle_count = int(payload.get('cycle_count', state.cycle_count))
         state.last_cycle_utc = str(payload.get('last_cycle_utc', state.last_cycle_utc))
+        state.last_seen_market_bar_utc = str(payload.get('last_seen_market_bar_utc', payload.get('last_executed_market_bar_utc', state.last_seen_market_bar_utc)))
         return state

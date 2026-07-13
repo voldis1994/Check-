@@ -49,7 +49,7 @@ def _system_config():
     return parse_config_payload(payload)
 
 def _runtime_config(*, ack_timeout_ms: int=5000) -> RuntimeConfig:
-    return RuntimeConfig(cycle_interval_ms=1000, ack_timeout_ms=ack_timeout_ms, retry_max=3, retry_delay_ms=200, data_stale_threshold_ms=15000, cycle_max_duration_ms=30000, metrics_interval_ms=60000, auto_discover_instances=True)
+    return RuntimeConfig(cycle_interval_ms=1000, ack_timeout_ms=ack_timeout_ms, retry_max=3, retry_delay_ms=200, data_stale_threshold_ms=15000, cycle_max_duration_ms=30000, metrics_interval_ms=60000, auto_discover_instances=True, execute_entries_on_closed_bar_only=True)
 
 def _buy_decision_result() -> DecisionResult:
     engine_result = run_decision_engine(universe=_universe(), market_bars=_bullish_bars(), instance_state=_instance_state(), relative_spread=1.0, system_config=_system_config())
@@ -314,22 +314,20 @@ def test_run_execution_engine_ack_timeout_writes_error_journal_and_timeout_state
     assert intent_entry.ack_status == AckStatus.FAILED.value
     assert REASON_ACK_TIMEOUT in intent_entry.reason
 
-def test_run_execution_engine_none_action_publishes_control_without_ack_or_trade_journal(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_execution_engine_none_action_skips_control_publish(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_fixed_command_id(monkeypatch)
     paths = SystemPaths(root_path=tmp_path)
     instance = _instance()
     state = _instance_state()
     result = run_execution_engine(paths=paths, instance=instance, instance_state=state, decision_result=_wait_decision_result(), risk_engine_result=_allow_risk_result(), runtime=_runtime_config(), timestamp_utc='2026-07-07T06:00:00.000Z')
     assert result.order_command.action == OrderAction.NONE.value
-    assert result.control_published is True
+    assert result.control_published is False
     assert result.trade_intent_logged is False
     assert result.ack_interpretation is None
     assert result.trade_journal_entry is None
     assert result.state_updated is False
     assert not build_trade_journal_path(paths, instance).exists()
-    control = parse_control(build_control_path(paths, instance).read_text(encoding='utf-8'))
-    assert control.action == OrderAction.NONE.value
-    assert control.reason == 'WAIT: equal scores'
+    assert not build_control_path(paths, instance).exists()
 
 def test_run_execution_engine_prefers_trade_management_modify_before_wait_decision(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_fixed_command_id(monkeypatch)

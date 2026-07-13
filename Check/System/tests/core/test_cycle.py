@@ -6,7 +6,7 @@ import pytest
 from engine.core.instance import Instance
 from engine.core.lifecycle import startup
 from engine.core.paths import SystemPaths
-from engine.core.cycle import InstanceCycleData, build_account_block_reason, build_risk_trade_params, load_instance_cycle_data, resolve_open_position_from_state, resolve_structure_levels, resolve_use_global_universe, run_instance_cycle, run_instance_decision_phase, run_instance_risk_phase, run_instance_trade_management_phase, should_execute_trade, update_instance_instrument_state, update_instance_spread_model, validate_market_for_cycle, validate_sensor_for_cycle, validate_status_for_cycle, validate_universe_for_cycle
+from engine.core.cycle import InstanceCycleData, apply_closed_bar_entry_gate, build_account_block_reason, build_risk_trade_params, load_instance_cycle_data, resolve_open_position_from_state, resolve_structure_levels, resolve_use_global_universe, run_instance_cycle, run_instance_decision_phase, run_instance_risk_phase, run_instance_trade_management_phase, should_execute_trade, update_instance_instrument_state, update_instance_spread_model, validate_market_for_cycle, validate_sensor_for_cycle, validate_status_for_cycle, validate_universe_for_cycle
 from engine.execution.engine import ExecutionResult
 from engine.execution.command import OrderCommand
 from engine.execution.control_writer import build_control_path
@@ -14,9 +14,12 @@ from engine.journal.decision_journal import build_decision_journal_path
 from engine.journal.error_journal import build_error_journal_path
 from engine.journal.trade_journal import build_trade_journal_path
 from engine.normalizer.market_normalizer import NormalizedMarketBar
-from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_DATA_INVALID, RiskResult, Side
+from engine.decision.engine import DecisionResult
+from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, RiskResult, Side
 from engine.protocol.parser import parse_decision_journal_line, parse_error_journal_line
 from engine.protocol.models import SensorReading, StatusPositionSnapshot, StatusRecord, UniverseRecord
+from engine.risk.engine import RiskEngineResult
+from engine.state.instance_state import InstanceState
 from engine.protocol.writer import write_status
 from engine.validator.market_validator import ValidationResult
 from tests.core.config_payload import FIXTURE_CYCLE_UTC, valid_system_config_payload
@@ -298,3 +301,24 @@ def test_run_instance_cycle_passes_trade_management_to_execution(tmp_path: Path,
     assert result.completed
     assert captured['management_result'] is not None
     assert resolve_open_position_from_state(instance_memory.instance_state) is not None
+
+def test_apply_closed_bar_entry_gate_allows_first_cycle_on_new_bar(tmp_path: Path) -> None:
+    runtime, instance = _startup_runtime(tmp_path)
+    state = InstanceState(instance=instance)
+    decision = DecisionResult(decision_id='d1', decision=Decision.BUY.value, reason='BUY', preferred_side=Side.BUY.value, buy_candidate=None, sell_candidate=None, buy_score=0.8, sell_score=0.2, analysis_context={})
+    risk = RiskEngineResult(result=RiskResult.ALLOW.value, reason='', position_size=0.1, stop_loss=1.09, take_profit=1.11)
+    runtime.allow_control_writes = True
+    result = apply_closed_bar_entry_gate(runtime=runtime, instance_state=state, decision_result=decision, risk_engine_result=risk, market_bar_time_utc='2026-07-07T06:02:00.000Z')
+    assert result.result == RiskResult.ALLOW.value
+    assert state.last_seen_market_bar_utc == '2026-07-07T06:02:00.000Z'
+
+def test_apply_closed_bar_entry_gate_blocks_repeat_open_on_same_bar(tmp_path: Path) -> None:
+    runtime, instance = _startup_runtime(tmp_path)
+    state = InstanceState(instance=instance)
+    state.last_seen_market_bar_utc = '2026-07-07T06:02:00.000Z'
+    decision = DecisionResult(decision_id='d1', decision=Decision.BUY.value, reason='BUY', preferred_side=Side.BUY.value, buy_candidate=None, sell_candidate=None, buy_score=0.8, sell_score=0.2, analysis_context={})
+    risk = RiskEngineResult(result=RiskResult.ALLOW.value, reason='', position_size=0.1, stop_loss=1.09, take_profit=1.11)
+    runtime.allow_control_writes = True
+    result = apply_closed_bar_entry_gate(runtime=runtime, instance_state=state, decision_result=decision, risk_engine_result=risk, market_bar_time_utc='2026-07-07T06:02:00.000Z')
+    assert result.result == RiskResult.BLOCK.value
+    assert 'ENTRY_DEFERRED' in result.reason or REASON_ENTRY_DEFERRED in result.reason

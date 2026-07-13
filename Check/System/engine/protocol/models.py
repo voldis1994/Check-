@@ -112,6 +112,7 @@ class RuntimeConfig:
     cycle_max_duration_ms: int
     metrics_interval_ms: int
     auto_discover_instances: bool
+    execute_entries_on_closed_bar_only: bool
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'cycle_interval_ms', _require_int(self.cycle_interval_ms, 'runtime.cycle_interval_ms', minimum=1))
@@ -122,9 +123,10 @@ class RuntimeConfig:
         object.__setattr__(self, 'cycle_max_duration_ms', _require_int(self.cycle_max_duration_ms, 'runtime.cycle_max_duration_ms', minimum=1))
         object.__setattr__(self, 'metrics_interval_ms', _require_int(self.metrics_interval_ms, 'runtime.metrics_interval_ms', minimum=1))
         object.__setattr__(self, 'auto_discover_instances', _require_bool(self.auto_discover_instances, 'runtime.auto_discover_instances'))
+        object.__setattr__(self, 'execute_entries_on_closed_bar_only', _require_bool(self.execute_entries_on_closed_bar_only, 'runtime.execute_entries_on_closed_bar_only'))
 
     def to_dict(self) -> dict[str, int | bool]:
-        return {'cycle_interval_ms': self.cycle_interval_ms, 'ack_timeout_ms': self.ack_timeout_ms, 'retry_max': self.retry_max, 'retry_delay_ms': self.retry_delay_ms, 'data_stale_threshold_ms': self.data_stale_threshold_ms, 'cycle_max_duration_ms': self.cycle_max_duration_ms, 'metrics_interval_ms': self.metrics_interval_ms, 'auto_discover_instances': self.auto_discover_instances}
+        return {'cycle_interval_ms': self.cycle_interval_ms, 'ack_timeout_ms': self.ack_timeout_ms, 'retry_max': self.retry_max, 'retry_delay_ms': self.retry_delay_ms, 'data_stale_threshold_ms': self.data_stale_threshold_ms, 'cycle_max_duration_ms': self.cycle_max_duration_ms, 'metrics_interval_ms': self.metrics_interval_ms, 'auto_discover_instances': self.auto_discover_instances, 'execute_entries_on_closed_bar_only': self.execute_entries_on_closed_bar_only}
 
 @dataclass(frozen=True)
 class InstanceDefinition:

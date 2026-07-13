@@ -269,7 +269,7 @@ def shutdown(runtime: LiveRuntime) -> int:
 
 def print_live_startup_banner(runtime: LiveRuntime, instances: tuple[Instance, ...]) -> None:
     print(f'SYSTEM live started: root={runtime.paths.root}', flush=True)
-    print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms}', flush=True)
+    print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms} closed_bar_entries={runtime.config.runtime.execute_entries_on_closed_bar_only}', flush=True)
     print(f'logs={runtime.paths.logs_dir}', flush=True)
     for instance in instances:
         market_path = runtime.paths.account_dir(instance.account_id) / instance.market_filename()
@@ -283,13 +283,15 @@ def print_live_cycle_summary(result: object) -> None:
     for item in result.instance_results:
         decision = item.decision_result.decision if item.decision_result is not None else '-'
         reason = item.decision_result.reason if item.decision_result is not None else ''
+        risk = item.risk_engine_result.result if item.risk_engine_result is not None else '-'
+        action = item.execution_result.order_command.action if item.execution_result is not None else '-'
         if item.completed:
             status = 'OK'
         elif item.error_logged:
             status = 'SKIP'
         else:
             status = 'FAIL'
-        print(f'cycle {item.instance.account_id} {item.instance.symbol} {status} decision={decision} reason={reason}', flush=True)
+        print(f'cycle {item.instance.account_id} {item.instance.symbol} {status} decision={decision} risk={risk} action={action} reason={reason}', flush=True)
 
 def run_live_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[LiveRuntime], None] | None=None, require_mt4_exports: bool=False, wait_for_mt4_seconds: float=0.0) -> int:
     try:

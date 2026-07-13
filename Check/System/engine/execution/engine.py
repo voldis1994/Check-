@@ -91,9 +91,9 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
     unconfirmed = detect_unconfirmed_control(paths, instance, instance_state)
     if not is_control_republish_allowed(instance_state, unconfirmed, proposed_command_id=order_command.command_id):
         return ExecutionResult(order_command=order_command, control_published=False, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)
-    publish_control(paths, instance, order_command, timestamp_utc=resolved_timestamp, retry_policy=retry_policy, retry_alert_context=retry_alert_context)
     if not _requires_trade_execution(order_command):
-        return ExecutionResult(order_command=order_command, control_published=True, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)
+        return ExecutionResult(order_command=order_command, control_published=False, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)
+    publish_control(paths, instance, order_command, timestamp_utc=resolved_timestamp, retry_policy=retry_policy, retry_alert_context=retry_alert_context)
     log_trade_intent(paths, instance, build_trade_intent_params(order_command), timestamp_utc=resolved_timestamp)
     ack_timeout = build_ack_timeout_config(runtime)
     wait_started = started_monotonic if started_monotonic is not None else monotonic_fn()

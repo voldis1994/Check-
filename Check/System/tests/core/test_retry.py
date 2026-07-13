@@ -6,7 +6,7 @@ from engine.protocol.errors import ExecutionError
 from engine.protocol.models import RuntimeConfig
 
 def _runtime_config(*, retry_max: int=3, retry_delay_ms: int=200) -> RuntimeConfig:
-    return RuntimeConfig(cycle_interval_ms=1000, ack_timeout_ms=5000, retry_max=retry_max, retry_delay_ms=retry_delay_ms, data_stale_threshold_ms=15000, cycle_max_duration_ms=30000, metrics_interval_ms=60000, auto_discover_instances=True)
+    return RuntimeConfig(cycle_interval_ms=1000, ack_timeout_ms=5000, retry_max=retry_max, retry_delay_ms=retry_delay_ms, data_stale_threshold_ms=15000, cycle_max_duration_ms=30000, metrics_interval_ms=60000, auto_discover_instances=True, execute_entries_on_closed_bar_only=True)
 
 def test_build_retry_policy_uses_runtime_values() -> None:
     policy = build_retry_policy(_runtime_config(retry_max=4, retry_delay_ms=150))
