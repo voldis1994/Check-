@@ -272,6 +272,8 @@ class TradeManagementSettings:
     partial_close_progress_ratio: float
     partial_close_volume_ratio: float
     time_stop_max_bars: int
+    trailing_lookback_bars: int
+    trailing_step_pips: float
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'enabled', _require_bool(self.enabled, 'trade_management.enabled'))
@@ -290,9 +292,14 @@ class TradeManagementSettings:
             raise ValidationError('trade_management.partial_close_volume_ratio must be in (0, 1)', module='protocol.models', context={'value': partial_close_volume_ratio})
         object.__setattr__(self, 'partial_close_volume_ratio', partial_close_volume_ratio)
         object.__setattr__(self, 'time_stop_max_bars', _require_int(self.time_stop_max_bars, 'trade_management.time_stop_max_bars', minimum=1))
+        object.__setattr__(self, 'trailing_lookback_bars', _require_int(self.trailing_lookback_bars, 'trade_management.trailing_lookback_bars', minimum=1))
+        trailing_step_pips = _require_number(self.trailing_step_pips, 'trade_management.trailing_step_pips')
+        if trailing_step_pips < 0:
+            raise ValidationError('trade_management.trailing_step_pips must be >= 0', module='protocol.models', context={'value': trailing_step_pips})
+        object.__setattr__(self, 'trailing_step_pips', trailing_step_pips)
 
     def to_dict(self) -> dict[str, int | float | bool]:
-        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'use_fixed_take_profit': self.use_fixed_take_profit, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars}
+        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'use_fixed_take_profit': self.use_fixed_take_profit, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars, 'trailing_lookback_bars': self.trailing_lookback_bars, 'trailing_step_pips': self.trailing_step_pips}
 
 @dataclass(frozen=True)
 class JournalConfig:

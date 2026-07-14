@@ -71,8 +71,9 @@ class InstanceCycleResult:
     performance_timings: CycleTimingSnapshot | None = None
     market_data_utc: str | None = None
 
-def build_trade_management_config(trade_params: RiskEngineTradeParams, *, trailing_buffer: float, settings: TradeManagementSettings) -> TradeManagementConfig:
-    return TradeManagementConfig(breakeven_progress_ratio=settings.breakeven_progress_ratio, trailing_buffer=trailing_buffer, partial_close_progress_ratio=settings.partial_close_progress_ratio, partial_close_volume_ratio=settings.partial_close_volume_ratio, time_stop_max_bars=settings.time_stop_max_bars, volume_step=trade_params.volume_step)
+def build_trade_management_config(trade_params: RiskEngineTradeParams, *, trailing_buffer: float, settings: TradeManagementSettings, pip: float) -> TradeManagementConfig:
+    price_trail_distance = settings.trailing_step_pips * pip if pip > 0 and settings.trailing_step_pips > 0 else 0.0
+    return TradeManagementConfig(breakeven_progress_ratio=settings.breakeven_progress_ratio, trailing_buffer=trailing_buffer, partial_close_progress_ratio=settings.partial_close_progress_ratio, partial_close_volume_ratio=settings.partial_close_volume_ratio, time_stop_max_bars=settings.time_stop_max_bars, volume_step=trade_params.volume_step, price_trail_distance=price_trail_distance)
 
 def _synthetic_reference_take_profit(*, side: str, entry_price: float, stop_loss: float, reward_ratio: float) -> float:
     if reward_ratio <= 0:
@@ -108,11 +109,15 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     if instance_memory.instance_state.open_ticket is not None:
         instance_memory.instance_state.increment_position_bars()
     position = resolve_open_position_from_state(instance_memory.instance_state, reward_ratio=runtime.config.risk.reward_ratio)
-    structure = resolve_structure_levels(market_bars, structure_lookback_bars=runtime.config.analysis.structure_lookback_bars)
+    trailing_lookback = runtime.config.trade_management.trailing_lookback_bars
+    structure = resolve_structure_levels(market_bars, structure_lookback_bars=trailing_lookback)
     digits = instance_memory.instance_state.instrument_digits
     if digits <= 0 and market_bars:
         digits = market_bars[-1].digits
-    return evaluate_trade_management(position=position, current_price=resolve_trade_management_price(position_side=instance_memory.instance_state.position_side or Side.BUY.value, sensor_reading=sensor_reading, market_bars=market_bars), swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
+    pip = instance_memory.instance_state.instrument_pip
+    if pip <= 0 and market_bars:
+        pip = market_bars[-1].point * 10.0
+    return evaluate_trade_management(position=position, current_price=resolve_trade_management_price(position_side=instance_memory.instance_state.position_side or Side.BUY.value, sensor_reading=sensor_reading, market_bars=market_bars), swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management, pip=pip), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
 
 def _build_ai_market_context(*, decision_result: DecisionResult, spread_snapshot: SpreadModelSnapshot, market_bars: tuple[NormalizedMarketBar, ...]) -> dict[str, object]:
     return {'relative_spread': spread_snapshot.relative_spread, 'last_close': market_bars[-1].close, 'last_time_utc': str(market_bars[-1].time_utc), 'system_reason': decision_result.reason, 'buy_score': decision_result.buy_score, 'sell_score': decision_result.sell_score}

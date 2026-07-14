@@ -70,10 +70,12 @@ def test_evaluate_trailing_stop_generates_modify_for_sell() -> None:
     assert result.stop_loss == pytest.approx(1.1042)
     assert 'TRAILING' in result.reason
 
-def test_evaluate_trailing_stop_skips_when_structure_stop_is_not_better() -> None:
-    position = _buy_position(stop_loss=1.1009)
-    result = evaluate_trailing_stop(position=position, current_price=1.103, swing_low=1.101, swing_high=1.104, trailing_buffer=0.0002, digits=5, modify_take_profit=position.take_profit)
-    assert result is None
+def test_evaluate_trailing_stop_uses_price_trail_when_more_aggressive() -> None:
+    position = _buy_position(stop_loss=1.098)
+    result = evaluate_trailing_stop(position=position, current_price=1.103, swing_low=1.099, swing_high=1.104, trailing_buffer=0.0002, digits=5, modify_take_profit=position.take_profit, price_trail_distance=0.0008)
+    assert result is not None
+    assert result.stop_loss == pytest.approx(1.1022)
+    assert 'TRAILING' in result.reason
 
 def test_evaluate_partial_close_generates_close_with_partial_volume() -> None:
     position = _buy_position(volume=0.1)

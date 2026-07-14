@@ -19,6 +19,7 @@ class TradeManagementConfig:
     partial_close_volume_ratio: float
     time_stop_max_bars: int
     volume_step: float
+    price_trail_distance: float = 0.0
 
 @dataclass(frozen=True)
 class OpenPosition:
@@ -84,22 +85,34 @@ def evaluate_breakeven(*, position: OpenPosition, current_price: float, breakeve
         return TradeManagementResult(action=OrderAction.MODIFY.value, reason='TRADE_MANAGEMENT_BREAKEVEN: stop loss moved to entry', stop_loss=new_stop_loss, take_profit=modify_take_profit)
     raise _validation_error('side must be BUY or SELL', side=position.side)
 
-def evaluate_trailing_stop(*, position: OpenPosition, current_price: float, swing_low: float, swing_high: float, trailing_buffer: float, digits: int, modify_take_profit: float) -> TradeManagementResult | None:
+def evaluate_trailing_stop(*, position: OpenPosition, current_price: float, swing_low: float, swing_high: float, trailing_buffer: float, digits: int, modify_take_profit: float, price_trail_distance: float=0.0) -> TradeManagementResult | None:
     if trailing_buffer < 0:
         raise _validation_error('trailing_buffer must be >= 0', trailing_buffer=trailing_buffer)
+    if price_trail_distance < 0:
+        raise _validation_error('price_trail_distance must be >= 0', price_trail_distance=price_trail_distance)
     if position.side == Side.BUY.value:
-        if swing_low <= 0:
+        candidates: list[float] = []
+        if swing_low > 0:
+            candidates.append(_round_price(swing_low - trailing_buffer, digits))
+        if price_trail_distance > 0:
+            candidates.append(_round_price(current_price - price_trail_distance, digits))
+        if not candidates:
             return None
-        candidate_stop_loss = _round_price(swing_low - trailing_buffer, digits)
+        candidate_stop_loss = max(candidates)
         if candidate_stop_loss <= position.stop_loss:
             return None
         if candidate_stop_loss >= current_price:
             return None
         return TradeManagementResult(action=OrderAction.MODIFY.value, reason='TRADE_MANAGEMENT_TRAILING: stop loss raised to follow structure', stop_loss=candidate_stop_loss, take_profit=modify_take_profit)
     if position.side == Side.SELL.value:
-        if swing_high <= 0:
+        candidates = []
+        if swing_high > 0:
+            candidates.append(_round_price(swing_high + trailing_buffer, digits))
+        if price_trail_distance > 0:
+            candidates.append(_round_price(current_price + price_trail_distance, digits))
+        if not candidates:
             return None
-        candidate_stop_loss = _round_price(swing_high + trailing_buffer, digits)
+        candidate_stop_loss = min(candidates)
         if candidate_stop_loss >= position.stop_loss:
             return None
         if candidate_stop_loss <= current_price:
@@ -139,7 +152,7 @@ def evaluate_trade_management(*, position: OpenPosition | None, current_price: f
     partial_close_result = evaluate_partial_close(position=position, current_price=current_price, partial_close_progress_ratio=config.partial_close_progress_ratio, partial_close_volume_ratio=config.partial_close_volume_ratio, volume_step=config.volume_step)
     if partial_close_result is not None:
         return _gate_close_action(partial_close_result, allow_close=allow_close)
-    trailing_result = evaluate_trailing_stop(position=position, current_price=current_price, swing_low=swing_low, swing_high=swing_high, trailing_buffer=config.trailing_buffer, digits=digits, modify_take_profit=modify_take_profit)
+    trailing_result = evaluate_trailing_stop(position=position, current_price=current_price, swing_low=swing_low, swing_high=swing_high, trailing_buffer=config.trailing_buffer, digits=digits, modify_take_profit=modify_take_profit, price_trail_distance=config.price_trail_distance)
     if trailing_result is not None:
         return trailing_result
     breakeven_result = evaluate_breakeven(position=position, current_price=current_price, breakeven_progress_ratio=config.breakeven_progress_ratio, digits=digits, modify_take_profit=modify_take_profit)
