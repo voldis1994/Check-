@@ -74,13 +74,22 @@ class InstanceCycleResult:
 def build_trade_management_config(trade_params: RiskEngineTradeParams, *, trailing_buffer: float, settings: TradeManagementSettings) -> TradeManagementConfig:
     return TradeManagementConfig(breakeven_progress_ratio=settings.breakeven_progress_ratio, trailing_buffer=trailing_buffer, partial_close_progress_ratio=settings.partial_close_progress_ratio, partial_close_volume_ratio=settings.partial_close_volume_ratio, time_stop_max_bars=settings.time_stop_max_bars, volume_step=trade_params.volume_step)
 
-def resolve_open_position_from_state(instance_state: InstanceState) -> OpenPosition | None:
+def _synthetic_reference_take_profit(*, side: str, entry_price: float, stop_loss: float, reward_ratio: float) -> float:
+    if reward_ratio <= 0:
+        return 0.0
+    if side == Side.BUY.value and entry_price > stop_loss:
+        return entry_price + (entry_price - stop_loss) * reward_ratio
+    if side == Side.SELL.value and stop_loss > entry_price:
+        return entry_price - (stop_loss - entry_price) * reward_ratio
+    return 0.0
+
+def resolve_open_position_from_state(instance_state: InstanceState, *, reward_ratio: float | None=None) -> OpenPosition | None:
     if instance_state.open_ticket is None or instance_state.position_side is None or instance_state.position_volume is None or (instance_state.position_entry_price is None) or (instance_state.position_stop_loss is None):
         return None
     broker_take_profit = instance_state.position_take_profit or 0.0
-    management_take_profit = broker_take_profit if broker_take_profit > 0 else instance_state.position_reference_take_profit
-    if management_take_profit is None or management_take_profit <= 0:
-        return None
+    management_take_profit = broker_take_profit if broker_take_profit > 0 else instance_state.position_reference_take_profit or 0.0
+    if management_take_profit <= 0 and reward_ratio is not None:
+        management_take_profit = _synthetic_reference_take_profit(side=instance_state.position_side, entry_price=instance_state.position_entry_price, stop_loss=instance_state.position_stop_loss, reward_ratio=reward_ratio)
     return OpenPosition(ticket=instance_state.open_ticket, side=instance_state.position_side, entry_price=instance_state.position_entry_price, stop_loss=instance_state.position_stop_loss, take_profit=management_take_profit, volume=instance_state.position_volume, bars_open=instance_state.position_bars_open, partial_close_applied=instance_state.partial_close_applied)
 
 def resolve_trade_management_price(*, position_side: str, sensor_reading: SensorReading | None, market_bars: tuple[NormalizedMarketBar, ...]) -> float:
@@ -98,7 +107,7 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     resolved_trade_params = trade_params or build_risk_trade_params(runtime)
     if instance_memory.instance_state.open_ticket is not None:
         instance_memory.instance_state.increment_position_bars()
-    position = resolve_open_position_from_state(instance_memory.instance_state)
+    position = resolve_open_position_from_state(instance_memory.instance_state, reward_ratio=runtime.config.risk.reward_ratio)
     structure = resolve_structure_levels(market_bars, structure_lookback_bars=runtime.config.analysis.structure_lookback_bars)
     digits = instance_memory.instance_state.instrument_digits
     if digits <= 0 and market_bars:

@@ -284,6 +284,35 @@ def test_run_instance_trade_management_phase_returns_modify_for_breakeven_progre
     assert management_result.stop_loss > 1.098
     assert management_result.reason.startswith('TRADE_MANAGEMENT_')
 
+def test_resolve_open_position_without_broker_tp_uses_reference_or_synthetic() -> None:
+    state = InstanceState(instance=Instance(account_id='12345', symbol='EURUSD', magic=100001))
+    state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.01, entry_price=1.1, stop_loss=1.098, take_profit=0.0)
+    without_reward = resolve_open_position_from_state(state)
+    assert without_reward is not None
+    assert without_reward.take_profit == 0.0
+    synthetic = resolve_open_position_from_state(state, reward_ratio=2.0)
+    assert synthetic is not None
+    assert synthetic.take_profit == pytest.approx(1.104)
+    state.position_reference_take_profit = 1.105
+    referenced = resolve_open_position_from_state(state, reward_ratio=2.0)
+    assert referenced is not None
+    assert referenced.take_profit == pytest.approx(1.105)
+
+def test_run_instance_trade_management_phase_trails_without_broker_take_profit(tmp_path: Path) -> None:
+    from dataclasses import replace
+    from datetime import datetime, timezone
+    runtime, instance = _startup_runtime(tmp_path)
+    runtime.config = replace(runtime.config, trade_management=replace(runtime.config.trade_management, use_fixed_take_profit=False, allow_close=False))
+    instance_memory = runtime.memory.get_or_create(instance)
+    instance_memory.instance_state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.01, entry_price=1.1, stop_loss=1.098, take_profit=0.0)
+    instance_memory.instance_state.update_instrument(digits=5, point=1e-05, pip=0.0001)
+    market_bars = tuple((NormalizedMarketBar(time_utc=datetime(2026, 7, 7, 6, index, tzinfo=timezone.utc), open=1.1 + index * 0.0002, high=1.101 + index * 0.0002, low=1.0995 + index * 0.0002, close=1.1005 + index * 0.0002, volume=100.0, symbol='EURUSD', timeframe='M1', digits=5, point=1e-05, bar_index=index) for index in range(5)))
+    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime)
+    assert management_result.action == OrderAction.MODIFY.value
+    assert management_result.stop_loss is not None
+    assert management_result.stop_loss > 1.098
+    assert 'TRAILING' in management_result.reason or 'BREAKEVEN' in management_result.reason
+
 def test_run_instance_cycle_passes_trade_management_to_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runtime, instance = _startup_runtime(tmp_path)
     instance_memory = runtime.memory.get_or_create(instance)
