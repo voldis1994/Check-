@@ -856,6 +856,7 @@ class TradeJournalEntry:
     volume: float | None = None
     price: float | None = None
     ticket: int | None = None
+    stop_loss: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'trade_id', _require_non_empty_string(self.trade_id, 'trade_id'))
@@ -884,6 +885,8 @@ class TradeJournalEntry:
             object.__setattr__(self, 'price', _require_number(self.price, 'price'))
         if self.ticket is not None:
             object.__setattr__(self, 'ticket', _require_int(self.ticket, 'ticket', minimum=0))
+        if self.stop_loss is not None:
+            object.__setattr__(self, 'stop_loss', _require_number(self.stop_loss, 'stop_loss'))
 
     @property
     def instance_key(self) -> InstanceKey:
@@ -899,6 +902,8 @@ class TradeJournalEntry:
             data['price'] = self.price
         if self.ticket is not None:
             data['ticket'] = self.ticket
+        if self.stop_loss is not None:
+            data['stop_loss'] = self.stop_loss
         return data
 
 @dataclass(frozen=True)

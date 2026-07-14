@@ -256,7 +256,7 @@ def parse_trade_journal_line(line: str) -> TradeJournalEntry:
         raise _protocol_error('trade journal line is empty', label='trade_journal')
     payload = parse_json(line)
     kwargs: dict[str, Any] = {'trade_id': _require_key(payload, 'trade_id', 'trade_journal'), 'timestamp_utc': _require_key(payload, 'timestamp_utc', 'trade_journal'), 'account_id': _require_key(payload, 'account_id', 'trade_journal'), 'symbol': _require_key(payload, 'symbol', 'trade_journal'), 'magic': _require_key(payload, 'magic', 'trade_journal'), 'event': _require_key(payload, 'event', 'trade_journal'), 'command_id': _require_key(payload, 'command_id', 'trade_journal'), 'ack_status': _require_key(payload, 'ack_status', 'trade_journal'), 'reason': _require_key(payload, 'reason', 'trade_journal')}
-    for optional in ('side', 'volume', 'price', 'ticket'):
+    for optional in ('side', 'volume', 'price', 'ticket', 'stop_loss'):
         if optional in payload and payload[optional] is not None:
             kwargs[optional] = payload[optional]
     return _build_model(TradeJournalEntry, 'trade_journal', **kwargs)

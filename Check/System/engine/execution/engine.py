@@ -34,7 +34,7 @@ class ExecutionResult:
     state_updated: bool
 
 def build_trade_intent_params(order_command: OrderCommand) -> TradeIntentParams:
-    return TradeIntentParams(command_id=order_command.command_id, event=order_command.action, reason=order_command.reason, side=order_command.side, volume=order_command.volume, ticket=order_command.ticket)
+    return TradeIntentParams(command_id=order_command.command_id, event=order_command.action, reason=order_command.reason, side=order_command.side, volume=order_command.volume, ticket=order_command.ticket, stop_loss=order_command.stop_loss)
 
 def wait_for_ack(*, started_monotonic: float, ack_timeout_ms: int, ack_available: Callable[[], bool], monotonic_fn: Callable[[], float]=time.monotonic, sleep_fn: Callable[[float], None]=time.sleep, poll_interval_ms: int=50) -> bool:
     while not is_ack_timeout_elapsed(started_monotonic=started_monotonic, current_monotonic=monotonic_fn(), ack_timeout_ms=ack_timeout_ms):

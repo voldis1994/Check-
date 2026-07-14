@@ -43,7 +43,7 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
     status_position = find_status_position(status, instance)
     if instance_state.open_ticket is not None:
         if status_position is None or status_position.ticket != instance_state.open_ticket:
-            log_external_position_close(paths, instance, ticket=instance_state.open_ticket, side=instance_state.position_side, volume=instance_state.position_volume, timestamp_utc=timestamp_utc)
+            log_external_position_close(paths, instance, ticket=instance_state.open_ticket, side=instance_state.position_side, volume=instance_state.position_volume, timestamp_utc=timestamp_utc, price=instance_state.position_stop_loss or instance_state.position_entry_price, stop_loss=instance_state.position_stop_loss)
             instance_state.clear_position()
             changed = True
             external_close = True
