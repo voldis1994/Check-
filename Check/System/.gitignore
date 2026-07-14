@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .mypy_cache/
+.env
 data/clients/*
 !data/clients/.gitkeep
 data/logs/*
