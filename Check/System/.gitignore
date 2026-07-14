@@ -14,3 +14,5 @@ data/history/*
 !data/history/.gitkeep
 data/universe/*
 !data/universe/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
