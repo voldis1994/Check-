@@ -67,6 +67,8 @@ echo ============================================================
 echo.
 echo  Nākamais solis — palaid live:
 echo    PALAID.bat
+echo  Un atverī live dashboard ^(otrā CMD logā^):
+echo    DASHBOARD.bat
 echo.
 echo  MT4 (vienreiz):
 echo    scripts\copy_mql4_to_mt4.bat "C:\ceļš\uz\MT4\MQL4"
