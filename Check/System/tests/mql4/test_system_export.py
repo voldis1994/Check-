@@ -118,13 +118,10 @@ def test_system_file_exists_uses_get_file_attributes(export_source: str) -> None
     assert 'GetFileAttributesW' in body
 
 def test_system_read_text_file_uses_winapi_read(export_source: str) -> None:
-    body = mql_source.function_body(export_source, 'SYSTEM_ReadTextFileDll')
+    body = mql_source.function_body(export_source, 'SYSTEM_ReadTextFile')
     assert 'CreateFileW' in body
     assert 'ReadFile' in body
     assert 'CloseHandle' in body
-    wrapper = mql_source.function_body(export_source, 'SYSTEM_ReadTextFile')
-    assert 'SYSTEM_ReadTextFileDll' in wrapper
-    assert 'SYSTEM_ReadTextFileCommon' in wrapper
 
 def test_system_csv_contains_time_utc_detects_existing_timestamp() -> None:
     csv_text = 'time_utc,open\n2026-07-07T06:00:00.000Z,1.1\n'

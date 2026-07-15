@@ -134,7 +134,7 @@ bool SYSTEM_FileExists(const string path)
    return attributes != SYSTEM_INVALID_FILE_ATTRIBUTES;
 }
 
-bool SYSTEM_ReadTextFileDll(const string path, string &content)
+bool SYSTEM_ReadTextFile(const string path, string &content)
 {
    content = "";
    if(!SYSTEM_FileExists(path))
@@ -176,42 +176,6 @@ bool SYSTEM_ReadTextFileDll(const string path, string &content)
    return true;
 }
 
-bool SYSTEM_ReadTextFileCommon(const string absolute_path, string &content)
-{
-   content = "";
-   string relative = SYSTEM_ToCommonRelative(absolute_path);
-   if(!FileIsExist(relative, FILE_COMMON))
-      return true;
-
-   int handle = FileOpen(relative, FILE_BIN | FILE_READ | FILE_COMMON);
-   if(handle == INVALID_HANDLE)
-      return false;
-
-   int size = (int)FileSize(handle);
-   if(size <= 0)
-   {
-      FileClose(handle);
-      content = "";
-      return true;
-   }
-
-   uchar buffer[];
-   ArrayResize(buffer, size);
-   int got = FileReadArray(handle, buffer, 0, size);
-   FileClose(handle);
-   if(got <= 0)
-      return false;
-   content = CharArrayToString(buffer, 0, got, CP_UTF8);
-   return true;
-}
-
-bool SYSTEM_ReadTextFile(const string path, string &content)
-{
-   if(SYSTEM_ReadTextFileDll(path, content))
-      return true;
-   return SYSTEM_ReadTextFileCommon(path, content);
-}
-
 bool SYSTEM_CsvContainsTimeUtc(const string csv_content, const string time_utc)
 {
    return StringFind(csv_content, time_utc, 0) >= 0;
@@ -251,7 +215,7 @@ bool SYSTEM_ExportMarketBar(
    if(bar_shift < 0)
       return false;
    if(!SYSTEM_EnsureAccountDirectories(account_id))
-      Print("SYSTEM EnsureAccountDirectories (DLL) failed — continuing with Common\\Files fallback");
+      return false;
 
    datetime bar_time = iTime(symbol, PERIOD_M1, bar_shift);
    if(bar_time <= 0)
@@ -286,7 +250,7 @@ bool SYSTEM_ExportSensorReading(const string account_id, const string symbol, co
    if(StringLen(account_id) == 0 || StringLen(symbol) == 0)
       return false;
    if(!SYSTEM_EnsureAccountDirectories(account_id))
-      Print("SYSTEM EnsureAccountDirectories (DLL) failed — continuing with Common\\Files fallback");
+      return false;
 
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
    double point = MarketInfo(symbol, MODE_POINT);
