@@ -70,6 +70,7 @@ class InstanceCycleResult:
     ack_latency_ms: int | None = None
     performance_timings: CycleTimingSnapshot | None = None
     market_data_utc: str | None = None
+    skip_reason: str | None = None
 
 def build_trade_management_config(trade_params: RiskEngineTradeParams, *, trailing_buffer: float, settings: TradeManagementSettings, pip: float) -> TradeManagementConfig:
     price_trail_distance = settings.trailing_step_pips * pip if pip > 0 and settings.trailing_step_pips > 0 else 0.0
@@ -244,7 +245,7 @@ def _abort_cycle_timeout(*, runtime: LiveRuntime, instance: Instance, timeout_gu
         if instance_memory.spread_state.record is not None:
             instance_memory.spread_state.save(runtime.paths)
     timings = CycleTimingSnapshot(cycle_duration_ms=timeout_guard.elapsed_ms(), load_duration_ms=timeout_guard.elapsed_ms(), analysis_duration_ms=0, decision_duration_ms=0, io_wait_ms=timeout_guard.elapsed_ms())
-    return InstanceCycleResult(instance=instance, timestamp_utc=now_utc(), completed=False, error_logged=True, performance_timings=timings)
+    return InstanceCycleResult(instance=instance, timestamp_utc=now_utc(), completed=False, error_logged=True, performance_timings=timings, skip_reason=REASON_CYCLE_TIMEOUT)
 
 def _enforce_cycle_duration_limit(*, runtime: LiveRuntime, instance: Instance, cycle_duration_ms: int) -> bool:
     limit_ms = runtime.config.runtime.cycle_max_duration_ms
@@ -281,20 +282,20 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         loaded = load_instance_cycle_data(runtime.paths, instance, use_global_universe=use_global_universe, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context)
     except DataIOError as exc:
         _log_cycle_error(runtime.paths, instance, message='failed to load instance cycle data', context={'error': str(exc)})
-        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True)
+        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'load_failed:{exc}')
     load_duration_ms = monotonic_elapsed_ms(load_started)
     if timeout_guard.is_exceeded():
         return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
     market_result = validate_market_for_cycle(loaded.market_raw)
     if isinstance(market_result, ValidationResult):
         _log_cycle_error(runtime.paths, instance, message='market validation failed', context={'errors': list(market_result.errors)})
-        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True)
+        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'market_invalid:{";".join(market_result.errors[:2])}')
     market_bars = market_result
     runtime.memory.update_market_history(instance, market_bars)
     sensor_result = validate_sensor_for_cycle(loaded.sensor_raw)
     if isinstance(sensor_result, ValidationResult):
         _log_cycle_error(runtime.paths, instance, message='sensor validation failed', context={'errors': list(sensor_result.errors)})
-        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True)
+        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'sensor_invalid:{";".join(sensor_result.errors[:2])}')
     sensor_reading = sensor_result
     stale_threshold_ms = runtime.config.runtime.data_stale_threshold_ms
     from engine.core.monitoring import compute_data_freshness_ms, is_data_stale
@@ -305,11 +306,11 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     bar_freshness_ms = compute_data_freshness_ms(market_data_utc, resolved_timestamp)
     if is_data_stale(market_freshness_ms, stale_threshold_ms) or is_data_stale(sensor_freshness_ms, stale_threshold_ms):
         _log_stale_data_skip(runtime.paths, instance, market_freshness_ms=bar_freshness_ms, sensor_freshness_ms=sensor_freshness_ms, threshold_ms=stale_threshold_ms)
-        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, market_data_utc=market_data_utc)
+        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, market_data_utc=market_data_utc, skip_reason=f'stale_data:market_file={market_freshness_ms}ms sensor_file={sensor_freshness_ms}ms bar={bar_freshness_ms}ms threshold={stale_threshold_ms}ms')
     universe_result = validate_universe_for_cycle(loaded.universe_raw)
     if isinstance(universe_result, ValidationResult):
         _log_cycle_error(runtime.paths, instance, message='universe validation failed', context={'errors': list(universe_result.errors)})
-        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, market_data_utc=market_data_utc)
+        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, market_data_utc=market_data_utc, skip_reason=f'universe_invalid:{";".join(universe_result.errors[:2])}')
     universe = universe_result
     status_result = validate_status_for_cycle(loaded.status_raw)
     if not status_result.is_valid or status_result.record is None:
@@ -323,7 +324,7 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, market_bar_time_utc=market_data_utc)
         log_decision(runtime.paths, instance, decision_result, effective_risk, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
         _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
-        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, decision_result=decision_result, risk_engine_result=risk_engine_result, decision_journal_logged=True, market_data_utc=market_data_utc)
+        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, decision_result=decision_result, risk_engine_result=risk_engine_result, decision_journal_logged=True, market_data_utc=market_data_utc, skip_reason=f'status_invalid:{";".join(status_result.errors[:2])}')
     status = status_result.record
     reconcile_position_with_status(runtime.paths, instance, instance_memory.instance_state, status, timestamp_utc=resolved_timestamp)
     if timeout_guard.is_exceeded():
@@ -339,9 +340,9 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         decision_result, risk_engine_result, ai_meta, ai_query = run_instance_ai_risk_pipeline(decision_result=decision_result, instance_memory=instance_memory, status=status, market_bars=market_bars, runtime=runtime, spread_snapshot=spread_snapshot, trade_params=trade_params)
         analysis_duration_ms = monotonic_elapsed_ms(analysis_started)
         decision_duration_ms = analysis_duration_ms
-    except SystemError:
+    except SystemError as exc:
         analysis_duration_ms = monotonic_elapsed_ms(analysis_started)
-        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True)
+        return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'decision_error:{exc}')
     effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, market_bar_time_utc=market_data_utc)
     log_decision(runtime.paths, instance, decision_result, effective_risk, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
     if timeout_guard.is_exceeded():

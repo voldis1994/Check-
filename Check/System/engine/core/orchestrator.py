@@ -67,7 +67,7 @@ def run_instance_cycle_isolated(runtime: LiveRuntime, instance: Instance, *, use
     except Exception as exc:
         resolved_timestamp = timestamp_utc or now_utc()
         log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='instance cycle failed with unexpected error', context={'error': str(exc)})
-        return InstanceCycleResult(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True)
+        return InstanceCycleResult(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'unexpected_error:{exc}')
 
 def run_runtime_cycles(runtime: LiveRuntime, *, instances: Iterable[Instance] | None=None, use_global_universe: bool | None=None, timestamp_utc: str | None=None, cache: MutableMapping[str, Any] | None=None) -> OrchestratorCycleResult:
     if runtime.shutdown_requested:
