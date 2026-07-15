@@ -56,7 +56,7 @@ def test_system_atomic_write_text_calls_fsync_before_replace(tmp_path: Path, mon
     assert calls == ['fsync', 'replace']
 
 def test_system_atomic_write_text_uses_tmp_flush_and_move(io_source: str) -> None:
-    body = mql_source.function_body(io_source, 'SYSTEM_AtomicWriteText')
+    body = mql_source.function_body(io_source, 'SYSTEM_AtomicWriteTextDll')
     assert 'SYSTEM_TmpPathFor' in body
     assert 'CreateFileW' in body
     assert 'WriteFile' in body
@@ -64,7 +64,11 @@ def test_system_atomic_write_text_uses_tmp_flush_and_move(io_source: str) -> Non
     assert 'CloseHandle' in body
     assert 'MoveFileExW' in body
     assert 'SYSTEM_EnsureDirectory' in body
+    wrapper = mql_source.function_body(io_source, 'SYSTEM_AtomicWriteText')
+    assert 'SYSTEM_AtomicWriteTextDll' in wrapper
+    assert 'SYSTEM_AtomicWriteTextCommon' in wrapper
+    assert 'FILE_COMMON' in io_source
 
 def test_system_atomic_write_text_ensures_parent_directory_before_write(io_source: str) -> None:
-    body = mql_source.function_body(io_source, 'SYSTEM_AtomicWriteText')
+    body = mql_source.function_body(io_source, 'SYSTEM_AtomicWriteTextDll')
     assert 'SYSTEM_ParentDirectory' in body

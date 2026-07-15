@@ -29,10 +29,10 @@ def test_system_ea_requires_m1_timeframe_on_init(ea_source: str) -> None:
 def test_system_ea_initializes_paths_on_init(ea_source: str) -> None:
     assert 'SYSTEM_InitPaths()' in ea_source
 
-def test_system_ea_exports_on_new_m1_bar(ea_source: str) -> None:
-    assert 'SYSTEM_IsNewM1Bar' in ea_source
-    assert 'SYSTEM_ExportMarketAndSensor' in ea_source
-    assert 'g_last_exported_bar_time' in ea_source
+def test_system_ea_exports_immediately_and_on_timer(ea_source: str) -> None:
+    assert 'SYSTEM_RunExportCycle' in ea_source
+    assert 'EventSetTimer' in ea_source
+    assert 'OnTimer' in ea_source
 
 def test_system_ea_exports_status_and_universe_on_new_m1_bar(ea_source: str) -> None:
     assert 'SYSTEM_ExportStatus' in ea_source

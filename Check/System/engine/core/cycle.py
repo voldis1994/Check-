@@ -142,6 +142,8 @@ def resolve_use_global_universe(paths: SystemPaths) -> bool:
     return paths.universe_file.exists()
 
 def load_instance_cycle_data(paths: SystemPaths, instance: Instance, *, use_global_universe: bool | None=None, cache: MutableMapping[str, Any] | None=None, retry_policy: RetryPolicy | None=None, retry_alert_context: RetryAlertContext | None=None) -> InstanceCycleData:
+    from engine.core.mt4_bridge import mirror_common_bridge_to_deployment
+    mirror_common_bridge_to_deployment(paths)
     resolved_use_global = resolve_use_global_universe(paths) if use_global_universe is None else use_global_universe
     return InstanceCycleData(market_raw=load_market_data(paths, instance, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context), sensor_raw=load_sensor_data(paths, instance, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context), status_raw=load_status_data(paths, instance.account_id, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context), universe_raw=load_universe_data(paths, instance.account_id, use_global_universe=resolved_use_global, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context))
 
