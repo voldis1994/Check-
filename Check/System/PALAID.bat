@@ -10,18 +10,18 @@ echo ============================================================
 echo.
 
 if not exist "%ROOT%\config\system.json" (
-  echo [KLUDA] Šeit nav SYSTEM projekts. Atver:
+  echo [KLUDA] Seit nav SYSTEM projekts. Atver:
   echo   C:\Check\System
   pause
   exit /b 1
 )
 
 if not exist "%ROOT%\.venv\Scripts\python.exe" (
-  echo Vispirms uzstāda... ^(UZSTADIT.bat^)
+  echo Vispirms uzstada... ^(UZSTADIT.bat^)
   call "%ROOT%\UZSTADIT.bat" --quiet
   if errorlevel 1 (
     echo.
-    echo Uzstādīšana neizdevās. Palaid: UZSTADIT.bat
+    echo Uzstadisana neizdevas. Palaid: UZSTADIT.bat
     pause
     exit /b 1
   )
@@ -31,13 +31,23 @@ set "PY=%ROOT%\.venv\Scripts\python.exe"
 "%PY%" -m pip install -r "%ROOT%\requirements.txt" -q
 if errorlevel 1 goto :fail
 
-echo Sinhronizē ceļus...
+echo Sinhronize celus...
 "%PY%" "%ROOT%\scripts\sync_paths.py" --root "%ROOT%"
 if errorlevel 1 goto :fail
 
+echo.
+echo ------------------------------------------------------------
+echo  PIRMS STARTA PARBAUDI MT4:
+echo    1. SYSTEM_EA uz EURUSD M1
+echo    2. AutoTrading IESLEGTS
+echo    3. SystemRootPath = %ROOT%
+echo  Ja nav failu data\clients\231054\market_*.csv,
+echo  Python gaidis ~90s, tad startes ar SKIP lidz EA raksta.
+echo ------------------------------------------------------------
+echo.
 echo SYSTEM root: %ROOT%
 echo.
-echo Palaižu engine... ^(Ctrl+C lai apturētu^)
+echo Palauzu engine... ^(Ctrl+C lai apturetu^)
 echo.
 
 "%PY%" -u "%ROOT%\run_live.py"
@@ -49,6 +59,6 @@ exit /b %EXIT_CODE%
 
 :fail
 echo.
-echo Palaišana neizdevās.
+echo Palaisana neizdevas.
 pause
 exit /b 1

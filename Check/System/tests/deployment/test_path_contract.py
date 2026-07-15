@@ -92,6 +92,7 @@ def test_prepare_deployment_root_aligns_config_mql4_and_directories(tmp_path: Pa
     assert report.passed
     assert (tmp_path / 'data' / 'clients').is_dir()
     assert (tmp_path / 'data' / 'logs').is_dir()
+    assert (tmp_path / 'data' / 'clients' / '12345').is_dir()
     assert read_config_root_path(tmp_path / 'config' / 'system.json') == str(tmp_path)
     assert read_mql4_compiled_root(tmp_path) == str(tmp_path)
 
