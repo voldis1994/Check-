@@ -146,12 +146,20 @@ def evaluate_trade_management(*, position: OpenPosition | None, current_price: f
     if position is None:
         return _no_action()
     modify_take_profit = position.take_profit if use_fixed_take_profit else 0.0
+    # Close actions run first only when allowed. If allow_close=false (trail-only),
+    # gated closes must NOT return early — otherwise trailing/BE die after time_stop fires.
+    # Live bug: position_bars_open increments every cycle (~1s), so time_stop_max_bars=30
+    # blocked all MODIFY trailing after ~30 seconds with allow_close=false.
     time_stop_result = evaluate_time_stop(position=position, time_stop_max_bars=config.time_stop_max_bars)
     if time_stop_result is not None:
-        return _gate_close_action(time_stop_result, allow_close=allow_close)
+        gated_time_stop = _gate_close_action(time_stop_result, allow_close=allow_close)
+        if gated_time_stop.action != OrderAction.NONE.value:
+            return gated_time_stop
     partial_close_result = evaluate_partial_close(position=position, current_price=current_price, partial_close_progress_ratio=config.partial_close_progress_ratio, partial_close_volume_ratio=config.partial_close_volume_ratio, volume_step=config.volume_step)
     if partial_close_result is not None:
-        return _gate_close_action(partial_close_result, allow_close=allow_close)
+        gated_partial = _gate_close_action(partial_close_result, allow_close=allow_close)
+        if gated_partial.action != OrderAction.NONE.value:
+            return gated_partial
     trailing_result = evaluate_trailing_stop(position=position, current_price=current_price, swing_low=swing_low, swing_high=swing_high, trailing_buffer=config.trailing_buffer, digits=digits, modify_take_profit=modify_take_profit, price_trail_distance=config.price_trail_distance)
     if trailing_result is not None:
         return trailing_result
