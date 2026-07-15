@@ -83,6 +83,12 @@ def test_startup_with_require_mt4_exports_succeeds_when_exports_present(tmp_path
     runtime = startup(root_path=root, config_path=config_path, require_mt4_exports=True)
     assert isinstance(runtime, LiveRuntime)
 
+def test_startup_soft_continues_without_mt4_after_wait(tmp_path: Path) -> None:
+    root, config_path = _prepare_runtime_root(tmp_path)
+    runtime = startup(root_path=root, config_path=config_path, require_mt4_exports=False, wait_for_mt4_seconds=0.1)
+    assert isinstance(runtime, LiveRuntime)
+    shutdown(runtime)
+
 def test_validate_root_path_requires_existing_directory(tmp_path: Path) -> None:
     paths = SystemPaths(tmp_path)
     validate_root_path(paths)

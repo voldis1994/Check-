@@ -24,13 +24,19 @@ def setup_only(project_root: Path | None = None) -> int:
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == '--setup-only':
         return setup_only()
-    wait_for_mt4_seconds = 30.0
-    require_mt4_exports = True
+    # Wait for MT4 EA to write market_*.csv. Do NOT hard-exit by default —
+    # missing exports used to cause Exit code 1 loops after every reinstall.
+    wait_for_mt4_seconds = 90.0
+    require_mt4_exports = False
     extra_args = sys.argv[1:]
     if '--no-wait-mt4' in extra_args:
         wait_for_mt4_seconds = 0.0
         extra_args = [arg for arg in extra_args if arg != '--no-wait-mt4']
+    if '--require-mt4' in extra_args:
+        require_mt4_exports = True
+        extra_args = [arg for arg in extra_args if arg != '--require-mt4']
     if '--allow-no-mt4' in extra_args:
+        # backward-compatible alias: soft start (already default)
         require_mt4_exports = False
         extra_args = [arg for arg in extra_args if arg != '--allow-no-mt4']
     if extra_args:

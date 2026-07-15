@@ -241,5 +241,8 @@ def prepare_deployment_root(root: str | Path) -> Path:
     config = load_system_config(deployment_root / CONFIG_RELATIVE_PATH, system_paths=bootstrap_paths)
     paths = build_system_paths(config, runtime_root=deployment_root)
     paths.ensure_directories()
+    for definition in config.instances:
+        if definition.enabled:
+            paths.ensure_account_directories(definition.account_id)
     sync_config_instances_from_clients(deployment_root)
     return deployment_root

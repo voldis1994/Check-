@@ -70,7 +70,16 @@ def format_mt4_missing_exports_message(paths: SystemPaths, instances: Iterable[I
         configured_accounts = sorted({instance.account_id for instance in instance_list})
         lines.append('')
         lines.append(f'configured account_id(s): {", ".join(configured_accounts)}')
-    lines.extend(['', 'Fix:', '  1. Start MT4 with SYSTEM_EA attached', f'  2. Set EA SystemRootPath to {paths.root}', '  3. Recompile EA after path changes (scripts/sync_paths.py)', '  4. Run: python tools/show_paths.py'])
+    lines.extend([
+        '',
+        'Fix (MT4 must WRITE these files — chart moving is not enough):',
+        '  1. MT4 open, SYSTEM_EA attached to EURUSD M1',
+        '  2. AutoTrading ON (green button)',
+        f'  3. EA Inputs -> SystemRootPath = {paths.root}',
+        '  4. Allow DLL imports if prompted; recompile EA after sync_paths',
+        '  5. Run: python tools\\show_paths.py',
+        '  6. Confirm market_EURUSD_100001.csv appears under data\\clients\\231054',
+    ])
     return '\n'.join(lines)
 
 def validate_mt4_runtime_ready(paths: SystemPaths, instances: Iterable[Instance]) -> None:
@@ -91,16 +100,22 @@ def wait_for_mt4_exports(paths: SystemPaths, instances: Iterable[Instance], *, w
         validate_mt4_runtime_ready(paths, instances)
         return
     deadline = time.monotonic() + wait_seconds
+    printed_hint = False
     while True:
         try:
             validate_mt4_runtime_ready(paths, instances)
+            if printed_hint:
+                print('MT4 exports detected — starting live engine.', flush=True)
             return
         except ConfigurationError:
-            if time.monotonic() >= deadline:
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0:
                 validate_mt4_runtime_ready(paths, instances)
-            print(format_mt4_missing_exports_message(paths, instances), file=sys.stderr)
-            print(f'waiting for MT4 exports ({int(max(0.0, deadline - time.monotonic()))}s remaining)...', file=sys.stderr)
-            time.sleep(poll_interval_seconds)
+            if not printed_hint:
+                print(format_mt4_missing_exports_message(paths, instances), file=sys.stderr)
+                printed_hint = True
+            print(f'waiting for MT4 exports ({int(remaining)}s remaining)...', file=sys.stderr, flush=True)
+            time.sleep(min(poll_interval_seconds, max(0.5, remaining)))
 
 def validate_root_path(paths: SystemPaths) -> None:
     if not paths.root.exists():
@@ -225,11 +240,23 @@ def startup(*, root_path: str | Path | None=None, config_path: str | Path | None
     paths = build_system_paths(config, runtime_root=bootstrap_paths.root)
     validate_root_path(paths)
     paths.ensure_directories()
+    for definition in config.instances:
+        if definition.enabled:
+            paths.ensure_account_directories(definition.account_id)
     system_logger = setup_system_logger(paths, level=config.logging.level, format_name=config.logging.format)
     log_event(system_logger, level='INFO', module=MODULE_NAME, message='startup begin')
     instances = discover_instances(config, paths)
-    if require_mt4_exports:
-        wait_for_mt4_exports(paths, instances, wait_seconds=wait_for_mt4_seconds)
+    if wait_for_mt4_seconds > 0:
+        try:
+            wait_for_mt4_exports(paths, instances, wait_seconds=wait_for_mt4_seconds)
+        except ConfigurationError as exc:
+            if require_mt4_exports:
+                raise
+            print(exc.message, file=sys.stderr)
+            print('WARNING: starting without MT4 market exports. Cycles will SKIP until SYSTEM_EA writes files.', file=sys.stderr, flush=True)
+            log_event(system_logger, level='WARNING', module=MODULE_NAME, message='startup continuing without MT4 exports')
+    elif require_mt4_exports:
+        validate_mt4_runtime_ready(paths, instances)
     memory = load_runtime_memory(paths, instances, lookback_bars=config.analysis.lookback_bars)
     spread_models = build_spread_models(memory)
     removed_hashes = invalidate_runtime_cache(paths, instances)
