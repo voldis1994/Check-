@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 import signal
+import socket
 import sys
 import time
 import webbrowser
@@ -59,7 +60,29 @@ def refresh_dashboard(runtime: DashboardRuntime, *, timestamp_utc: str | None=No
     return render_dashboard(snapshot, output=output, clear=clear)
 
 
-def run_dashboard_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[DashboardRuntime], None] | None=None, sleep_fn: Callable[[float], None]=time.sleep, output: Callable[[str], None] | None=None, clear: bool=False, enable_web: bool=False, web_host: str='127.0.0.1', web_port: int=DEFAULT_PORT, open_browser: bool=False) -> int:
+def _resolve_lan_ip() -> str | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(('8.8.8.8', 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return None
+
+
+def _print_dashboard_urls(*, web_host: str, web_port: int, bind_lan: bool) -> None:
+    local_url = f'http://127.0.0.1:{web_port}/'
+    print(f'SYSTEM web dashboard (PC): {local_url}', flush=True)
+    if bind_lan:
+        lan_ip = _resolve_lan_ip()
+        if lan_ip:
+            print(f'SYSTEM web dashboard (telefons, tas pats WiFi): http://{lan_ip}:{web_port}/', flush=True)
+        else:
+            print('SYSTEM web dashboard (telefons): neizdevas noteikt LAN IP — izmanto ipconfig', flush=True)
+    if web_host not in {'127.0.0.1', '0.0.0.0'}:
+        print(f'SYSTEM web dashboard (bind): http://{web_host}:{web_port}/', flush=True)
+
+
+def run_dashboard_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[DashboardRuntime], None] | None=None, sleep_fn: Callable[[float], None]=time.sleep, output: Callable[[str], None] | None=None, clear: bool=False, enable_web: bool=False, web_host: str='127.0.0.1', web_port: int=DEFAULT_PORT, open_browser: bool=False, bind_lan: bool=False) -> int:
     try:
         runtime = startup_dashboard(root_path=root_path, config_path=config_path)
     except ConfigurationError as exc:
@@ -78,16 +101,16 @@ def run_dashboard_main(*, root_path: str | Path | None=None, config_path: str | 
     if enable_web:
         def _provider():
             return load_dashboard_snapshot(runtime.config, runtime.paths)
+        bind_host = '0.0.0.0' if bind_lan else web_host
         try:
-            server = start_dashboard_server(provider=_provider, host=web_host, port=web_port)
+            server = start_dashboard_server(provider=_provider, host=bind_host, port=web_port)
         except OSError as exc:
-            print(f'dashboard web bind failed on {web_host}:{web_port}: {exc}', file=sys.stderr)
+            print(f'dashboard web bind failed on {bind_host}:{web_port}: {exc}', file=sys.stderr)
             return STARTUP_ERROR_EXIT_CODE
-        url = f'http://{web_host}:{web_port}/'
-        print(f'SYSTEM web dashboard: {url}', flush=True)
+        _print_dashboard_urls(web_host=bind_host, web_port=web_port, bind_lan=bind_lan)
         if open_browser:
             try:
-                webbrowser.open(url)
+                webbrowser.open(f'http://127.0.0.1:{web_port}/')
             except Exception:
                 pass
 
@@ -114,6 +137,7 @@ def _parse_args(argv: list[str] | None=None) -> argparse.Namespace:
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help=f'web port (default {DEFAULT_PORT})')
     parser.add_argument('--host', default='127.0.0.1', help='web bind host')
     parser.add_argument('--open-browser', action='store_true', help='open default browser to the web dashboard')
+    parser.add_argument('--bind-lan', action='store_true', help='listen on all interfaces so phone on same WiFi can connect')
     parser.add_argument('--no-clear', action='store_true', help='do not clear console between refreshes')
     return parser.parse_args(argv)
 
@@ -127,7 +151,7 @@ def main(argv: list[str] | None=None) -> int:
         return STARTUP_ERROR_EXIT_CODE
     prepare_deployment_root(project_root)
     output = print if args.no_clear else live_console_printer
-    return run_dashboard_main(root_path=project_root, config_path=config_path, output=output, enable_web=args.web or args.open_browser, web_host=args.host, web_port=args.port, open_browser=args.open_browser)
+    return run_dashboard_main(root_path=project_root, config_path=config_path, output=output, enable_web=args.web or args.open_browser or args.bind_lan, web_host=args.host, web_port=args.port, open_browser=args.open_browser, bind_lan=args.bind_lan)
 
 
 if __name__ == '__main__':

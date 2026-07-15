@@ -116,3 +116,11 @@ def test_dashboard_modules_forbid_trading_engine_imports() -> None:
                 for root in forbidden:
                     if node.module.startswith(root):
                         pytest.fail(f'{module_name} imports forbidden module {node.module}')
+
+def test_dashboard_bind_lan_prints_phone_url(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    import dashboard as dashboard_module
+    monkeypatch.setattr(dashboard_module, '_resolve_lan_ip', lambda: '192.168.0.55')
+    dashboard_module._print_dashboard_urls(web_host='0.0.0.0', web_port=8765, bind_lan=True)
+    captured = capsys.readouterr().out
+    assert '127.0.0.1:8765' in captured
+    assert '192.168.0.55:8765' in captured
