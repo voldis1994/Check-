@@ -5,7 +5,7 @@ set "ROOT=%CD%"
 
 echo.
 echo ============================================================
-echo   SYSTEM - LIVE COMMAND CENTER
+echo   SYSTEM - LIVE COMMAND CENTER  (PC + TELEFONS)
 echo ============================================================
 echo.
 
@@ -18,7 +18,7 @@ if not exist "%ROOT%\config\system.json" (
 
 if not exist "%ROOT%\dashboard.py" (
   echo [KLUDA] Nav dashboard.py
-  echo Atjaunini mapi no GitHub main vai lejupielade jauno ZIP.
+  echo Atjaunini mapi no GitHub main.
   pause
   exit /b 1
 )
@@ -44,13 +44,15 @@ if errorlevel 1 goto :fail
 
 echo.
 echo ------------------------------------------------------------
-echo  PC:       http://127.0.0.1:8765/
-echo  Telefons: http://TAVS_LAN_IP:8765/  ^(skaties zemak CMD^)
-echo            127.0.0.1 telefonaa NESTRADA - tas ir pats telefons!
-echo  Palaid PARALELI ari: PALAID.bat
+echo  DATORA PARLUKS:   http://127.0.0.1:8765/
+echo  TELEFONS:         LAN URL, ko Python izdrukas zemak
+echo                    (PARBAUDI PC un telefons ir TADAS PASAS WiFi)
+echo  QR:               atver dashboard -^> cilne PHONE
+echo  127.0.0.1 telefona NESTRADA!
+echo  Paraleli palaid:  PALAID.bat
 echo ------------------------------------------------------------
 echo.
-echo Palauzu dashboard... ^(Ctrl+C lai apturetu^)
+echo Palauzu mobile dashboard... ^(Ctrl+C aptur^)
 echo.
 
 "%PY%" -u "%ROOT%\dashboard.py" --web --open-browser --bind-lan --port 8765

@@ -97,11 +97,20 @@ def test_web_handler_serves_html_and_snapshot(tmp_path: Path) -> None:
     probe = Probe()
     probe.do_GET()
     assert captured['code'] == 200
-    assert b'Command Center' in captured['body']
+    assert b'SYSTEM' in captured['body']
+    assert b'phone' in captured['body'].lower() or b'LIVE' in captured['body']
     probe.path = '/api/snapshot'
     probe.do_GET()
     assert captured['code'] == 200
     assert b'generated_at_utc' in captured['body']
+    probe.path = '/manifest.webmanifest'
+    probe.do_GET()
+    assert captured['code'] == 200
+    assert b'short_name' in captured['body']
+    probe.path = '/icon.svg'
+    probe.do_GET()
+    assert captured['code'] == 200
+    assert b'<svg' in captured['body']
 
 def test_dashboard_modules_forbid_trading_engine_imports() -> None:
     import ast
