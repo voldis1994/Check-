@@ -75,10 +75,12 @@ def format_mt4_missing_exports_message(paths: SystemPaths, instances: Iterable[I
         'Fix (MT4 must WRITE these files — chart moving is not enough):',
         '  1. MT4 open, SYSTEM_EA attached to EURUSD M1',
         '  2. AutoTrading ON (green button)',
-        f'  3. EA Inputs -> SystemRootPath = {paths.root}',
-        '  4. Allow DLL imports if prompted; recompile EA after sync_paths',
-        '  5. Run: python tools\\show_paths.py',
-        '  6. Confirm market_EURUSD_100001.csv appears under data\\clients\\231054',
+        '  3. EA Properties -> Common -> Allow DLL imports = YES',
+        f'  4. EA Inputs -> SystemRootPath = {paths.root}',
+        '  5. Recompile SYSTEM_EA.mq4 in MetaEditor after update',
+        '  6. Experts tab: look for \"SYSTEM export OK\"',
+        '  7. Fallback path (no DLL): %APPDATA%\\MetaQuotes\\Terminal\\Common\\Files\\CheckSystem\\',
+        '  8. Run: python tools\\show_paths.py',
     ])
     return '\n'.join(lines)
 
@@ -96,12 +98,15 @@ def validate_mt4_runtime_ready(paths: SystemPaths, instances: Iterable[Instance]
         raise _config_error(format_mt4_missing_exports_message(paths, instance_list), clients_dir=str(paths.clients_dir))
 
 def wait_for_mt4_exports(paths: SystemPaths, instances: Iterable[Instance], *, wait_seconds: float, poll_interval_seconds: float=2.0) -> None:
+    from engine.core.mt4_bridge import mirror_common_bridge_to_deployment
     if wait_seconds <= 0:
+        mirror_common_bridge_to_deployment(paths)
         validate_mt4_runtime_ready(paths, instances)
         return
     deadline = time.monotonic() + wait_seconds
     printed_hint = False
     while True:
+        mirror_common_bridge_to_deployment(paths)
         try:
             validate_mt4_runtime_ready(paths, instances)
             if printed_hint:
