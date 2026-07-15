@@ -135,6 +135,14 @@ def test_evaluate_trade_management_can_return_trailing_modify() -> None:
     assert 'TRAILING' in result.reason
     assert result.take_profit == pytest.approx(0.0)
 
+
+def test_evaluate_trade_management_trails_when_time_stop_gated_by_allow_close() -> None:
+    config = TradeManagementConfig(breakeven_progress_ratio=0.95, trailing_buffer=0.0002, partial_close_progress_ratio=0.95, partial_close_volume_ratio=0.5, time_stop_max_bars=30, volume_step=0.01, price_trail_distance=0.0005)
+    position = _buy_position(bars_open=60, stop_loss=1.098)
+    result = evaluate_trade_management(position=position, current_price=1.106, swing_low=1.102, swing_high=1.108, config=config, digits=5, allow_close=False, use_fixed_take_profit=False)
+    assert result.action == OrderAction.MODIFY.value
+    assert 'TRAILING' in result.reason
+
 def test_trade_management_never_outputs_buy_or_sell_actions() -> None:
     scenarios: list[TradeManagementResult] = []
     scenarios.append(evaluate_trade_management(position=_buy_position(bars_open=120), current_price=1.102, swing_low=1.101, swing_high=1.104, config=_config(), digits=5))
