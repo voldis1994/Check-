@@ -12,12 +12,14 @@ _TOP_LEVEL_FIELDS = frozenset({'schema_version', 'system', 'paths', 'runtime', '
 _SYSTEM_FIELDS = frozenset({'name', 'root_path', 'timeframe'})
 _PATHS_FIELDS = frozenset({'clients', 'logs', 'cache', 'history', 'universe'})
 _RUNTIME_FIELDS = frozenset({'cycle_interval_ms', 'ack_timeout_ms', 'retry_max', 'retry_delay_ms', 'data_stale_threshold_ms', 'cycle_max_duration_ms', 'metrics_interval_ms', 'auto_discover_instances', 'execute_entries_on_closed_bar_only'})
-_INSTANCE_FIELDS = frozenset({'account_id', 'symbol', 'magic', 'enabled'})
+_INSTANCE_REQUIRED_FIELDS = frozenset({'account_id', 'symbol', 'magic', 'enabled'})
+_INSTANCE_OPTIONAL_FIELDS = frozenset({'trailing_mode', 'trailing_step_pips', 'trailing_lookback_bars', 'trailing_atr_mult', 'trailing_atr_period', 'trailing_sl_fraction', 'trailing_spread_floor_mult', 'stop_loss_buffer'})
+_INSTANCE_FIELDS = _INSTANCE_REQUIRED_FIELDS | _INSTANCE_OPTIONAL_FIELDS
 _RISK_FIELDS = frozenset({'max_open_positions_per_instance', 'max_daily_loss_percent', 'max_drawdown_percent', 'daily_loss_limit_enabled', 'drawdown_limit_enabled', 'reward_ratio', 'max_risk_per_trade_percent', 'max_stop_loss_pips', 'volume_step', 'fixed_lot_volume'})
 _ANALYSIS_FIELDS = frozenset({'lookback_bars', 'structure_lookback_bars', 'spread_relative_threshold', 'volatility_relative_threshold', 'block_high_impact_news', 'stop_loss_buffer', 'block_ranging_chase_entries', 'ranging_extreme_threshold', 'ranging_recent_momentum_bars', 'weights'})
 _ANALYSIS_WEIGHT_FIELDS = frozenset({'momentum', 'trend', 'structure', 'pressure', 'behavior', 'impact', 'context'})
 _JOURNAL_FIELDS = frozenset({'retention_days'})
-_TRADE_MANAGEMENT_FIELDS = frozenset({'enabled', 'allow_close', 'use_fixed_take_profit', 'breakeven_progress_ratio', 'partial_close_progress_ratio', 'partial_close_volume_ratio', 'time_stop_max_bars', 'trailing_lookback_bars', 'trailing_step_pips'})
+_TRADE_MANAGEMENT_FIELDS = frozenset({'enabled', 'allow_close', 'use_fixed_take_profit', 'breakeven_progress_ratio', 'partial_close_progress_ratio', 'partial_close_volume_ratio', 'time_stop_max_bars', 'trailing_lookback_bars', 'trailing_step_pips', 'trailing_mode', 'trailing_atr_mult', 'trailing_atr_period', 'trailing_sl_fraction', 'trailing_spread_floor_mult'})
 _DASHBOARD_FIELDS = frozenset({'refresh_interval_ms'})
 _LOGGING_FIELDS = frozenset({'level', 'format'})
 _AI_FIELDS = frozenset({'mode', 'fail_closed', 'reject_action', 'timeout_ms', 'retry_max', 'retry_delay_ms'})
@@ -32,6 +34,16 @@ def _ensure_mapping(value: Any, field_name: str) -> dict[str, Any]:
 
 def _assert_exact_fields(data: dict[str, Any], expected: frozenset[str], field_name: str) -> None:
     unknown = sorted(set(data.keys()) - expected)
+    if unknown:
+        raise _config_error(f'{field_name} contains unsupported fields', field=field_name, unknown_fields=unknown)
+
+def _assert_required_fields(data: dict[str, Any], required: frozenset[str], field_name: str) -> None:
+    missing = sorted(required - set(data.keys()))
+    if missing:
+        raise _config_error(f'{field_name} is missing required fields', field=field_name, missing_fields=missing)
+
+def _assert_allowed_fields(data: dict[str, Any], allowed: frozenset[str], field_name: str) -> None:
+    unknown = sorted(set(data.keys()) - allowed)
     if unknown:
         raise _config_error(f'{field_name} contains unsupported fields', field=field_name, unknown_fields=unknown)
 
@@ -63,7 +75,8 @@ def _assert_schema_shape(payload: dict[str, Any]) -> None:
         raise _config_error('instances must be a list', field='instances', value_type=type(instances).__name__)
     for index, item in enumerate(instances):
         item_mapping = _ensure_mapping(item, f'instances[{index}]')
-        _assert_exact_fields(item_mapping, _INSTANCE_FIELDS, f'instances[{index}]')
+        _assert_required_fields(item_mapping, _INSTANCE_REQUIRED_FIELDS, f'instances[{index}]')
+        _assert_allowed_fields(item_mapping, _INSTANCE_FIELDS, f'instances[{index}]')
     _assert_exact_fields(_ensure_mapping(payload['risk'], 'risk'), _RISK_FIELDS, 'risk')
     analysis_mapping = _ensure_mapping(payload['analysis'], 'analysis')
     _assert_exact_fields(analysis_mapping, _ANALYSIS_FIELDS, 'analysis')

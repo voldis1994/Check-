@@ -104,9 +104,9 @@ def test_e2e_open_partial_close_cycle_reduces_volume(tmp_path: Path, monkeypatch
     assert state.position_volume is not None
     original_volume = state.position_volume
     if state.position_side == Side.BUY.value:
-        target_close = state.position_entry_price + 0.75 * (state.position_take_profit - state.position_entry_price)
+        target_close = state.position_entry_price + 0.82 * (state.position_take_profit - state.position_entry_price)
     else:
-        target_close = state.position_entry_price - 0.75 * (state.position_entry_price - state.position_take_profit)
+        target_close = state.position_entry_price - 0.82 * (state.position_entry_price - state.position_take_profit)
     partial_timestamp = '2026-07-07T06:03:00.000Z'
     simulator.export_tick(instance, market_scenario='bullish', timestamp_utc=partial_timestamp, close_override=target_close)
     partial_result = run_instance_cycle(runtime, instance, use_global_universe=False, timestamp_utc=partial_timestamp)
