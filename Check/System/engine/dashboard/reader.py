@@ -83,6 +83,11 @@ class InstanceDashboardView:
     status_age_ms: int | None = None
     sparkline: str = ''
     last_close: float | None = None
+    ai_available: bool | None = None
+    ai_fallback_used: bool | None = None
+    system_decision_before_ai: str | None = None
+    decision_after_ai: str | None = None
+    exec_stale: bool = False
 
 @dataclass(frozen=True)
 class DashboardSnapshot:
@@ -270,6 +275,17 @@ def _collect_instance_actions(paths: SystemPaths, instance: Instance) -> list[Ro
         events.append(RobotActionEvent(timestamp_utc=stamp, kind='ACK', summary=ack_status, detail=ack_command_id or '', account_id=instance.account_id, symbol=instance.symbol))
     return events
 
+
+def is_stale_failed_open(*, open_ticket: int | None, last_trade_event: str | None, last_trade_ack: str | None, last_trade_reason: str | None) -> bool:
+    if open_ticket is not None:
+        return False
+    if last_trade_event != 'OPEN':
+        return False
+    if last_trade_ack in {'FAILED', 'REJECTED', 'TIMEOUT'}:
+        return True
+    reason = last_trade_reason or ''
+    return 'ACK_TIMEOUT' in reason
+
 def build_action_feed(paths: SystemPaths, instances: tuple[Instance, ...], *, limit: int=ACTION_FEED_LIMIT) -> tuple[RobotActionEvent, ...]:
     events: list[RobotActionEvent] = []
     for instance in instances:
@@ -299,7 +315,64 @@ def read_instance_dashboard_view(paths: SystemPaths, instance: Instance) -> Inst
         if current_spread is None:
             current_spread = spread_state.record.current_spread
     monitoring = load_instance_metrics(paths, instance)
-    return InstanceDashboardView(instance=instance, last_decision=decision_entry.decision if decision_entry is not None else instance_state.last_decision, last_reason=decision_entry.reason if decision_entry is not None else instance_state.last_reason, risk_result=decision_entry.risk_result if decision_entry is not None else None, risk_reason=decision_entry.risk_reason if decision_entry is not None else None, relative_spread=relative_spread, open_ticket=instance_state.open_ticket, position_side=instance_state.position_side, position_volume=instance_state.position_volume, last_ack_status=ack_status, last_ack_command_id=ack_command_id, last_error_message=error_entry.message if error_entry is not None else None, last_error_type=error_entry.error_type if error_entry is not None else None, instance_health=monitoring.instance_health if monitoring is not None else None, cycle_latency_ms=monitoring.cycle_latency_ms if monitoring is not None else None, ack_latency_ms=monitoring.ack_latency_ms if monitoring is not None else None, data_freshness_ms=monitoring.data_freshness_ms if monitoring is not None else None, error_count=monitoring.error_count if monitoring is not None else None, error_rate_per_min=monitoring.error_rate_per_min if monitoring is not None else None, buy_score=None if decision_entry is None else decision_entry.buy_score, sell_score=None if decision_entry is None else decision_entry.sell_score, ai_mode=None if decision_entry is None else decision_entry.ai_mode, ai_reason=None if decision_entry is None else decision_entry.ai_reason, entry_price=instance_state.position_entry_price, stop_loss=instance_state.position_stop_loss, take_profit=instance_state.position_take_profit, position_bars_open=instance_state.position_bars_open if instance_state.open_ticket is not None else None, cycle_count=instance_state.cycle_count, last_trade_event=None if trade_entry is None else trade_entry.event, last_trade_reason=None if trade_entry is None else trade_entry.reason, last_trade_ack=None if trade_entry is None else trade_entry.ack_status, control_action=control_action, control_reason=control_reason, control_timestamp_utc=control_timestamp, broker_connected=connected, trade_allowed=trade_allowed, balance=balance, equity=equity, bid=bid, ask=ask, current_spread=current_spread, market_age_ms=_file_age_ms(account_dir / instance.market_filename()), sensor_age_ms=_file_age_ms(account_dir / instance.sensor_filename()), status_age_ms=_file_age_ms(account_dir / instance.status_filename()), sparkline=sparkline, last_close=last_close)
+    last_trade_event = None if trade_entry is None else trade_entry.event
+    last_trade_reason = None if trade_entry is None else trade_entry.reason
+    last_trade_ack = None if trade_entry is None else trade_entry.ack_status
+    stale = is_stale_failed_open(open_ticket=instance_state.open_ticket, last_trade_event=last_trade_event, last_trade_ack=last_trade_ack, last_trade_reason=last_trade_reason)
+    return InstanceDashboardView(
+        instance=instance,
+        last_decision=decision_entry.decision if decision_entry is not None else instance_state.last_decision,
+        last_reason=decision_entry.reason if decision_entry is not None else instance_state.last_reason,
+        risk_result=decision_entry.risk_result if decision_entry is not None else None,
+        risk_reason=decision_entry.risk_reason if decision_entry is not None else None,
+        relative_spread=relative_spread,
+        open_ticket=instance_state.open_ticket,
+        position_side=instance_state.position_side,
+        position_volume=instance_state.position_volume,
+        last_ack_status=ack_status,
+        last_ack_command_id=ack_command_id,
+        last_error_message=error_entry.message if error_entry is not None else None,
+        last_error_type=error_entry.error_type if error_entry is not None else None,
+        instance_health=monitoring.instance_health if monitoring is not None else None,
+        cycle_latency_ms=monitoring.cycle_latency_ms if monitoring is not None else None,
+        ack_latency_ms=monitoring.ack_latency_ms if monitoring is not None else None,
+        data_freshness_ms=monitoring.data_freshness_ms if monitoring is not None else None,
+        error_count=monitoring.error_count if monitoring is not None else None,
+        error_rate_per_min=monitoring.error_rate_per_min if monitoring is not None else None,
+        buy_score=None if decision_entry is None else decision_entry.buy_score,
+        sell_score=None if decision_entry is None else decision_entry.sell_score,
+        ai_mode=None if decision_entry is None else decision_entry.ai_mode,
+        ai_reason=None if decision_entry is None else decision_entry.ai_reason,
+        entry_price=instance_state.position_entry_price,
+        stop_loss=instance_state.position_stop_loss,
+        take_profit=instance_state.position_take_profit,
+        position_bars_open=instance_state.position_bars_open if instance_state.open_ticket is not None else None,
+        cycle_count=instance_state.cycle_count,
+        last_trade_event=last_trade_event,
+        last_trade_reason=last_trade_reason,
+        last_trade_ack=last_trade_ack,
+        control_action=control_action,
+        control_reason=control_reason,
+        control_timestamp_utc=control_timestamp,
+        broker_connected=connected,
+        trade_allowed=trade_allowed,
+        balance=balance,
+        equity=equity,
+        bid=bid,
+        ask=ask,
+        current_spread=current_spread,
+        market_age_ms=_file_age_ms(account_dir / instance.market_filename()),
+        sensor_age_ms=_file_age_ms(account_dir / instance.sensor_filename()),
+        status_age_ms=_file_age_ms(account_dir / instance.status_filename()),
+        sparkline=sparkline,
+        last_close=last_close,
+        ai_available=None if decision_entry is None else decision_entry.ai_available,
+        ai_fallback_used=None if decision_entry is None else decision_entry.ai_fallback_used,
+        system_decision_before_ai=None if decision_entry is None else decision_entry.system_decision_before_ai,
+        decision_after_ai=None if decision_entry is None else decision_entry.decision_after_ai,
+        exec_stale=stale,
+    )
+
 
 def load_dashboard_snapshot(config: SystemConfig, paths: SystemPaths, *, timestamp_utc: str | None=None) -> DashboardSnapshot:
     instances = discover_instances(config, paths)

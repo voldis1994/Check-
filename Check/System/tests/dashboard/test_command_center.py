@@ -133,3 +133,21 @@ def test_dashboard_bind_lan_prints_phone_url(capsys: pytest.CaptureFixture[str],
     captured = capsys.readouterr().out
     assert '127.0.0.1:8765' in captured
     assert '192.168.0.55:8765' in captured
+
+def test_scores_line_labels_system_not_ai(tmp_path: Path) -> None:
+    from engine.dashboard.console import format_command_center
+    from engine.dashboard.reader import DashboardSnapshot, InstanceDashboardView
+    view = InstanceDashboardView(instance=_instance(), last_decision='WAIT', last_reason='BOTH_DIRECTIONS_INVALID', risk_result='BLOCK', risk_reason=None, relative_spread=0.0, open_ticket=None, position_side=None, position_volume=None, last_ack_status='TIMEOUT', last_ack_command_id='cmd-old', last_error_message=None, last_error_type=None, buy_score=0.32, sell_score=0.32, ai_mode='advisory', ai_reason='hold', last_trade_event='OPEN', last_trade_ack='FAILED', last_trade_reason='ACK_TIMEOUT: timed out', exec_stale=True)
+    rendered = format_command_center(DashboardSnapshot(generated_at_utc='2026-07-07T06:00:00.000Z', instances=(view,), system_name='SYSTEM'))
+    assert 'scores (system)' in rendered
+    assert 'ai=advisory' not in rendered
+    assert 'ai mode=advisory' in rendered
+    assert 'exec idle (flat)' in rendered
+    assert 'last_fail' in rendered
+    assert 'OPEN/FAILED' in rendered
+
+def test_is_stale_failed_open_for_flat_timeout() -> None:
+    from engine.dashboard.reader import is_stale_failed_open
+    assert is_stale_failed_open(open_ticket=None, last_trade_event='OPEN', last_trade_ack='FAILED', last_trade_reason='ACK_TIMEOUT')
+    assert not is_stale_failed_open(open_ticket=55, last_trade_event='OPEN', last_trade_ack='FAILED', last_trade_reason='ACK_TIMEOUT')
+    assert not is_stale_failed_open(open_ticket=None, last_trade_event='MODIFY', last_trade_ack='SUCCESS', last_trade_reason='ok')

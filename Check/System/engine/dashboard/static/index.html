@@ -275,15 +275,19 @@ function renderInstances(data) {
       <div class="reason">${esc(v.last_reason || '—')}</div>
       <div class="spark">${esc(v.sparkline || '········')}</div>
       <div class="grid">
-        <div class="metric"><div class="label">Buy</div><div class="value" style="color:var(--buy)">${fmt(v.buy_score, 3)}</div></div>
-        <div class="metric"><div class="label">Sell</div><div class="value" style="color:var(--sell)">${fmt(v.sell_score, 3)}</div></div>
+        <div class="metric"><div class="label">Buy (system)</div><div class="value" style="color:var(--buy)">${fmt(v.buy_score, 3)}</div></div>
+        <div class="metric"><div class="label">Sell (system)</div><div class="value" style="color:var(--sell)">${fmt(v.sell_score, 3)}</div></div>
         <div class="metric"><div class="label">Bid / Ask</div><div class="value">${fmt(v.bid)} / ${fmt(v.ask)}</div></div>
         <div class="metric"><div class="label">Spread</div><div class="value">${fmt(v.current_spread)} <span class="sub">(${fmt(v.relative_spread, 2)}σ)</span></div></div>
         <div class="metric"><div class="label">Equity</div><div class="value">${fmt(v.equity, 2)}</div></div>
         <div class="metric"><div class="label">Data age</div><div class="value">${ageLabel(v.market_age_ms)}</div></div>
-        <div class="metric"><div class="label">Control</div><div class="value">${esc(v.control_action || '—')}</div></div>
-        <div class="metric"><div class="label">ACK</div><div class="value">${esc(v.last_ack_status || '—')}</div></div>
+        <div class="metric"><div class="label">AI mode</div><div class="value">${esc(v.ai_mode || '—')}</div></div>
+        <div class="metric"><div class="label">AI avail</div><div class="value">${v.ai_available == null ? '—' : (v.ai_available ? 'yes' : 'no')}</div></div>
       </div>
+      <div class="pos-sub" style="margin-top:12px">AI reason: ${esc(v.ai_reason || '—')}<br/>system→after: ${esc(v.system_decision_before_ai || '—')} → ${esc(v.decision_after_ai || '—')}</div>
+      ${v.exec_stale
+        ? `<div class="pos flat" style="border-color:rgba(251,113,133,0.35)"><div class="pos-title">Exec / last fail</div><div class="pos-main">idle (flat)</div><div class="pos-sub">last fail ${esc(v.last_trade_event || '')}/${esc(v.last_trade_ack || '')} · ${esc(v.last_trade_reason || '')}</div></div>`
+        : `<div class="pos flat"><div class="pos-title">Exec</div><div class="pos-main">${esc(v.control_action || '—')} · ${esc(v.last_trade_event || '—')}/${esc(v.last_trade_ack || '—')}</div><div class="pos-sub">ack ${esc(v.last_ack_status || '—')}</div></div>`}
       ${pos}
     </article>`;
   }).join('');

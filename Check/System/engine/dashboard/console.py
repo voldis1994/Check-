@@ -103,7 +103,15 @@ def format_command_center(snapshot: DashboardSnapshot) -> str:
         if view.buy_score is not None or view.sell_score is not None:
             buy = '-' if view.buy_score is None else f'{view.buy_score:.3f}'
             sell = '-' if view.sell_score is None else f'{view.sell_score:.3f}'
-            lines.append(f'  {_c(FG_MUTED, "scores")} buy={_c(FG_BUY, buy)}  sell={_c(FG_SELL, sell)}  ai={view.ai_mode or "-"}')
+            lines.append(f'  {_c(FG_MUTED, "scores (system)")} buy={_c(FG_BUY, buy)}  sell={_c(FG_SELL, sell)}')
+        ai_mode = view.ai_mode or '-'
+        ai_avail = '-' if view.ai_available is None else ('yes' if view.ai_available else 'no')
+        ai_fb = '-' if view.ai_fallback_used is None else ('yes' if view.ai_fallback_used else 'no')
+        before = view.system_decision_before_ai or '-'
+        after = view.decision_after_ai or '-'
+        lines.append(f'  {_c(FG_MUTED, "ai")} mode={ai_mode} available={ai_avail} fallback={ai_fb} system={before} after={after}')
+        if view.ai_reason:
+            lines.append(f'           {_c(FG_MUTED, "ai_reason")} {view.ai_reason}')
         spark = view.sparkline or _c(FG_MUTED, '(waiting for market bars)')
         close = '-' if view.last_close is None else f'{view.last_close:.5f}'
         bid = '-' if view.bid is None else f'{view.bid:.5f}'
@@ -121,9 +129,14 @@ def format_command_center(snapshot: DashboardSnapshot) -> str:
             lines.append(f'           entry={view.entry_price}  sl={view.stop_loss}  tp={view.take_profit or 0.0}')
         control = view.control_action or '-'
         trade = view.last_trade_event or '-'
+        trade_ack = view.last_trade_ack or '-'
         ack = view.last_ack_status or '-'
-        lines.append(f'  {_c(FG_MUTED, "exec")} control={control}  trade={trade}/{view.last_trade_ack or "-"}  ack={ack}')
-        if view.control_reason:
+        if view.exec_stale:
+            lines.append(f'  {_c(FG_MUTED, "exec")} idle (flat)')
+            lines.append(f'  {_c(FG_ALERT, "last_fail")} {trade}/{trade_ack}  ack={ack}  {view.last_trade_reason or ""}')
+        else:
+            lines.append(f'  {_c(FG_MUTED, "exec")} control={control}  trade={trade}/{trade_ack}  ack={ack}')
+        if view.control_reason and not view.exec_stale:
             lines.append(f'           {_c(FG_MUTED, "control_reason")} {view.control_reason}')
         if view.last_error_message:
             lines.append(f'  {_c(FG_ALERT, "error")} {view.last_error_type}: {view.last_error_message}')
