@@ -1,7 +1,9 @@
 from __future__ import annotations
+import argparse
 import signal
 import sys
 import time
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -9,8 +11,9 @@ from engine.core.config import load_system_config
 from engine.core.lifecycle import build_system_paths, validate_config_root_path, validate_root_path
 from engine.core.logging_setup import log_event, setup_system_logger
 from engine.core.paths import SystemPaths
-from engine.dashboard.console import render_dashboard
+from engine.dashboard.console import live_console_printer, render_dashboard
 from engine.dashboard.reader import load_dashboard_snapshot
+from engine.dashboard.web import DEFAULT_PORT, start_dashboard_server
 from engine.deployment.path_contract import prepare_deployment_root
 from engine.protocol.errors import ConfigurationError
 from engine.protocol.models import SystemConfig
@@ -31,7 +34,7 @@ class DashboardRuntime:
     shutdown_requested: bool = False
 
 
-def startup_dashboard(*, root_path: str | Path | None = None, config_path: str | Path | None = None) -> DashboardRuntime:
+def startup_dashboard(*, root_path: str | Path | None=None, config_path: str | Path | None=None) -> DashboardRuntime:
     bootstrap_paths = SystemPaths(root_path)
     validate_root_path(bootstrap_paths)
     resolved_config_path = Path(config_path) if config_path is not None else bootstrap_paths.config_path
@@ -51,43 +54,80 @@ def request_dashboard_shutdown(runtime: DashboardRuntime) -> None:
     runtime.shutdown_requested = True
 
 
-def refresh_dashboard(runtime: DashboardRuntime, *, timestamp_utc: str | None = None, output: Callable[[str], None] | None = None) -> str:
+def refresh_dashboard(runtime: DashboardRuntime, *, timestamp_utc: str | None=None, output: Callable[[str], None] | None=None, clear: bool=False) -> str:
     snapshot = load_dashboard_snapshot(runtime.config, runtime.paths, timestamp_utc=timestamp_utc)
-    return render_dashboard(snapshot, output=output)
+    return render_dashboard(snapshot, output=output, clear=clear)
 
 
-def run_dashboard_main(*, root_path: str | Path | None = None, config_path: str | Path | None = None, wait_for_shutdown: Callable[[DashboardRuntime], None] | None = None, sleep_fn: Callable[[float], None] = time.sleep, output: Callable[[str], None] | None = None) -> int:
+def run_dashboard_main(*, root_path: str | Path | None=None, config_path: str | Path | None=None, wait_for_shutdown: Callable[[DashboardRuntime], None] | None=None, sleep_fn: Callable[[float], None]=time.sleep, output: Callable[[str], None] | None=None, clear: bool=False, enable_web: bool=False, web_host: str='127.0.0.1', web_port: int=DEFAULT_PORT, open_browser: bool=False) -> int:
     try:
         runtime = startup_dashboard(root_path=root_path, config_path=config_path)
     except ConfigurationError as exc:
         print(f'dashboard startup failed: {exc.message}', file=sys.stderr)
         return STARTUP_ERROR_EXIT_CODE
 
+    resolved_output = output if output is not None else live_console_printer
+    resolved_clear = clear if output is not None else False
+
     def _handle_shutdown_signal(_signum: int, _frame: object | None) -> None:
         request_dashboard_shutdown(runtime)
     signal.signal(signal.SIGINT, _handle_shutdown_signal)
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
-    refresh_dashboard(runtime, output=output)
+
+    server = None
+    if enable_web:
+        def _provider():
+            return load_dashboard_snapshot(runtime.config, runtime.paths)
+        try:
+            server = start_dashboard_server(provider=_provider, host=web_host, port=web_port)
+        except OSError as exc:
+            print(f'dashboard web bind failed on {web_host}:{web_port}: {exc}', file=sys.stderr)
+            return STARTUP_ERROR_EXIT_CODE
+        url = f'http://{web_host}:{web_port}/'
+        print(f'SYSTEM web dashboard: {url}', flush=True)
+        if open_browser:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+
+    refresh_dashboard(runtime, output=resolved_output, clear=resolved_clear)
     if wait_for_shutdown is not None:
         wait_for_shutdown(runtime)
+        if server is not None:
+            server.shutdown()
         return STARTUP_EXIT_CODE
     interval_seconds = runtime.config.dashboard.refresh_interval_ms / 1000.0
     while not runtime.shutdown_requested:
         sleep_fn(interval_seconds)
         if runtime.shutdown_requested:
             break
-        refresh_dashboard(runtime, output=output)
+        refresh_dashboard(runtime, output=resolved_output, clear=resolved_clear)
+    if server is not None:
+        server.shutdown()
     return STARTUP_EXIT_CODE
 
 
-def main() -> int:
+def _parse_args(argv: list[str] | None=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description='SYSTEM live command-center dashboard')
+    parser.add_argument('--web', action='store_true', help='serve HTML dashboard on localhost')
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT, help=f'web port (default {DEFAULT_PORT})')
+    parser.add_argument('--host', default='127.0.0.1', help='web bind host')
+    parser.add_argument('--open-browser', action='store_true', help='open default browser to the web dashboard')
+    parser.add_argument('--no-clear', action='store_true', help='do not clear console between refreshes')
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None=None) -> int:
+    args = _parse_args(argv)
     project_root = _resolve_project_root()
     config_path = project_root / CONFIG_RELATIVE_PATH
     if not config_path.is_file():
         print(f'dashboard startup failed: config file not found at {config_path}', file=sys.stderr)
         return STARTUP_ERROR_EXIT_CODE
     prepare_deployment_root(project_root)
-    return run_dashboard_main(root_path=project_root, config_path=config_path)
+    output = print if args.no_clear else live_console_printer
+    return run_dashboard_main(root_path=project_root, config_path=config_path, output=output, enable_web=args.web or args.open_browser, web_host=args.host, web_port=args.port, open_browser=args.open_browser)
 
 
 if __name__ == '__main__':
