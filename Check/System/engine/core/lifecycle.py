@@ -289,10 +289,12 @@ def print_live_cycle_summary(result: object) -> None:
         risk = item.risk_engine_result.result if item.risk_engine_result is not None else '-'
         risk_reason = item.risk_engine_result.reason if item.risk_engine_result is not None else ''
         action = item.execution_result.order_command.action if item.execution_result is not None else '-'
-        if risk == RiskResult.BLOCK.value and risk_reason:
+        if item.skip_reason:
+            reason = item.skip_reason
+        elif risk == RiskResult.BLOCK.value and risk_reason:
             reason = risk_reason
         else:
-            reason = decision_reason
+            reason = decision_reason or '-'
         if item.completed:
             status = 'OK'
         elif item.error_logged:

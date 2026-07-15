@@ -292,3 +292,14 @@ def test_run_live_main_prints_startup_banner(tmp_path: Path, capsys: pytest.Capt
     captured = capsys.readouterr()
     assert exit_code == STARTUP_EXIT_CODE
     assert 'SYSTEM live started' in captured.out
+
+def test_print_live_cycle_summary_shows_skip_reason(capsys: pytest.CaptureFixture[str]) -> None:
+    from engine.core.cycle import InstanceCycleResult
+    from engine.core.lifecycle import print_live_cycle_summary
+    from engine.core.orchestrator import OrchestratorCycleResult
+    instance = Instance(account_id='231054', symbol='EURUSD', magic=100001)
+    result = OrchestratorCycleResult(instance_results=(InstanceCycleResult(instance=instance, timestamp_utc='2026-07-15T19:00:00.000Z', completed=False, error_logged=True, skip_reason='stale_data:market_file=120000ms threshold=90000ms'),), completed_count=0, failed_count=1)
+    print_live_cycle_summary(result)
+    captured = capsys.readouterr()
+    assert 'SKIP' in captured.out
+    assert 'stale_data' in captured.out
