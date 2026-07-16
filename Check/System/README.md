@@ -32,6 +32,49 @@ DASHBOARD.bat
 `FIX_MT4.bat` copies **both** `Experts` and `Include\SYSTEM_*.mqh`.  
 If compile says `can't open ...\Include\SYSTEM_...`, run `FIX_MT4.bat` again on the active Terminal data folder (File → Open Data Folder).
 
+## Multiple accounts on one PC
+
+One Python root (`C:\Check\System`) + one `PALAID.bat` can run many accounts.  
+Each account needs its **own MT4 terminal** (one login per terminal).
+
+### Config
+
+`config\system.json`:
+
+```json
+"instances": [
+  { "account_id": "231054", "symbol": "EURUSD", "magic": 100001, "enabled": true },
+  { "account_id": "OTRAIS_KONTS", "symbol": "EURUSD", "magic": 100002, "enabled": true }
+]
+```
+
+Or start with one account — when the second EA exports `market_*.csv`, sync/auto-discover adds it.
+
+### MT4
+
+1. Terminal A → account 1, Terminal B → account 2
+2. `FIX_MT4.bat` for **each** Terminal data folder
+3. Compile EA in each MetaEditor
+4. Each chart EURUSD M1:
+   - AutoTrading ON
+   - Allow DLL imports = YES
+   - `SystemRootPath = C:\Check\System` (same path)
+   - Magic `100001` / `100002`
+
+### Run
+
+```bat
+PALAID.bat
+DASHBOARD.bat
+```
+
+Dashboard shows one card per account. Files:
+
+- `data\clients\231054\`
+- `data\clients\OTRAIS_KONTS\`
+
+Helper checklist: `KONTI.bat`
+
 ## Install from GitHub
 
 ```bat
@@ -52,7 +95,7 @@ PALAID.bat
 ```
 
 `UZSTADIT.bat` / `PALAID.bat` run `scripts\sync_paths.py` so Python config, MQL4 root, and runtime root stay aligned.  
-Account id in config auto-updates from the first `data\clients\<account>\market_*.csv` export.
+`instances[]` syncs from all `data\clients\<account>\market_*.csv` exports (multi-account aware).
 
 ## Tests
 
