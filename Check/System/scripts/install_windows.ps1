@@ -105,9 +105,9 @@ function Update-ConfigRootPath {
         [string] $ConfigFile,
         [string] $RootPath
     )
-    $escaped = $RootPath.Replace("\", "\\")
     $json = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
-    $json.system.root_path = $escaped
+    # ConvertTo-Json escapes backslashes; do not pre-escape the path.
+    $json.system.root_path = $RootPath
     $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $ConfigFile -Encoding UTF8
 }
 
@@ -135,10 +135,15 @@ function Install-Mt4Files {
     if (-not (Test-Path $Mt4Root)) {
         throw "MT4 mape neeksistē: $Mt4Root"
     }
+    $resolvedMt4 = $Mt4Root
+    if ((Split-Path -Leaf $resolvedMt4) -ine "MQL4") {
+        $nested = Join-Path $resolvedMt4 "MQL4"
+        if (Test-Path $nested) { $resolvedMt4 = $nested }
+    }
     $expertsSource = Join-Path $SystemRoot "mql4\Experts"
     $includeSource = Join-Path $SystemRoot "mql4\Include"
-    $expertsTarget = Join-Path $Mt4Root "Experts"
-    $includeTarget = Join-Path $Mt4Root "Include"
+    $expertsTarget = Join-Path $resolvedMt4 "Experts"
+    $includeTarget = Join-Path $resolvedMt4 "Include"
 
     if (-not (Test-Path $expertsTarget)) { New-Item -ItemType Directory -Path $expertsTarget -Force | Out-Null }
     if (-not (Test-Path $includeTarget)) { New-Item -ItemType Directory -Path $includeTarget -Force | Out-Null }
@@ -239,10 +244,10 @@ Write-Host "Projekta mape:     $InstallPath"
 Write-Host "Konfigurācija:     $configPath"
 Write-Host "Python (venv):     $venvPython"
 Write-Host ""
-Write-Host "Nākamie soļi:"
-Write-Host "  1. Pielāgojiet config: $configPath"
-Write-Host "  2. MT4: scripts\copy_mql4_to_mt4.bat `"...\MQL4`""
-Write-Host "  3. MT4: pievienojiet SYSTEM_EA chartam"
-Write-Host "  4. Palaidiet: PALAID.bat"
-Write-Host "  5. LIVE pārbaude: $venvPython tools\validate_live.py --root `"$InstallPath`""
+Write-Host "Nakamie soli:"
+Write-Host "  1. FIX_MT4.bat  (automātiski meklē Terminal\*\MQL4)"
+Write-Host "  2. MetaEditor: F7 Compile SYSTEM_EA.mq4 (0 errors)"
+Write-Host "  3. EA uz EURUSD M1: Allow DLL imports=YES, SystemRootPath=$InstallPath"
+Write-Host "  4. PALAID.bat"
+Write-Host "  5. DASHBOARD.bat"
 Write-Host ""

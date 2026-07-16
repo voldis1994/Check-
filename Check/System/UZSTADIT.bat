@@ -70,12 +70,12 @@ echo    PALAID.bat
 echo  Un atverī live dashboard ^(otrā CMD logā^):
 echo    DASHBOARD.bat
 echo.
-echo  MT4 (vienreiz — Obligāti gan Experts, gan Include):
-echo    MT4: File -^> Open Data Folder  ^(atver ...\Terminal\HASH\^)
-echo    FIX_MT4.bat "...\Terminal\HASH\MQL4"
+echo  MT4 (vienreiz — Obligati gan Experts, gan Include):
+echo    FIX_MT4.bat
+echo      ^(automātiski meklē %%APPDATA%%\MetaQuotes\Terminal\*\MQL4^)
 echo    MetaEditor: F7 Compile SYSTEM_EA.mq4  ^(0 errors^)
 echo    EA: Allow DLL imports=YES, SystemRootPath=%ROOT%
-echo    Ja "can't open ...\Include\SYSTEM_..." — Include nav nokopēts; palaid FIX_MT4.bat atkārtoti.
+echo    Ja "can't open ...\Include\SYSTEM_..." — palaid FIX_MT4.bat atkartoti.
 echo.
 if /I "%~1"=="--quiet" exit /b 0
 pause

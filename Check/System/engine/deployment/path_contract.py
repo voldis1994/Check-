@@ -184,6 +184,20 @@ def sync_deployment_paths(root: str | Path | None=None) -> Path:
     return deployment_root
 
 
+def _account_dirs_with_market_exports(clients_dir: Path) -> list[Path]:
+    ranked: list[tuple[float, Path]] = []
+    for entry in clients_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        market_files = list(entry.glob('market_*.csv'))
+        if not market_files:
+            continue
+        newest = max(path.stat().st_mtime for path in market_files)
+        ranked.append((newest, entry))
+    ranked.sort(key=lambda item: (-item[0], item[1].name))
+    return [entry for _, entry in ranked]
+
+
 def sync_config_instances_from_clients(root: str | Path, *, config_path: Path | None=None) -> bool:
     from engine.core.config import load_system_config
     from engine.core.lifecycle import build_system_paths, parse_market_filename
@@ -196,17 +210,22 @@ def sync_config_instances_from_clients(root: str | Path, *, config_path: Path | 
     clients_dir = paths.clients_dir
     if not clients_dir.is_dir():
         return False
-    account_dirs = sorted(entry for entry in clients_dir.iterdir() if entry.is_dir())
-    if not account_dirs:
+    export_dirs = _account_dirs_with_market_exports(clients_dir)
+    if not export_dirs:
         return False
     payload = json.loads(resolved_config_path.read_text(encoding='utf-8'))
     instances = payload.get('instances')
     if not isinstance(instances, list) or not instances:
         return False
-    primary_account = account_dirs[0].name
+    first = instances[0]
+    if not isinstance(first, dict):
+        return False
+    configured_account = str(first.get('account_id') or '')
+    primary_dir = next((entry for entry in export_dirs if entry.name == configured_account), export_dirs[0])
+    primary_account = primary_dir.name
     discovered_symbol: str | None = None
     discovered_magic: int | None = None
-    for entry in account_dirs[0].iterdir():
+    for entry in sorted(primary_dir.iterdir()):
         if not entry.is_file():
             continue
         parsed = parse_market_filename(entry.name)
@@ -214,10 +233,7 @@ def sync_config_instances_from_clients(root: str | Path, *, config_path: Path | 
             discovered_symbol, discovered_magic = parsed
             break
     changed = False
-    first = instances[0]
-    if not isinstance(first, dict):
-        return False
-    if len(account_dirs) == 1 and first.get('account_id') != primary_account:
+    if first.get('account_id') != primary_account:
         first['account_id'] = primary_account
         changed = True
     if discovered_symbol is not None and first.get('symbol') != discovered_symbol:

@@ -111,7 +111,7 @@ import sys
 config_file, root_path = sys.argv[1], sys.argv[2]
 with open(config_file, encoding="utf-8") as handle:
     payload = json.load(handle)
-payload["system"]["root_path"] = root_path.replace("\\", "\\\\")
+payload["system"]["root_path"] = root_path
 with open(config_file, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2)
     handle.write("\n")

@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 set "ROOT=%CD%"
 
@@ -8,38 +8,79 @@ echo === KOPET MQL4 UZ MT4 + PARBAUDE ===
 echo Root: %ROOT%
 echo.
 
-if "%~1"=="" (
-  echo MetaTrader: File -^> Open Data Folder
-  echo Tad šajā CMD ielīmē pilnu ceļu līdz MQL4 mapei, piem.:
-  echo.
-  echo   FIX_MT4.bat "C:\Users\voldi\AppData\Roaming\MetaQuotes\Terminal\XXXX\MQL4"
-  echo.
-  echo Vai:
-  echo   scripts\copy_mql4_to_mt4.bat "C:\...\MQL4"
-  echo.
-  echo Pēc kopēšanas MetaEditor:
-  echo   1^) Atver Experts\SYSTEM_EA.mq4
-  echo   2^) F7 Compile — jābūt 0 errors
-  echo   3^) EA uz EURUSD M1
-  echo   4^) Common: Allow DLL imports = YES
-  echo   5^) Inputs: SystemRootPath = %ROOT%
-  echo   6^) Experts logā: SYSTEM export OK
-  echo.
-  echo JA KOMPILE RĀDA "can't open ...\Include\SYSTEM_..." —
-  echo   Experts ir nokopēts, bet Include\SYSTEM_*.mqh NAV.
-  echo   Palaid šo bat ar MQL4 ceļu ^(skat. augstāk^).
+set "MT4_TARGET=%~1"
+if not "%MT4_TARGET%"=="" goto :copy
+
+echo Mekleju MetaQuotes Terminal MQL4 mapes...
+set "FOUND="
+set "COUNT=0"
+for /d %%D in ("%APPDATA%\MetaQuotes\Terminal\*") do (
+  if exist "%%D\MQL4" (
+    set /a COUNT+=1
+    set "FOUND=%%D\MQL4"
+    echo   [!COUNT!] %%D\MQL4
+  )
+)
+
+if "%COUNT%"=="0" (
+  echo [KLUDA] Nav atrasta neviena ...\MetaQuotes\Terminal\*\MQL4
+  echo MT4: File -^> Open Data Folder, tad:
+  echo   FIX_MT4.bat "C:\Users\...\MetaQuotes\Terminal\HASH\MQL4"
   echo.
   pause
   exit /b 1
 )
 
-call "%ROOT%\scripts\copy_mql4_to_mt4.bat" "%~1"
+if "%COUNT%"=="1" (
+  set "MT4_TARGET=%FOUND%"
+  echo.
+  echo Atlasita vieniga Terminal mape:
+  echo   %MT4_TARGET%
+  echo.
+  goto :copy
+)
+
+echo.
+echo Atrastas %COUNT% Terminal mapes. Noradi numuru vai ielime pilnu MQL4 celu.
+set /p "CHOICE=Izvele: "
+if exist "%CHOICE%\Experts" set "MT4_TARGET=%CHOICE%"
+if exist "%CHOICE%" if /I "%CHOICE:~-4%"=="MQL4" set "MT4_TARGET=%CHOICE%"
+if "%MT4_TARGET%"=="" (
+  set "IDX=0"
+  for /d %%D in ("%APPDATA%\MetaQuotes\Terminal\*") do (
+    if exist "%%D\MQL4" (
+      set /a IDX+=1
+      if "!IDX!"=="%CHOICE%" set "MT4_TARGET=%%D\MQL4"
+    )
+  )
+)
+
+if "%MT4_TARGET%"=="" (
+  echo [KLUDA] Nederiga izvele.
+  pause
+  exit /b 1
+)
+
+:copy
+echo.
+echo Kopē uz: %MT4_TARGET%
+echo.
+call "%ROOT%\scripts\copy_mql4_to_mt4.bat" "%MT4_TARGET%"
 set "RC=%ERRORLEVEL%"
 echo.
 if not "%RC%"=="0" (
-  echo [KLUDA] Kopēšana neizdevās.
+  echo [KLUDA] Kopesana neizdevas.
   pause
   exit /b %RC%
 )
+
+echo MetaEditor:
+echo   1^) Atver Experts\SYSTEM_EA.mq4
+echo   2^) F7 Compile — jabut 0 errors
+echo   3^) EA uz EURUSD M1
+echo   4^) Common: Allow DLL imports = YES
+echo   5^) Inputs: SystemRootPath = %ROOT%
+echo   6^) Experts loga: SYSTEM export OK
+echo.
 pause
 exit /b 0

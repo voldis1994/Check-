@@ -75,12 +75,7 @@
     "partial_close_volume_ratio": 0.5,
     "time_stop_max_bars": 30,
     "trailing_lookback_bars": 8,
-    "trailing_step_pips": 4.0,
-    "trailing_mode": "atr_multiple",
-    "trailing_atr_mult": 1.2,
-    "trailing_atr_period": 14,
-    "trailing_sl_fraction": 0.5,
-    "trailing_spread_floor_mult": 1.2
+    "trailing_step_pips": 4.0
   },
   "dashboard": {
     "refresh_interval_ms": 1000

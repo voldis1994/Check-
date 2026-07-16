@@ -94,34 +94,13 @@ def test_load_system_config_repository_file() -> None:
     assert config.paths.clients == 'data/clients'
     assert config.analysis.weights.context == 1.0
     assert config.risk.reward_ratio == 2.0
-    assert config.trade_management.trailing_mode == 'atr_multiple'
     assert config.trade_management.trailing_lookback_bars == 8
     assert config.trade_management.trailing_step_pips == 4.0
-    assert config.trade_management.trailing_atr_mult == 1.2
-    assert config.trade_management.trailing_spread_floor_mult == 1.2
 
-def test_parse_config_payload_loads_universal_trailing_settings() -> None:
+def test_parse_config_payload_loads_pip_trailing_settings() -> None:
     config = parse_config_payload(valid_system_config_payload())
-    assert config.trade_management.trailing_mode == 'fixed_pips'
-    assert config.trade_management.trailing_atr_mult == 1.2
-    assert config.trade_management.trailing_atr_period == 14
-    assert config.trade_management.trailing_sl_fraction == 0.5
-    assert config.trade_management.trailing_spread_floor_mult == 1.2
-
-def test_parse_config_payload_allows_instance_trailing_overrides() -> None:
-    payload = valid_system_config_payload()
-    payload['instances'][0]['trailing_mode'] = 'atr_multiple'
-    payload['instances'][0]['trailing_step_pips'] = 3.0
-    payload['instances'][0]['trailing_lookback_bars'] = 12
-    payload['instances'][0]['trailing_spread_floor_mult'] = 1.5
-    payload['instances'][0]['stop_loss_buffer'] = 0.5
-    config = parse_config_payload(payload)
-    instance = config.instances[0]
-    assert instance.trailing_mode == 'atr_multiple'
-    assert instance.trailing_step_pips == 3.0
-    assert instance.trailing_lookback_bars == 12
-    assert instance.trailing_spread_floor_mult == 1.5
-    assert instance.stop_loss_buffer == 0.5
+    assert config.trade_management.trailing_lookback_bars == 5
+    assert config.trade_management.trailing_step_pips == 0.0
 
 def test_parse_config_payload_rejects_unknown_instance_fields() -> None:
     payload = valid_system_config_payload()
@@ -129,8 +108,8 @@ def test_parse_config_payload_rejects_unknown_instance_fields() -> None:
     with pytest.raises(ConfigurationError, match='unsupported fields'):
         parse_config_payload(payload)
 
-def test_parse_config_payload_rejects_invalid_trailing_mode() -> None:
+def test_parse_config_payload_rejects_universal_trailing_fields() -> None:
     payload = valid_system_config_payload()
-    payload['trade_management']['trailing_mode'] = 'magic'
-    with pytest.raises(ConfigurationError, match='invalid config payload'):
+    payload['trade_management']['trailing_mode'] = 'fixed_pips'
+    with pytest.raises(ConfigurationError, match='unsupported fields'):
         parse_config_payload(payload)

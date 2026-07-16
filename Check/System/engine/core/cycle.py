@@ -30,7 +30,6 @@ from engine.protocol.parser import parse_sensor_csv, parse_universe
 from engine.reason import build_reason
 from engine.risk.engine import RiskEngineResult, RiskEngineTradeParams, run_risk_engine
 from engine.risk.trade_management import OpenPosition, TradeManagementConfig, TradeManagementResult, evaluate_trade_management
-from engine.risk.trailing_distance import find_instance_definition, resolve_structure_buffer, resolve_trailing_distances, resolve_trailing_params
 from engine.state.instance_state import InstanceState
 from engine.state.memory import InstanceMemory
 from engine.validator.market_validator import ValidationResult, validate_market_csv
@@ -73,9 +72,9 @@ class InstanceCycleResult:
     market_data_utc: str | None = None
     skip_reason: str | None = None
 
-def build_trade_management_config(trade_params: RiskEngineTradeParams, *, trailing_buffer: float, settings: TradeManagementSettings, pip: float, price_trail_distance: float | None=None) -> TradeManagementConfig:
-    resolved_price_trail = price_trail_distance if price_trail_distance is not None else (settings.trailing_step_pips * pip if pip > 0 and settings.trailing_step_pips > 0 else 0.0)
-    return TradeManagementConfig(breakeven_progress_ratio=settings.breakeven_progress_ratio, trailing_buffer=trailing_buffer, partial_close_progress_ratio=settings.partial_close_progress_ratio, partial_close_volume_ratio=settings.partial_close_volume_ratio, time_stop_max_bars=settings.time_stop_max_bars, volume_step=trade_params.volume_step, price_trail_distance=resolved_price_trail)
+def build_trade_management_config(trade_params: RiskEngineTradeParams, *, trailing_buffer: float, settings: TradeManagementSettings, pip: float) -> TradeManagementConfig:
+    price_trail_distance = settings.trailing_step_pips * pip if pip > 0 and settings.trailing_step_pips > 0 else 0.0
+    return TradeManagementConfig(breakeven_progress_ratio=settings.breakeven_progress_ratio, trailing_buffer=trailing_buffer, partial_close_progress_ratio=settings.partial_close_progress_ratio, partial_close_volume_ratio=settings.partial_close_volume_ratio, time_stop_max_bars=settings.time_stop_max_bars, volume_step=trade_params.volume_step, price_trail_distance=price_trail_distance)
 
 def _synthetic_reference_take_profit(*, side: str, entry_price: float, stop_loss: float, reward_ratio: float) -> float:
     if reward_ratio <= 0:
@@ -111,19 +110,15 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     if instance_memory.instance_state.open_ticket is not None:
         instance_memory.instance_state.increment_position_bars()
     position = resolve_open_position_from_state(instance_memory.instance_state, reward_ratio=runtime.config.risk.reward_ratio)
-    instance = instance_memory.instance
-    definition = find_instance_definition(runtime.config, account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic)
-    trailing_params = resolve_trailing_params(settings=runtime.config.trade_management, analysis_stop_loss_buffer=runtime.config.analysis.stop_loss_buffer, instance_definition=definition)
-    structure = resolve_structure_levels(market_bars, structure_lookback_bars=trailing_params.lookback_bars)
+    trailing_lookback = runtime.config.trade_management.trailing_lookback_bars
+    structure = resolve_structure_levels(market_bars, structure_lookback_bars=trailing_lookback)
     digits = instance_memory.instance_state.instrument_digits
     if digits <= 0 and market_bars:
         digits = market_bars[-1].digits
     pip = instance_memory.instance_state.instrument_pip
     if pip <= 0 and market_bars:
         pip = market_bars[-1].point * 10.0
-    current_spread = sensor_reading.spread if sensor_reading is not None else 0.0
-    distances = resolve_trailing_distances(params=trailing_params, pip=pip, market_bars=market_bars, current_spread=current_spread, entry_price=None if position is None else position.entry_price, stop_loss=None if position is None else position.stop_loss)
-    return evaluate_trade_management(position=position, current_price=resolve_trade_management_price(position_side=instance_memory.instance_state.position_side or Side.BUY.value, sensor_reading=sensor_reading, market_bars=market_bars), swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=distances.trailing_buffer, settings=runtime.config.trade_management, pip=pip, price_trail_distance=distances.price_trail_distance), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
+    return evaluate_trade_management(position=position, current_price=resolve_trade_management_price(position_side=instance_memory.instance_state.position_side or Side.BUY.value, sensor_reading=sensor_reading, market_bars=market_bars), swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management, pip=pip), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
 
 def _build_ai_market_context(*, decision_result: DecisionResult, spread_snapshot: SpreadModelSnapshot, market_bars: tuple[NormalizedMarketBar, ...]) -> dict[str, object]:
     return {'relative_spread': spread_snapshot.relative_spread, 'last_close': market_bars[-1].close, 'last_time_utc': str(market_bars[-1].time_utc), 'system_reason': decision_result.reason, 'buy_score': decision_result.buy_score, 'sell_score': decision_result.sell_score}
@@ -210,11 +205,7 @@ def resolve_structure_levels(market_bars: tuple[NormalizedMarketBar, ...], *, st
     return analyze_structure_window(market_bars, structure_lookback_bars=structure_lookback_bars)
 
 def run_instance_decision_phase(*, universe: UniverseRecord, market_bars: tuple[NormalizedMarketBar, ...], instance_memory: InstanceMemory, relative_spread: float, runtime: LiveRuntime, block_reason: str | None=None, current_spread: float=0.0) -> DecisionResult:
-    instance = instance_memory.instance
-    definition = find_instance_definition(runtime.config, account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic)
-    trailing_params = resolve_trailing_params(settings=runtime.config.trade_management, analysis_stop_loss_buffer=runtime.config.analysis.stop_loss_buffer, instance_definition=definition)
-    effective_buffer = resolve_structure_buffer(configured_buffer=trailing_params.stop_loss_buffer, spread=current_spread)
-    return run_decision_engine(universe=universe, market_bars=market_bars, instance_state=instance_memory.instance_state, relative_spread=relative_spread, system_config=runtime.config, block_reason=block_reason, paths=runtime.paths, stop_loss_buffer=effective_buffer)
+    return run_decision_engine(universe=universe, market_bars=market_bars, instance_state=instance_memory.instance_state, relative_spread=relative_spread, system_config=runtime.config, block_reason=block_reason, paths=runtime.paths)
 
 def run_instance_risk_phase(*, decision_result: DecisionResult, instance_memory: InstanceMemory, status: StatusRecord, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None) -> RiskEngineResult:
     structure = resolve_structure_levels(market_bars, structure_lookback_bars=runtime.config.analysis.structure_lookback_bars)

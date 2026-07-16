@@ -304,7 +304,7 @@ def print_live_startup_banner(runtime: LiveRuntime, instances: tuple[Instance, .
     ai_mode = runtime.config.ai.mode
     ai_key = 'yes' if os.getenv('OPENAI_API_KEY') else 'missing'
     print(f'SYSTEM live started: root={runtime.paths.root}', flush=True)
-    print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms} closed_bar_entries={runtime.config.runtime.execute_entries_on_closed_bar_only} python_close={runtime.config.trade_management.allow_close} ai_mode={ai_mode} openai_key={ai_key} trail_mode={runtime.config.trade_management.trailing_mode} trail_lookback={runtime.config.trade_management.trailing_lookback_bars} trail_pips={runtime.config.trade_management.trailing_step_pips} trail_atr_mult={runtime.config.trade_management.trailing_atr_mult} spread_floor={runtime.config.trade_management.trailing_spread_floor_mult}', flush=True)
+    print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms} closed_bar_entries={runtime.config.runtime.execute_entries_on_closed_bar_only} python_close={runtime.config.trade_management.allow_close} ai_mode={ai_mode} openai_key={ai_key} trail_lookback={runtime.config.trade_management.trailing_lookback_bars} trail_pips={runtime.config.trade_management.trailing_step_pips}', flush=True)
     print(f'logs={runtime.paths.logs_dir}', flush=True)
     for instance in instances:
         market_path = runtime.paths.account_dir(instance.account_id) / instance.market_filename()

@@ -128,86 +128,26 @@ class RuntimeConfig:
     def to_dict(self) -> dict[str, int | bool]:
         return {'cycle_interval_ms': self.cycle_interval_ms, 'ack_timeout_ms': self.ack_timeout_ms, 'retry_max': self.retry_max, 'retry_delay_ms': self.retry_delay_ms, 'data_stale_threshold_ms': self.data_stale_threshold_ms, 'cycle_max_duration_ms': self.cycle_max_duration_ms, 'metrics_interval_ms': self.metrics_interval_ms, 'auto_discover_instances': self.auto_discover_instances, 'execute_entries_on_closed_bar_only': self.execute_entries_on_closed_bar_only}
 
-_TRAILING_MODES = frozenset({'fixed_pips', 'atr_multiple', 'sl_fraction'})
-
 @dataclass(frozen=True)
 class InstanceDefinition:
     account_id: str
     symbol: str
     magic: int
     enabled: bool
-    trailing_mode: str | None = None
-    trailing_step_pips: float | None = None
-    trailing_lookback_bars: int | None = None
-    trailing_atr_mult: float | None = None
-    trailing_atr_period: int | None = None
-    trailing_sl_fraction: float | None = None
-    trailing_spread_floor_mult: float | None = None
-    stop_loss_buffer: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'account_id', _validate_account_id(self.account_id))
         object.__setattr__(self, 'symbol', _validate_symbol(self.symbol))
         object.__setattr__(self, 'magic', _validate_magic(self.magic))
         object.__setattr__(self, 'enabled', _require_bool(self.enabled, 'instances[].enabled'))
-        if self.trailing_mode is not None:
-            mode = _require_non_empty_string(self.trailing_mode, 'instances[].trailing_mode')
-            if mode not in _TRAILING_MODES:
-                raise ValidationError('instances[].trailing_mode is invalid', module='protocol.models', context={'value': mode, 'allowed': sorted(_TRAILING_MODES)})
-            object.__setattr__(self, 'trailing_mode', mode)
-        if self.trailing_step_pips is not None:
-            trailing_step_pips = _require_number(self.trailing_step_pips, 'instances[].trailing_step_pips')
-            if trailing_step_pips < 0:
-                raise ValidationError('instances[].trailing_step_pips must be >= 0', module='protocol.models', context={'value': trailing_step_pips})
-            object.__setattr__(self, 'trailing_step_pips', trailing_step_pips)
-        if self.trailing_lookback_bars is not None:
-            object.__setattr__(self, 'trailing_lookback_bars', _require_int(self.trailing_lookback_bars, 'instances[].trailing_lookback_bars', minimum=1))
-        if self.trailing_atr_mult is not None:
-            trailing_atr_mult = _require_number(self.trailing_atr_mult, 'instances[].trailing_atr_mult')
-            if trailing_atr_mult < 0:
-                raise ValidationError('instances[].trailing_atr_mult must be >= 0', module='protocol.models', context={'value': trailing_atr_mult})
-            object.__setattr__(self, 'trailing_atr_mult', trailing_atr_mult)
-        if self.trailing_atr_period is not None:
-            object.__setattr__(self, 'trailing_atr_period', _require_int(self.trailing_atr_period, 'instances[].trailing_atr_period', minimum=1))
-        if self.trailing_sl_fraction is not None:
-            trailing_sl_fraction = _require_number(self.trailing_sl_fraction, 'instances[].trailing_sl_fraction')
-            if trailing_sl_fraction < 0:
-                raise ValidationError('instances[].trailing_sl_fraction must be >= 0', module='protocol.models', context={'value': trailing_sl_fraction})
-            object.__setattr__(self, 'trailing_sl_fraction', trailing_sl_fraction)
-        if self.trailing_spread_floor_mult is not None:
-            trailing_spread_floor_mult = _require_number(self.trailing_spread_floor_mult, 'instances[].trailing_spread_floor_mult')
-            if trailing_spread_floor_mult < 0:
-                raise ValidationError('instances[].trailing_spread_floor_mult must be >= 0', module='protocol.models', context={'value': trailing_spread_floor_mult})
-            object.__setattr__(self, 'trailing_spread_floor_mult', trailing_spread_floor_mult)
-        if self.stop_loss_buffer is not None:
-            stop_loss_buffer = _require_number(self.stop_loss_buffer, 'instances[].stop_loss_buffer')
-            if stop_loss_buffer < 0:
-                raise ValidationError('instances[].stop_loss_buffer must be >= 0', module='protocol.models', context={'value': stop_loss_buffer})
-            object.__setattr__(self, 'stop_loss_buffer', stop_loss_buffer)
 
     @property
     def instance_key(self) -> InstanceKey:
         return InstanceKey(self.account_id, self.symbol, self.magic)
 
-    def to_dict(self) -> dict[str, str | int | float | bool]:
-        data: dict[str, str | int | float | bool] = {'account_id': self.account_id, 'symbol': self.symbol, 'magic': self.magic, 'enabled': self.enabled}
-        if self.trailing_mode is not None:
-            data['trailing_mode'] = self.trailing_mode
-        if self.trailing_step_pips is not None:
-            data['trailing_step_pips'] = self.trailing_step_pips
-        if self.trailing_lookback_bars is not None:
-            data['trailing_lookback_bars'] = self.trailing_lookback_bars
-        if self.trailing_atr_mult is not None:
-            data['trailing_atr_mult'] = self.trailing_atr_mult
-        if self.trailing_atr_period is not None:
-            data['trailing_atr_period'] = self.trailing_atr_period
-        if self.trailing_sl_fraction is not None:
-            data['trailing_sl_fraction'] = self.trailing_sl_fraction
-        if self.trailing_spread_floor_mult is not None:
-            data['trailing_spread_floor_mult'] = self.trailing_spread_floor_mult
-        if self.stop_loss_buffer is not None:
-            data['stop_loss_buffer'] = self.stop_loss_buffer
-        return data
+    def to_dict(self) -> dict[str, str | int | bool]:
+        return {'account_id': self.account_id, 'symbol': self.symbol, 'magic': self.magic, 'enabled': self.enabled}
+
 ANALYSIS_WEIGHT_KEYS: tuple[str, ...] = ('momentum', 'trend', 'structure', 'pressure', 'behavior', 'impact', 'context')
 
 @dataclass(frozen=True)
@@ -335,11 +275,6 @@ class TradeManagementSettings:
     time_stop_max_bars: int
     trailing_lookback_bars: int
     trailing_step_pips: float
-    trailing_mode: str = 'atr_multiple'
-    trailing_atr_mult: float = 1.2
-    trailing_atr_period: int = 14
-    trailing_sl_fraction: float = 0.5
-    trailing_spread_floor_mult: float = 1.2
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'enabled', _require_bool(self.enabled, 'trade_management.enabled'))
@@ -363,26 +298,9 @@ class TradeManagementSettings:
         if trailing_step_pips < 0:
             raise ValidationError('trade_management.trailing_step_pips must be >= 0', module='protocol.models', context={'value': trailing_step_pips})
         object.__setattr__(self, 'trailing_step_pips', trailing_step_pips)
-        trailing_mode = _require_non_empty_string(self.trailing_mode, 'trade_management.trailing_mode')
-        if trailing_mode not in _TRAILING_MODES:
-            raise ValidationError('trade_management.trailing_mode is invalid', module='protocol.models', context={'value': trailing_mode, 'allowed': sorted(_TRAILING_MODES)})
-        object.__setattr__(self, 'trailing_mode', trailing_mode)
-        trailing_atr_mult = _require_number(self.trailing_atr_mult, 'trade_management.trailing_atr_mult')
-        if trailing_atr_mult < 0:
-            raise ValidationError('trade_management.trailing_atr_mult must be >= 0', module='protocol.models', context={'value': trailing_atr_mult})
-        object.__setattr__(self, 'trailing_atr_mult', trailing_atr_mult)
-        object.__setattr__(self, 'trailing_atr_period', _require_int(self.trailing_atr_period, 'trade_management.trailing_atr_period', minimum=1))
-        trailing_sl_fraction = _require_number(self.trailing_sl_fraction, 'trade_management.trailing_sl_fraction')
-        if trailing_sl_fraction < 0:
-            raise ValidationError('trade_management.trailing_sl_fraction must be >= 0', module='protocol.models', context={'value': trailing_sl_fraction})
-        object.__setattr__(self, 'trailing_sl_fraction', trailing_sl_fraction)
-        trailing_spread_floor_mult = _require_number(self.trailing_spread_floor_mult, 'trade_management.trailing_spread_floor_mult')
-        if trailing_spread_floor_mult < 0:
-            raise ValidationError('trade_management.trailing_spread_floor_mult must be >= 0', module='protocol.models', context={'value': trailing_spread_floor_mult})
-        object.__setattr__(self, 'trailing_spread_floor_mult', trailing_spread_floor_mult)
 
-    def to_dict(self) -> dict[str, int | float | bool | str]:
-        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'use_fixed_take_profit': self.use_fixed_take_profit, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars, 'trailing_lookback_bars': self.trailing_lookback_bars, 'trailing_step_pips': self.trailing_step_pips, 'trailing_mode': self.trailing_mode, 'trailing_atr_mult': self.trailing_atr_mult, 'trailing_atr_period': self.trailing_atr_period, 'trailing_sl_fraction': self.trailing_sl_fraction, 'trailing_spread_floor_mult': self.trailing_spread_floor_mult}
+    def to_dict(self) -> dict[str, int | float | bool]:
+        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'use_fixed_take_profit': self.use_fixed_take_profit, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars, 'trailing_lookback_bars': self.trailing_lookback_bars, 'trailing_step_pips': self.trailing_step_pips}
 
 @dataclass(frozen=True)
 class JournalConfig:
