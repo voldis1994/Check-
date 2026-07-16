@@ -14,10 +14,10 @@ Invoke-WebRequest -Uri $ZipUrl -OutFile $ZipFile -UseBasicParsing
 Expand-Archive -LiteralPath $ZipFile -DestinationPath $Temp -Force
 
 $SystemSrc = Get-ChildItem -Path $Temp -Directory -Recurse |
-    Where-Object { $_.Name -eq "SYSTEM" -and (Test-Path (Join-Path $_.FullName "engine")) } |
+    Where-Object { ($_.Name -ieq "System" -or $_.Name -ieq "SYSTEM") -and (Test-Path (Join-Path $_.FullName "engine")) -and (Test-Path (Join-Path $_.FullName "run_live.py")) } |
     Select-Object -First 1
 
-if (-not $SystemSrc) { throw "SYSTEM mape nav atrasta ZIP arhiva" }
+if (-not $SystemSrc) { throw "System mape nav atrasta ZIP arhiva" }
 
 Write-Host "==> Kopē uz $InstallPath ..." -ForegroundColor Cyan
 if (Test-Path $InstallPath) { Remove-Item $InstallPath -Recurse -Force }
@@ -26,7 +26,8 @@ Copy-Item -Path (Join-Path $SystemSrc.FullName "*") -Destination $InstallPath -R
 
 $config = Join-Path $InstallPath "config\system.json"
 $json = Get-Content $config -Raw | ConvertFrom-Json
-$json.system.root_path = $InstallPath.Replace("\", "\\")
+# ConvertTo-Json escapes backslashes; do not pre-escape the path.
+$json.system.root_path = $InstallPath
 $json | ConvertTo-Json -Depth 20 | Set-Content $config -Encoding UTF8
 
 foreach ($dir in @("data\clients","data\logs","data\cache","data\history","data\universe")) {
@@ -58,10 +59,16 @@ $venvPy = Join-Path $InstallPath ".venv\Scripts\python.exe"
 & $venvPy -m pip install --upgrade pip -q
 & $venvPy -m pip install -r (Join-Path $InstallPath "requirements.txt") -q
 
+Write-Host "==> Sinhronize celus..." -ForegroundColor Cyan
+& $venvPy (Join-Path $InstallPath "scripts\sync_paths.py") --root $InstallPath
+if ($LASTEXITCODE -ne 0) { throw "sync_paths neizdevas" }
+
 Remove-Item $Temp -Recurse -Force
 
 Write-Host ""
 Write-Host "GATAVS!  $InstallPath" -ForegroundColor Green
 Write-Host "Config:   $config"
-Write-Host "Palaid:   $InstallPath\.venv\Scripts\activate"
-Write-Host "          python $InstallPath\run_live.py"
+Write-Host "1) FIX_MT4.bat   (kopē Experts+Include uz MT4)"
+Write-Host "2) MetaEditor F7 Compile SYSTEM_EA.mq4"
+Write-Host "3) PALAID.bat"
+Write-Host "4) DASHBOARD.bat"

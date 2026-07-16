@@ -10,8 +10,8 @@ echo ============================================================
 echo.
 
 if not exist "%ROOT%\config\system.json" (
-  echo [KLUDA] Seit nav SYSTEM projekts. Atver:
-  echo   C:\Check\System
+  echo [KLUDA] Seit nav SYSTEM projekts. Atver mapi ar dashboard.py, piem.:
+  echo   %ROOT%
   pause
   exit /b 1
 )

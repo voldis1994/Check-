@@ -107,3 +107,19 @@ def test_sync_config_instances_from_clients_updates_account_id(tmp_path: Path) -
     assert changed
     payload = json.loads((tmp_path / 'config' / 'system.json').read_text(encoding='utf-8'))
     assert payload['instances'][0]['account_id'] == '999888'
+
+
+def test_sync_config_instances_prefers_market_exports_over_empty_placeholder(tmp_path: Path) -> None:
+    _install_minimal_deployment(tmp_path)
+    sync_deployment_paths(tmp_path)
+    placeholder = tmp_path / 'data' / 'clients' / '231054'
+    placeholder.mkdir(parents=True, exist_ok=True)
+    live = tmp_path / 'data' / 'clients' / '555777'
+    live.mkdir(parents=True, exist_ok=True)
+    (live / 'market_EURUSD_100001.csv').write_text('time_utc,open,high,low,close,volume\n', encoding='utf-8')
+    changed = sync_config_instances_from_clients(tmp_path)
+    assert changed
+    payload = json.loads((tmp_path / 'config' / 'system.json').read_text(encoding='utf-8'))
+    assert payload['instances'][0]['account_id'] == '555777'
+    assert payload['instances'][0]['symbol'] == 'EURUSD'
+    assert payload['instances'][0]['magic'] == 100001

@@ -2,34 +2,57 @@
 
 Python M1 trading platform. Python decides. MT4 exports data and executes orders.
 
-Deploy root: `C:\Check\System`
+Recommended deploy root: `C:\Check\System` (any folder works after `UZSTADIT.bat`).
 
-## Setup
+Trailing: fixed pips via `trade_management.trailing_step_pips` + structure lookback.
+
+## New PC (full path)
 
 ```bat
 cd C:\Check\System
 UZSTADIT.bat
-PALAID.bat
+FIX_MT4.bat
 ```
 
-`UZSTADIT.bat` and `PALAID.bat` automatically run `scripts\sync_paths.py` so Python config, MQL4 root, and runtime root stay aligned.
+Then in MetaEditor:
 
-Or install from GitHub:
+1. Open `Experts\SYSTEM_EA.mq4`
+2. Press **F7 Compile** → **0 errors**
+3. Attach EA to **EURUSD M1**
+4. Common: **Allow DLL imports = YES**
+5. Inputs: `SystemRootPath` = this folder (e.g. `C:\Check\System`)
+
+Start live:
+
+```bat
+PALAID.bat
+DASHBOARD.bat
+```
+
+`FIX_MT4.bat` copies **both** `Experts` and `Include\SYSTEM_*.mqh`.  
+If compile says `can't open ...\Include\SYSTEM_...`, run `FIX_MT4.bat` again on the active Terminal data folder (File → Open Data Folder).
+
+## Install from GitHub
 
 ```bat
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 ```
 
+Or quick ZIP installer:
+
+```bat
+powershell -ExecutionPolicy Bypass -File scripts\lejupielade_uzreiz.ps1
+```
+
 ## Run
 
 ```bat
-python scripts\sync_paths.py
-python tools\show_paths.py
-python tools\validate_live.py
+UZSTADIT.bat
 PALAID.bat
 ```
 
-MT4 EA `SystemRootPath` must match `config/system.json` `system.root_path`.
+`UZSTADIT.bat` / `PALAID.bat` run `scripts\sync_paths.py` so Python config, MQL4 root, and runtime root stay aligned.  
+Account id in config auto-updates from the first `data\clients\<account>\market_*.csv` export.
 
 ## Tests
 

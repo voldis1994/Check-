@@ -10,8 +10,8 @@ echo ============================================================
 echo.
 
 if not exist "%ROOT%\config\system.json" (
-  echo [KLUDA] Seit nav SYSTEM projekts. Atver:
-  echo   C:\Check\System
+  echo [KLUDA] Seit nav SYSTEM projekts. Atver mapi ar run_live.py, piem.:
+  echo   %ROOT%
   pause
   exit /b 1
 )
@@ -41,8 +41,9 @@ echo  PIRMS STARTA PARBAUDI MT4:
 echo    1. SYSTEM_EA uz EURUSD M1
 echo    2. AutoTrading IESLEGTS
 echo    3. SystemRootPath = %ROOT%
-echo  Ja nav failu data\clients\231054\market_*.csv,
+echo  Ja nav failu data\clients\<konts>\market_*.csv,
 echo  Python gaidis ~90s, tad startes ar SKIP lidz EA raksta.
+echo  Konta ID sinhronizes no pirmas market_*.csv mapes.
 echo ------------------------------------------------------------
 echo.
 echo SYSTEM root: %ROOT%
