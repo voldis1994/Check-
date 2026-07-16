@@ -123,3 +123,45 @@ def test_sync_config_instances_prefers_market_exports_over_empty_placeholder(tmp
     assert payload['instances'][0]['account_id'] == '555777'
     assert payload['instances'][0]['symbol'] == 'EURUSD'
     assert payload['instances'][0]['magic'] == 100001
+
+
+def test_sync_config_instances_appends_second_account(tmp_path: Path) -> None:
+    _install_minimal_deployment(tmp_path)
+    sync_deployment_paths(tmp_path)
+    first = tmp_path / 'data' / 'clients' / '111111'
+    second = tmp_path / 'data' / 'clients' / '222222'
+    first.mkdir(parents=True, exist_ok=True)
+    second.mkdir(parents=True, exist_ok=True)
+    (first / 'market_EURUSD_100001.csv').write_text('time_utc,open,high,low,close,volume\n', encoding='utf-8')
+    # Seed config with first live account, then discover second.
+    payload = json.loads((tmp_path / 'config' / 'system.json').read_text(encoding='utf-8'))
+    payload['instances'] = [{'account_id': '111111', 'symbol': 'EURUSD', 'magic': 100001, 'enabled': True}]
+    (tmp_path / 'config' / 'system.json').write_text(json.dumps(payload), encoding='utf-8')
+    (second / 'market_EURUSD_100002.csv').write_text('time_utc,open,high,low,close,volume\n', encoding='utf-8')
+    changed = sync_config_instances_from_clients(tmp_path)
+    assert changed
+    payload = json.loads((tmp_path / 'config' / 'system.json').read_text(encoding='utf-8'))
+    assert len(payload['instances']) == 2
+    assert payload['instances'][0]['account_id'] == '111111'
+    assert payload['instances'][0]['magic'] == 100001
+    assert payload['instances'][1]['account_id'] == '222222'
+    assert payload['instances'][1]['magic'] == 100002
+
+
+def test_sync_config_instances_keeps_waiting_predeclared_account(tmp_path: Path) -> None:
+    _install_minimal_deployment(tmp_path)
+    sync_deployment_paths(tmp_path)
+    payload = json.loads((tmp_path / 'config' / 'system.json').read_text(encoding='utf-8'))
+    payload['instances'] = [
+        {'account_id': '111111', 'symbol': 'EURUSD', 'magic': 100001, 'enabled': True},
+        {'account_id': '222222', 'symbol': 'EURUSD', 'magic': 100002, 'enabled': True},
+    ]
+    (tmp_path / 'config' / 'system.json').write_text(json.dumps(payload), encoding='utf-8')
+    live = tmp_path / 'data' / 'clients' / '111111'
+    live.mkdir(parents=True, exist_ok=True)
+    (live / 'market_EURUSD_100001.csv').write_text('time_utc,open,high,low,close,volume\n', encoding='utf-8')
+    changed = sync_config_instances_from_clients(tmp_path)
+    assert not changed
+    payload = json.loads((tmp_path / 'config' / 'system.json').read_text(encoding='utf-8'))
+    assert len(payload['instances']) == 2
+    assert payload['instances'][1]['account_id'] == '222222'

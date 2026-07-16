@@ -43,7 +43,8 @@ echo    2. AutoTrading IESLEGTS
 echo    3. SystemRootPath = %ROOT%
 echo  Ja nav failu data\clients\<konts>\market_*.csv,
 echo  Python gaidis ~90s, tad startes ar SKIP lidz EA raksta.
-echo  Konta ID sinhronizes no pirmas market_*.csv mapes.
+echo  Vairaki konti: skaties KONTI.bat  ^(katram kontam savs MT4 + magic^).
+echo  instances[] sinhronizes no visiem market_*.csv eksportiem.
 echo ------------------------------------------------------------
 echo.
 echo SYSTEM root: %ROOT%

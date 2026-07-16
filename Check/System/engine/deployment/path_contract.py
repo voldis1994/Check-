@@ -198,6 +198,35 @@ def _account_dirs_with_market_exports(clients_dir: Path) -> list[Path]:
     return [entry for _, entry in ranked]
 
 
+def _discover_market_instance_rows(clients_dir: Path, *, parse_market_filename) -> list[dict[str, str | int | bool]]:
+    rows: list[dict[str, str | int | bool]] = []
+    seen: set[tuple[str, str, int]] = set()
+    for account_dir in _account_dirs_with_market_exports(clients_dir):
+        for entry in sorted(account_dir.glob('market_*.csv')):
+            parsed = parse_market_filename(entry.name)
+            if parsed is None:
+                continue
+            symbol, magic = parsed
+            key = (account_dir.name, symbol, magic)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({'account_id': account_dir.name, 'symbol': symbol, 'magic': magic, 'enabled': True})
+    return rows
+
+
+def _instance_key(row: dict[str, object]) -> tuple[str, str, int] | None:
+    try:
+        account_id = str(row.get('account_id') or '')
+        symbol = str(row.get('symbol') or '')
+        magic = int(row.get('magic'))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not account_id or not symbol:
+        return None
+    return (account_id, symbol, magic)
+
+
 def sync_config_instances_from_clients(root: str | Path, *, config_path: Path | None=None) -> bool:
     from engine.core.config import load_system_config
     from engine.core.lifecycle import build_system_paths, parse_market_filename
@@ -210,40 +239,64 @@ def sync_config_instances_from_clients(root: str | Path, *, config_path: Path | 
     clients_dir = paths.clients_dir
     if not clients_dir.is_dir():
         return False
-    export_dirs = _account_dirs_with_market_exports(clients_dir)
-    if not export_dirs:
+    discovered = _discover_market_instance_rows(clients_dir, parse_market_filename=parse_market_filename)
+    if not discovered:
         return False
     payload = json.loads(resolved_config_path.read_text(encoding='utf-8'))
     instances = payload.get('instances')
     if not isinstance(instances, list) or not instances:
         return False
-    first = instances[0]
-    if not isinstance(first, dict):
+    existing = [item for item in instances if isinstance(item, dict)]
+    if not existing:
         return False
-    configured_account = str(first.get('account_id') or '')
-    primary_dir = next((entry for entry in export_dirs if entry.name == configured_account), export_dirs[0])
-    primary_account = primary_dir.name
-    discovered_symbol: str | None = None
-    discovered_magic: int | None = None
-    for entry in sorted(primary_dir.iterdir()):
-        if not entry.is_file():
+
+    discovered_by_account: dict[str, list[dict[str, str | int | bool]]] = {}
+    for row in discovered:
+        discovered_by_account.setdefault(str(row['account_id']), []).append(row)
+    discovered_keys = {_instance_key(row) for row in discovered}
+    discovered_keys.discard(None)
+
+    # Single stale placeholder (config account has no exports) → replace with all live exports.
+    only_account = str(existing[0].get('account_id') or '')
+    if len(existing) == 1 and only_account not in discovered_by_account:
+        payload['instances'] = discovered
+        resolved_config_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+        return True
+
+    merged: list[dict[str, str | int | bool]] = []
+    covered: set[tuple[str, str, int]] = set()
+
+    for item in existing:
+        key = _instance_key(item)
+        account_id = str(item.get('account_id') or '')
+        account_rows = discovered_by_account.get(account_id, [])
+        if key is not None and key in discovered_keys:
+            enabled = bool(item.get('enabled', True))
+            row = {'account_id': key[0], 'symbol': key[1], 'magic': key[2], 'enabled': enabled}
+            merged.append(row)
+            covered.add(key)
             continue
-        parsed = parse_market_filename(entry.name)
-        if parsed is not None:
-            discovered_symbol, discovered_magic = parsed
-            break
-    changed = False
-    if first.get('account_id') != primary_account:
-        first['account_id'] = primary_account
-        changed = True
-    if discovered_symbol is not None and first.get('symbol') != discovered_symbol:
-        first['symbol'] = discovered_symbol
-        changed = True
-    if discovered_magic is not None and first.get('magic') != discovered_magic:
-        first['magic'] = discovered_magic
-        changed = True
-    if not changed:
+        if len(account_rows) == 1:
+            row = dict(account_rows[0])
+            row['enabled'] = bool(item.get('enabled', True))
+            row_key = _instance_key(row)
+            if row_key is not None:
+                covered.add(row_key)
+            merged.append(row)
+            continue
+        # Keep pre-declared account waiting for its first EA export.
+        merged.append({'account_id': account_id, 'symbol': str(item.get('symbol') or 'EURUSD'), 'magic': int(item.get('magic') or 100001), 'enabled': bool(item.get('enabled', True))})
+
+    for row in discovered:
+        row_key = _instance_key(row)
+        if row_key is None or row_key in covered:
+            continue
+        merged.append(dict(row))
+        covered.add(row_key)
+
+    if merged == existing:
         return False
+    payload['instances'] = merged
     resolved_config_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     return True
 

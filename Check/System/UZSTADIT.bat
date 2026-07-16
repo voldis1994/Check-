@@ -65,17 +65,20 @@ echo ============================================================
 echo   GATAVS!
 echo ============================================================
 echo.
-echo  Nākamais solis — palaid live:
+echo  Nakamais solis — palaid live:
 echo    PALAID.bat
-echo  Un atverī live dashboard ^(otrā CMD logā^):
+echo  Un atveri live dashboard ^(otra CMD loga^):
 echo    DASHBOARD.bat
 echo.
 echo  MT4 (vienreiz — Obligati gan Experts, gan Include):
 echo    FIX_MT4.bat
-echo      ^(automātiski meklē %%APPDATA%%\MetaQuotes\Terminal\*\MQL4^)
+echo      ^(automatiski mekle %%APPDATA%%\MetaQuotes\Terminal\*\MQL4^)
 echo    MetaEditor: F7 Compile SYSTEM_EA.mq4  ^(0 errors^)
 echo    EA: Allow DLL imports=YES, SystemRootPath=%ROOT%
 echo    Ja "can't open ...\Include\SYSTEM_..." — palaid FIX_MT4.bat atkartoti.
+echo.
+echo  Vairaki konti viena PC: KONTI.bat
+echo    ^(katram kontam savs MT4 terminalis + cits MagicNumber^)
 echo.
 if /I "%~1"=="--quiet" exit /b 0
 pause
