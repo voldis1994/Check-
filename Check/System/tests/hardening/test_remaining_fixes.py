@@ -276,13 +276,25 @@ def test_15_ack_timeout_sets_pending_does_not_clear() -> None:
 
 
 def test_16_ack_timeout_status_reconcile_confirms_broker(tmp_path: Path) -> None:
+    from engine.execution.order_comment import build_open_order_comment
+
     paths = SystemPaths(tmp_path)
     instance = Instance('12345', 'EURUSD', 100001)
     paths.ensure_account_directories(instance.account_id)
     state = InstanceState(instance)
     state.instrument_digits = 5
     state.instrument_point = 0.00001
-    state.set_pending_execution(command_id='pending-open', side='BUY', volume=0.01)
+    comment = build_open_order_comment('pending-open')
+    state.set_pending_execution(
+        command_id='pending-open',
+        decision_id='dec-1',
+        since_utc='2026-07-17T12:00:00.000Z',
+        comment=comment,
+        symbol='EURUSD',
+        magic=100001,
+        side='BUY',
+        volume=0.01,
+    )
     status = _status(
         positions=(
             StatusPositionSnapshot(
@@ -295,6 +307,7 @@ def test_16_ack_timeout_status_reconcile_confirms_broker(tmp_path: Path) -> None
                 stop_loss=1.09,
                 take_profit=0.0,
                 open_time_utc='2026-07-17T12:00:01.000Z',
+                order_comment=comment,
             ),
         )
     )
@@ -313,7 +326,7 @@ def test_16b_same_ticket_does_not_clear_pending_after_modify_timeout(tmp_path: P
     state.instrument_digits = 5
     state.instrument_point = 0.00001
     state.update_position(open_ticket=555, position_side='BUY', position_volume=0.01, entry_price=1.1, stop_loss=1.09)
-    state.set_pending_execution(command_id='pending-open', side='BUY', volume=0.01)
+    state.set_pending_execution(command_id='pending-open', side='BUY', volume=0.01, comment='pending-open', since_utc='2026-07-17T12:00:00.000Z', symbol='EURUSD', magic=100001)
     status = _status(
         positions=(
             StatusPositionSnapshot(
@@ -325,6 +338,7 @@ def test_16b_same_ticket_does_not_clear_pending_after_modify_timeout(tmp_path: P
                 entry_price=1.1,
                 stop_loss=1.088,
                 take_profit=0.0,
+                order_comment='pending-open',
             ),
         )
     )
@@ -338,7 +352,15 @@ def test_16c_pending_side_mismatch_does_not_confirm(tmp_path: Path) -> None:
     instance = Instance('12345', 'EURUSD', 100001)
     paths.ensure_account_directories(instance.account_id)
     state = InstanceState(instance)
-    state.set_pending_execution(command_id='pending-open', side='BUY', volume=0.01)
+    state.set_pending_execution(
+        command_id='pending-open',
+        side='BUY',
+        volume=0.01,
+        comment='pending-open',
+        since_utc='2026-07-17T12:00:00.000Z',
+        symbol='EURUSD',
+        magic=100001,
+    )
     status = _status(
         positions=(
             StatusPositionSnapshot(
@@ -348,6 +370,8 @@ def test_16c_pending_side_mismatch_does_not_confirm(tmp_path: Path) -> None:
                 side='SELL',
                 volume=0.01,
                 entry_price=1.1003,
+                order_comment='pending-open',
+                open_time_utc='2026-07-17T12:00:01.000Z',
             ),
         )
     )

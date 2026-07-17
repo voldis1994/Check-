@@ -137,7 +137,19 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
         # OPEN ACK timeout: keep pending until status/history reconciles. Timeout alone must not clear it.
         # MODIFY/CLOSE timeouts do not set pending — same ticket still open is not proof of outcome.
         if order_command.action == OrderAction.OPEN.value:
-            instance_state.set_pending_execution(command_id=order_command.command_id, side=order_command.side, volume=order_command.volume)
+            from engine.execution.order_comment import build_open_order_comment
+            comment = order_command.order_comment or build_open_order_comment(order_command.command_id)
+            instance_state.set_pending_execution(
+                command_id=order_command.command_id,
+                decision_id=order_command.decision_id,
+                since_utc=resolved_timestamp,
+                comment=comment,
+                symbol=instance.symbol,
+                magic=instance.magic,
+                side=order_command.side,
+                volume=order_command.volume,
+                preexisting_tickets=(),
+            )
         archive_processed_control(paths, instance)
         archive_processed_ack(paths, instance)
         trade_entry = log_trade_ack_timeout(paths, instance, command_id=order_command.command_id, timestamp_utc=resolved_timestamp)

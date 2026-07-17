@@ -22,11 +22,13 @@ class ControlCommandData:
     stop_loss: float = 0.0
     take_profit: float = 0.0
     ticket: int = 0
+    order_comment: str = ''
     has_side: bool = False
     has_volume: bool = False
     has_stop_loss: bool = False
     has_take_profit: bool = False
     has_ticket: bool = False
+    has_order_comment: bool = False
 
 def build_control_file_path(root_path: str, account_id: str, symbol: str, magic: int) -> str:
     return f'{root_path}\\data\\clients\\{account_id}\\control_{symbol}_{magic}.json'
@@ -126,6 +128,10 @@ def parse_control_command(json_text: str) -> tuple[ControlCommandData | None, st
     if ticket is not None:
         command.ticket = ticket
         command.has_ticket = True
+    order_comment = extract_json_string_field(json_text, 'order_comment')
+    if order_comment is not None:
+        command.order_comment = order_comment
+        command.has_order_comment = True
     return (command, '')
 
 def validate_control_instance(command: ControlCommandData, *, expected_account_id: str, expected_symbol: str, expected_magic: int) -> str:

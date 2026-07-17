@@ -62,9 +62,11 @@ def test_system_status_exports_all_account_open_positions(status_source: str) ->
     assert 'OrdersTotal' in body
     assert 'OrderSymbol()' in body
     assert 'OrderMagicNumber()' in body
+    assert 'OrderComment()' in body
     assert 'open_positions' in body
     entry_body = mql_source.function_body(status_source, 'SYSTEM_BuildOpenPositionEntryJson')
     assert 'open_time_utc' in entry_body
+    assert 'order_comment' in entry_body
 
 def test_system_export_closed_trade_writes_closed_json(status_source: str) -> None:
     body = mql_source.function_body(status_source, 'SYSTEM_ExportClosedTrade')

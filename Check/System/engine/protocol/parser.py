@@ -187,6 +187,8 @@ def _parse_status_positions(payload: dict[str, Any]) -> tuple[StatusPositionSnap
             kwargs['take_profit'] = item['take_profit']
         if 'open_time_utc' in item and item['open_time_utc'] is not None:
             kwargs['open_time_utc'] = item['open_time_utc']
+        if 'order_comment' in item and item['order_comment'] is not None:
+            kwargs['order_comment'] = item['order_comment']
         positions.append(_build_model(StatusPositionSnapshot, 'status', **kwargs))
     return tuple(positions)
 
@@ -215,7 +217,7 @@ def parse_control(data: dict[str, Any] | str) -> ControlCommand:
     payload = _ensure_mapping(data, 'control')
     schema_version = _validate_schema_version(payload, 'control', is_supported_protocol_schema_version)
     kwargs: dict[str, Any] = {'schema_version': schema_version, 'timestamp_utc': _require_key(payload, 'timestamp_utc', 'control'), 'command_id': _require_key(payload, 'command_id', 'control'), 'account_id': _require_key(payload, 'account_id', 'control'), 'symbol': _require_key(payload, 'symbol', 'control'), 'magic': _require_key(payload, 'magic', 'control'), 'action': _require_key(payload, 'action', 'control'), 'reason': _require_key(payload, 'reason', 'control'), 'decision_id': _require_key(payload, 'decision_id', 'control')}
-    for optional in ('side', 'volume', 'stop_loss', 'take_profit', 'ticket'):
+    for optional in ('side', 'volume', 'stop_loss', 'take_profit', 'ticket', 'order_comment'):
         if optional in payload and payload[optional] is not None:
             kwargs[optional] = payload[optional]
     return _build_model(ControlCommand, 'control', **kwargs)

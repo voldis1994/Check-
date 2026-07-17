@@ -401,6 +401,7 @@ class StatusPositionSnapshot:
     stop_loss: float | None = None
     take_profit: float | None = None
     open_time_utc: str | None = None
+    order_comment: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'symbol', _validate_symbol(self.symbol))
@@ -422,6 +423,8 @@ class StatusPositionSnapshot:
             object.__setattr__(self, 'take_profit', _require_number(self.take_profit, 'open_positions.take_profit'))
         if self.open_time_utc is not None:
             object.__setattr__(self, 'open_time_utc', _require_non_empty_string(self.open_time_utc, 'open_positions.open_time_utc'))
+        if self.order_comment is not None:
+            object.__setattr__(self, 'order_comment', _require_non_empty_string(self.order_comment, 'open_positions.order_comment'))
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {'symbol': self.symbol, 'magic': self.magic, 'ticket': self.ticket, 'side': self.side, 'volume': self.volume}
@@ -433,6 +436,8 @@ class StatusPositionSnapshot:
             data['take_profit'] = self.take_profit
         if self.open_time_utc is not None:
             data['open_time_utc'] = self.open_time_utc
+        if self.order_comment is not None:
+            data['order_comment'] = self.order_comment
         return data
 
 @dataclass(frozen=True)
@@ -541,6 +546,7 @@ class ControlCommand:
     stop_loss: float | None = None
     take_profit: float | None = None
     ticket: int | None = None
+    order_comment: str | None = None
 
     def __post_init__(self) -> None:
         schema_version = _require_non_empty_string(self.schema_version, 'schema_version')
@@ -571,6 +577,8 @@ class ControlCommand:
             object.__setattr__(self, 'take_profit', _require_number(self.take_profit, 'take_profit'))
         if self.ticket is not None:
             object.__setattr__(self, 'ticket', _require_int(self.ticket, 'ticket', minimum=0))
+        if self.order_comment is not None:
+            object.__setattr__(self, 'order_comment', _require_non_empty_string(self.order_comment, 'order_comment'))
 
     @property
     def instance_key(self) -> InstanceKey:
@@ -588,6 +596,8 @@ class ControlCommand:
             data['take_profit'] = self.take_profit
         if self.ticket is not None:
             data['ticket'] = self.ticket
+        if self.order_comment is not None:
+            data['order_comment'] = self.order_comment
         return data
 
 @dataclass(frozen=True)

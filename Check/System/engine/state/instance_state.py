@@ -32,8 +32,15 @@ class InstanceState:
     last_command_id: str = ''
     last_ack_status: str = ''
     pending_execution_command_id: str | None = None
+    pending_execution_decision_id: str | None = None
+    pending_execution_since_utc: str | None = None
+    pending_execution_comment: str | None = None
+    pending_symbol: str | None = None
+    pending_magic_number: int | None = None
     pending_execution_side: str | None = None
     pending_execution_volume: float | None = None
+    pending_preexisting_tickets: tuple[int, ...] = ()
+    ambiguous_pending_execution: bool = False
     duplicate_position_anomaly: bool = False
     close_pending_reconciliation: bool = False
     close_pending_ticket: int | None = None
@@ -117,13 +124,39 @@ class InstanceState:
 
     def clear_pending_execution(self) -> None:
         self.pending_execution_command_id = None
+        self.pending_execution_decision_id = None
+        self.pending_execution_since_utc = None
+        self.pending_execution_comment = None
+        self.pending_symbol = None
+        self.pending_magic_number = None
         self.pending_execution_side = None
         self.pending_execution_volume = None
+        self.pending_preexisting_tickets = ()
+        self.ambiguous_pending_execution = False
 
-    def set_pending_execution(self, *, command_id: str, side: str | None=None, volume: float | None=None) -> None:
+    def set_pending_execution(
+        self,
+        *,
+        command_id: str,
+        decision_id: str | None=None,
+        since_utc: str | None=None,
+        comment: str | None=None,
+        symbol: str | None=None,
+        magic: int | None=None,
+        side: str | None=None,
+        volume: float | None=None,
+        preexisting_tickets: tuple[int, ...]=(),
+    ) -> None:
         self.pending_execution_command_id = command_id
+        self.pending_execution_decision_id = decision_id
+        self.pending_execution_since_utc = since_utc
+        self.pending_execution_comment = comment
+        self.pending_symbol = symbol
+        self.pending_magic_number = magic
         self.pending_execution_side = side
         self.pending_execution_volume = volume
+        self.pending_preexisting_tickets = tuple(preexisting_tickets)
+        self.ambiguous_pending_execution = False
 
     def clear_close_pending(self) -> None:
         self.close_pending_reconciliation = False
@@ -194,10 +227,24 @@ class InstanceState:
             data['position_last_bar_utc'] = self.position_last_bar_utc
         if self.pending_execution_command_id is not None:
             data['pending_execution_command_id'] = self.pending_execution_command_id
+        if self.pending_execution_decision_id is not None:
+            data['pending_execution_decision_id'] = self.pending_execution_decision_id
+        if self.pending_execution_since_utc is not None:
+            data['pending_execution_since_utc'] = self.pending_execution_since_utc
+        if self.pending_execution_comment is not None:
+            data['pending_execution_comment'] = self.pending_execution_comment
+        if self.pending_symbol is not None:
+            data['pending_symbol'] = self.pending_symbol
+        if self.pending_magic_number is not None:
+            data['pending_magic_number'] = self.pending_magic_number
         if self.pending_execution_side is not None:
             data['pending_execution_side'] = self.pending_execution_side
         if self.pending_execution_volume is not None:
             data['pending_execution_volume'] = self.pending_execution_volume
+        if self.pending_preexisting_tickets:
+            data['pending_preexisting_tickets'] = list(self.pending_preexisting_tickets)
+        if self.ambiguous_pending_execution:
+            data['ambiguous_pending_execution'] = True
         if self.duplicate_position_anomaly:
             data['duplicate_position_anomaly'] = True
         if self.close_pending_reconciliation:
@@ -265,12 +312,31 @@ class InstanceState:
         pending_execution_command_id = payload.get('pending_execution_command_id')
         if pending_execution_command_id is not None:
             state.pending_execution_command_id = str(pending_execution_command_id)
+        pending_execution_decision_id = payload.get('pending_execution_decision_id')
+        if pending_execution_decision_id is not None:
+            state.pending_execution_decision_id = str(pending_execution_decision_id)
+        pending_execution_since_utc = payload.get('pending_execution_since_utc')
+        if pending_execution_since_utc is not None:
+            state.pending_execution_since_utc = str(pending_execution_since_utc)
+        pending_execution_comment = payload.get('pending_execution_comment')
+        if pending_execution_comment is not None:
+            state.pending_execution_comment = str(pending_execution_comment)
+        pending_symbol = payload.get('pending_symbol')
+        if pending_symbol is not None:
+            state.pending_symbol = str(pending_symbol)
+        pending_magic_number = payload.get('pending_magic_number')
+        if pending_magic_number is not None:
+            state.pending_magic_number = int(pending_magic_number)
         pending_execution_side = payload.get('pending_execution_side')
         if pending_execution_side is not None:
             state.pending_execution_side = str(pending_execution_side)
         pending_execution_volume = payload.get('pending_execution_volume')
         if pending_execution_volume is not None:
             state.pending_execution_volume = float(pending_execution_volume)
+        preexisting = payload.get('pending_preexisting_tickets')
+        if isinstance(preexisting, list):
+            state.pending_preexisting_tickets = tuple(int(item) for item in preexisting)
+        state.ambiguous_pending_execution = bool(payload.get('ambiguous_pending_execution', False))
         state.duplicate_position_anomaly = bool(payload.get('duplicate_position_anomaly', False))
         state.close_pending_reconciliation = bool(payload.get('close_pending_reconciliation', False))
         close_pending_ticket = payload.get('close_pending_ticket')

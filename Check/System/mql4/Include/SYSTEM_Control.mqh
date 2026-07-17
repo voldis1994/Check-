@@ -27,11 +27,13 @@ struct SYSTEM_ControlCommand
    double stop_loss;
    double take_profit;
    int ticket;
+   string order_comment;
    bool has_side;
    bool has_volume;
    bool has_stop_loss;
    bool has_take_profit;
    bool has_ticket;
+   bool has_order_comment;
 };
 
 void SYSTEM_ResetControlCommand(SYSTEM_ControlCommand &command)
@@ -50,11 +52,13 @@ void SYSTEM_ResetControlCommand(SYSTEM_ControlCommand &command)
    command.stop_loss = 0.0;
    command.take_profit = 0.0;
    command.ticket = 0;
+   command.order_comment = "";
    command.has_side = false;
    command.has_volume = false;
    command.has_stop_loss = false;
    command.has_take_profit = false;
    command.has_ticket = false;
+   command.has_order_comment = false;
 }
 
 string SYSTEM_BuildControlFilePath(const string account_id, const string symbol, const int magic)
@@ -266,6 +270,8 @@ bool SYSTEM_ParseControlCommand(const string json, SYSTEM_ControlCommand &comman
       command.has_take_profit = true;
    if(SYSTEM_ExtractJsonIntField(json, "ticket", command.ticket))
       command.has_ticket = true;
+   if(SYSTEM_ExtractJsonStringField(json, "order_comment", command.order_comment))
+      command.has_order_comment = true;
 
    return true;
 }

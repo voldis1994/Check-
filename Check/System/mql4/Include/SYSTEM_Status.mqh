@@ -99,7 +99,8 @@ string SYSTEM_BuildOpenPositionEntryJson(
    const double entry_price,
    const double stop_loss,
    const double take_profit,
-   const datetime open_time
+   const datetime open_time,
+   const string order_comment
 )
 {
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
@@ -117,6 +118,8 @@ string SYSTEM_BuildOpenPositionEntryJson(
    json = json + "      \"take_profit\": " + SYSTEM_FormatJsonNumber(take_profit, digits);
    if(open_time > 0)
       json = json + ",\n      \"open_time_utc\": \"" + SYSTEM_FormatTimeUtc(open_time) + "\"";
+   if(StringLen(order_comment) > 0)
+      json = json + ",\n      \"order_comment\": \"" + SYSTEM_EscapeJsonString(order_comment) + "\"";
    json = json + "\n    }";
    return json;
 }
@@ -148,7 +151,8 @@ string SYSTEM_BuildOpenPositionsJson()
          OrderOpenPrice(),
          OrderStopLoss(),
          OrderTakeProfit(),
-         OrderOpenTime()
+         OrderOpenTime(),
+         OrderComment()
       );
       count++;
    }

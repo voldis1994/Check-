@@ -69,6 +69,43 @@ double SYSTEM_CommandIdHash(const string command_id)
    return hash;
 }
 
+string SYSTEM_UIntToHex8(const uint value)
+{
+   string digits = "0123456789ABCDEF";
+   string hex = "";
+   for(int i = 0; i < 8; i++)
+   {
+      int nibble = (int)((value >> (28 - i * 4)) & 0xF);
+      hex = hex + StringSubstr(digits, nibble, 1);
+   }
+   return hex;
+}
+
+string SYSTEM_BuildOpenOrderComment(const string command_id)
+{
+   // MT4 OrderComment limit is 31 chars. Prefer full command_id when it fits;
+   // otherwise use deterministic C{hex8} matching Python build_open_order_comment.
+   int length = StringLen(command_id);
+   if(length > 0 && length <= 31)
+      return command_id;
+
+   uint hash = 5381;
+   for(int index = 0; index < length; index++)
+      hash = hash * 33 + (uint)StringGetCharacter(command_id, index);
+   return "C" + SYSTEM_UIntToHex8(hash);
+}
+
+string SYSTEM_ResolveOpenOrderComment(const SYSTEM_ControlCommand &command)
+{
+   if(command.has_order_comment && StringLen(command.order_comment) > 0)
+   {
+      if(StringLen(command.order_comment) <= 31)
+         return command.order_comment;
+      return StringSubstr(command.order_comment, 0, 31);
+   }
+   return SYSTEM_BuildOpenOrderComment(command.command_id);
+}
+
 string SYSTEM_LoadProcessedCommandId(const string account_id, const string symbol, const int magic)
 {
    string path = SYSTEM_BuildProcessedCommandFilePath(account_id, symbol, magic);
@@ -324,6 +361,7 @@ bool SYSTEM_ExecuteOpen(
    double price = (trade_command == OP_BUY) ? MarketInfo(command.symbol, MODE_ASK) : MarketInfo(command.symbol, MODE_BID);
    double stop_loss = command.has_stop_loss ? command.stop_loss : 0.0;
    double take_profit = command.has_take_profit ? command.take_profit : 0.0;
+   string order_comment = SYSTEM_ResolveOpenOrderComment(command);
 
    int ticket = OrderSend(
       command.symbol,
@@ -333,7 +371,7 @@ bool SYSTEM_ExecuteOpen(
       SYSTEM_DEFAULT_SLIPPAGE,
       stop_loss,
       take_profit,
-      command.reason,
+      order_comment,
       command.magic,
       0,
       clrNONE

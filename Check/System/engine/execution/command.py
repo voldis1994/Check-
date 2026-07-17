@@ -24,6 +24,7 @@ class OrderCommand:
     stop_loss: float | None = None
     take_profit: float | None = None
     ticket: int | None = None
+    order_comment: str | None = None
 
 def _none_command(*, command_id: str, reason: str, decision_id: str) -> OrderCommand:
     return OrderCommand(command_id=command_id, action=OrderAction.NONE.value, reason=reason, decision_id=decision_id)
@@ -49,7 +50,8 @@ def _open_command(*, command_id: str, side: str, volume: float, stop_loss: float
         raise _validation_error('open command side must be BUY or SELL', side=side)
     if volume <= 0:
         raise _validation_error('open command volume must be > 0', volume=volume)
-    return OrderCommand(command_id=command_id, action=OrderAction.OPEN.value, side=side, volume=volume, stop_loss=stop_loss, take_profit=take_profit, reason=reason, decision_id=decision_id)
+    from engine.execution.order_comment import build_open_order_comment
+    return OrderCommand(command_id=command_id, action=OrderAction.OPEN.value, side=side, volume=volume, stop_loss=stop_loss, take_profit=take_profit, reason=reason, decision_id=decision_id, order_comment=build_open_order_comment(command_id))
 
 def build_modify_order_command(*, ticket: int, side: str, stop_loss: float, take_profit: float, reason: str, decision_id: str, command_id: str | None=None) -> OrderCommand:
     return _modify_command(command_id=command_id or str(uuid4()), ticket=ticket, side=side, stop_loss=stop_loss, take_profit=take_profit, reason=reason, decision_id=decision_id)

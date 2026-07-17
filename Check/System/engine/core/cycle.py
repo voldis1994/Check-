@@ -23,7 +23,7 @@ from engine.loader.universe_loader import RawUniverseData, load_universe_data
 from engine.normalizer.instrument_params import derive_instrument_params, detect_params_change
 from engine.normalizer.market_normalizer import NormalizedMarketBar, normalize_market_csv
 from engine.normalizer.spread_model import SpreadModelSnapshot, update_spread_model_from_sensor
-from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_CLOSE_PENDING_RECONCILIATION, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_INSTANCE_CONFLICT, REASON_STALE_STATUS_TIMESTAMP, REASON_STALE_UNIVERSE_TIMESTAMP, RiskResult, Side
+from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_AMBIGUOUS_PENDING_EXECUTION, REASON_CLOSE_PENDING_RECONCILIATION, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_INSTANCE_CONFLICT, REASON_STALE_STATUS_TIMESTAMP, REASON_STALE_UNIVERSE_TIMESTAMP, RiskResult, Side
 from engine.protocol.errors import DataIOError, SystemError
 from engine.protocol.models import SensorReading, StatusRecord, TradeManagementSettings, UniverseRecord
 from engine.protocol.parser import parse_sensor_csv, parse_universe
@@ -467,6 +467,9 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         if instance_memory.instance_state.pending_execution_command_id is not None:
             effective_risk = _block_open_risk_result(build_reason(REASON_EXECUTION_OUTCOME_UNRESOLVED, 'pending execution outcome blocks new OPEN', pending_command_id=instance_memory.instance_state.pending_execution_command_id))
             log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.EXECUTION.value, message='new OPEN blocked due to unresolved pending execution', context={'reason': REASON_EXECUTION_OUTCOME_UNRESOLVED, 'pending_command_id': instance_memory.instance_state.pending_execution_command_id})
+        elif instance_memory.instance_state.ambiguous_pending_execution:
+            effective_risk = _block_open_risk_result(build_reason(REASON_AMBIGUOUS_PENDING_EXECUTION, 'ambiguous pending OPEN blocks new OPEN'))
+            log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.EXECUTION.value, message='new OPEN blocked due to ambiguous pending execution', context={'reason': REASON_AMBIGUOUS_PENDING_EXECUTION})
         elif instance_memory.instance_state.close_pending_reconciliation:
             effective_risk = _block_open_risk_result(build_reason(REASON_CLOSE_PENDING_RECONCILIATION, 'close pending reconciliation blocks new OPEN', ticket=instance_memory.instance_state.close_pending_ticket))
             log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='new OPEN blocked due to close pending reconciliation', context={'reason': REASON_CLOSE_PENDING_RECONCILIATION, 'ticket': instance_memory.instance_state.close_pending_ticket})
