@@ -163,25 +163,21 @@ def test_07_closed_trade_match_journals_real_close(tmp_path: Path) -> None:
     assert 'swap' in payload['reason']
 
 
-def test_08_close_pending_kept_when_closed_file_missing(tmp_path: Path) -> None:
+def test_08_broker_flat_force_clears_ghost_when_closed_file_missing(tmp_path: Path) -> None:
     paths = SystemPaths(tmp_path)
     instance = Instance('12345', 'EURUSD', 100001)
     paths.ensure_account_directories(instance.account_id)
     state = InstanceState(instance)
     state.update_position(open_ticket=77, position_side='SELL', position_volume=0.02, entry_price=1.2, stop_loss=1.21)
     result = reconcile_position_with_status(paths, instance, state, _status(positions=()), timestamp_utc='2026-07-17T12:06:00.000Z')
-    assert result.close_pending is True
-    assert state.close_pending_reconciliation is True
-    assert state.close_pending_ticket == 77
-    # Active position state retained until closed-trade history confirms.
-    assert state.open_ticket == 77
-    assert state.position_entry_price == pytest.approx(1.2)
-    # Still pending next cycle
+    assert result.close_pending is False
+    assert result.close_reconciled is True
+    assert state.close_pending_reconciliation is False
+    assert state.open_ticket is None
+    # Second cycle stays flat / empty
     result2 = reconcile_position_with_status(paths, instance, state, _status(positions=()), timestamp_utc='2026-07-17T12:07:00.000Z')
-    assert state.close_pending_reconciliation is True
-    assert state.open_ticket == 77
-    assert result2.close_reconciled is False
-    assert result2.close_pending is True
+    assert state.open_ticket is None
+    assert result2.close_pending is False
 
 
 def test_09_never_invent_sl_or_entry_as_close_price(tmp_path: Path) -> None:
@@ -191,13 +187,14 @@ def test_09_never_invent_sl_or_entry_as_close_price(tmp_path: Path) -> None:
     state = InstanceState(instance)
     state.update_position(open_ticket=9, position_side='BUY', position_volume=0.01, entry_price=1.1000, stop_loss=1.0900)
     reconcile_position_with_status(paths, instance, state, _status(positions=()), timestamp_utc='2026-07-17T12:06:00.000Z')
-    assert state.open_ticket == 9
+    assert state.open_ticket is None
     journal_files = list(paths.account_journal_dir(instance.account_id).glob('trade_*.jsonl'))
     for path in journal_files:
         for line in path.read_text(encoding='utf-8').splitlines():
             if not line.strip():
                 continue
             payload = json.loads(line)
+            # Ghost clear must not invent SL/entry as broker close price.
             assert payload.get('price') not in {1.1, 1.1000, 1.09, 1.0900}
 
 

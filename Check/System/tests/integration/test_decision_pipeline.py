@@ -11,14 +11,40 @@ from engine.core.cycle import run_instance_ai_risk_pipeline, run_instance_decisi
 from engine.decision.engine import DecisionResult
 from engine.journal.decision_journal import build_decision_journal_path, log_decision
 from engine.protocol.constants import REASON_EQUAL_SCORES, REASON_RISK_MAX_POSITIONS, Decision, RiskResult
-from engine.protocol.models import StatusRecord
-from engine.protocol.writer import DECISION_JOURNAL_REQUIRED_FIELDS
+from engine.protocol.models import StatusPositionSnapshot, StatusRecord
+from engine.protocol.writer import DECISION_JOURNAL_REQUIRED_FIELDS, write_status
 from engine.risk.engine import RiskEngineResult, RiskEngineTradeParams
 from engine.state.instance_state import InstanceState
 from tests.core.config_payload import valid_system_config_payload
 from tests.integration.test_data_pipeline import FIXTURES_DIR, _install_integration_fixtures, _instance, run_instance_data_pipeline
 from tests.protocol.test_writer import required_fields_present
 MODULE_NAME = 'integration.decision_pipeline'
+
+def _write_status_with_open_position(paths: SystemPaths, instance: Instance, *, ticket: int = 1001) -> None:
+    status = StatusRecord(
+        schema_version='1.0.0',
+        timestamp_utc='2026-07-07T06:03:00.000Z',
+        account_id=instance.account_id,
+        connected=True,
+        trade_allowed=True,
+        balance=10000.0,
+        equity=10020.5,
+        margin_free=9800.0,
+        ea_version='1.0.0',
+        open_positions=(
+            StatusPositionSnapshot(
+                symbol=instance.symbol,
+                magic=instance.magic,
+                ticket=ticket,
+                side='BUY',
+                volume=0.1,
+                entry_price=1.1015,
+                stop_loss=1.0988,
+                take_profit=1.1117,
+            ),
+        ),
+    )
+    (paths.account_dir(instance.account_id) / instance.status_filename()).write_text(write_status(status), encoding='utf-8')
 
 @dataclass(frozen=True)
 class DecisionPipelineResult:
@@ -101,6 +127,7 @@ def test_risk_block_includes_risk_reason(tmp_path: Path) -> None:
     assert data_result.completed
     memory.instance_state.update_position(open_ticket=1001, position_side='BUY', position_volume=0.1)
     memory.instance_state.save(runtime.paths)
+    _write_status_with_open_position(runtime.paths, instance, ticket=1001)
     result = run_instance_decision_pipeline(runtime, instance, use_global_universe=False, timestamp_utc='2026-07-07T06:03:00.000Z')
     assert result.completed
     assert result.decision_result is not None
@@ -132,6 +159,7 @@ def test_decision_journal_contains_all_decisions(tmp_path: Path) -> None:
     assert run_instance_data_pipeline(risk_runtime, risk_instance, use_global_universe=False).completed
     risk_memory.instance_state.update_position(open_ticket=1001, position_side='BUY', position_volume=0.1)
     risk_memory.instance_state.save(risk_runtime.paths)
+    _write_status_with_open_position(risk_runtime.paths, risk_instance, ticket=1001)
     third = run_instance_decision_pipeline(risk_runtime, risk_instance, use_global_universe=False, timestamp_utc='2026-07-07T06:03:00.000Z')
     assert third.completed
     assert third.risk_engine_result is not None

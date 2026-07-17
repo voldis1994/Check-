@@ -154,6 +154,55 @@ def _archive_money_trailing_state(paths: SystemPaths, instance: Instance, instan
     atomic_write_json(archive_path, snapshot, pretty=True)
 
 
+def _force_clear_broker_flat_position(
+    paths: SystemPaths,
+    instance: Instance,
+    instance_state: InstanceState,
+    *,
+    timestamp_utc: str,
+) -> None:
+    """Broker status has no matching open position — clear ghost Python state.
+
+    Prefer closed-trade reconciliation when available. If history is missing or
+    mismatched, still clear so RISK_MAX_POSITIONS / close_pending cannot stick forever
+    while MT4 Trade is empty.
+    """
+    ticket = instance_state.close_pending_ticket or instance_state.open_ticket
+    side = instance_state.close_pending_side or instance_state.position_side
+    volume = instance_state.close_pending_volume if instance_state.close_pending_volume is not None else instance_state.position_volume
+    reason = build_reason(
+        REASON_EXTERNAL_POSITION_CLOSE,
+        'broker status flat; clearing local position state without confirmed closed-trade history',
+        ticket=ticket if ticket is not None else 0,
+        symbol=instance.symbol,
+        magic=instance.magic,
+        ghost_clear=True,
+    )
+    log_error(
+        paths,
+        instance,
+        module=MODULE_NAME,
+        error_type=ErrorType.PROTOCOL.value,
+        message='ghost/local position cleared because broker status has no open position',
+        context={'reason': reason, 'ticket': ticket, 'close_pending': instance_state.close_pending_reconciliation},
+    )
+    log_external_position_close(
+        paths,
+        instance,
+        ticket=ticket if ticket is not None else 0,
+        side=side,
+        volume=volume,
+        timestamp_utc=timestamp_utc,
+        price=None,
+        stop_loss=None,
+        reason=reason,
+    )
+    _archive_money_trailing_state(paths, instance, instance_state)
+    instance_state.clear_close_pending()
+    instance_state.clear_position()
+    instance_state.clear_pending_execution()
+
+
 def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance_state: InstanceState, *, timestamp_utc: str) -> bool:
     ticket = instance_state.close_pending_ticket
     if ticket is None:
@@ -347,6 +396,10 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
             trade_journal_logged = True
             close_reconciled = True
             return PositionSyncResult(changed=changed, external_close=external_close, trade_journal_logged=trade_journal_logged, duplicate_anomaly=False, close_pending=False, close_reconciled=True, broker_execution_confirmed=False, ambiguous_pending=False)
+        elif status_position is None and len(matches) == 0:
+            # Still broker-flat and no usable closed history: force-clear ghost state.
+            _force_clear_broker_flat_position(paths, instance, instance_state, timestamp_utc=timestamp_utc)
+            return PositionSyncResult(changed=True, external_close=True, trade_journal_logged=True, duplicate_anomaly=False, close_pending=False, close_reconciled=True, broker_execution_confirmed=False, ambiguous_pending=False)
         else:
             close_pending = True
             return PositionSyncResult(changed=changed, external_close=False, trade_journal_logged=False, duplicate_anomaly=False, close_pending=True, close_reconciled=False, broker_execution_confirmed=False, ambiguous_pending=False)
@@ -358,6 +411,12 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
                 close_reconciled = True
                 trade_journal_logged = True
                 external_close = True
+            elif status_position is None and len(matches) == 0:
+                _force_clear_broker_flat_position(paths, instance, instance_state, timestamp_utc=timestamp_utc)
+                close_reconciled = True
+                trade_journal_logged = True
+                external_close = True
+                close_pending = False
             else:
                 close_pending = True
                 reason = build_reason(REASON_CLOSE_PENDING_RECONCILIATION, 'external close pending reconciliation; waiting for closed trade file', ticket=instance_state.close_pending_ticket)

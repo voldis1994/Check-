@@ -24,6 +24,14 @@ def test_open_position_count_reflects_instance_state() -> None:
     assert open_position_count(_instance_state(with_position=False)) == 0
     assert open_position_count(_instance_state(with_position=True)) == 1
 
+def test_open_position_count_prefers_live_status_over_ghost_ticket() -> None:
+    state = _instance_state(with_position=True)
+    empty_status = _status(trade_allowed=True)
+    assert open_position_count(state) == 1
+    assert open_position_count(state, status=empty_status) == 0
+    allowed = check_max_open_positions(instance_state=state, risk_config=_risk_config(), status=empty_status)
+    assert allowed.allowed
+
 def test_check_max_open_positions_blocks_when_limit_reached() -> None:
     allowed = check_max_open_positions(instance_state=_instance_state(with_position=False), risk_config=_risk_config())
     blocked = check_max_open_positions(instance_state=_instance_state(with_position=True), risk_config=_risk_config())

@@ -21,7 +21,12 @@ def _allowed() -> RiskRuleResult:
 def _blocked(reason: str) -> RiskRuleResult:
     return RiskRuleResult(allowed=False, reason=reason)
 
-def open_position_count(instance_state: InstanceState) -> int:
+def open_position_count(instance_state: InstanceState, *, status: StatusRecord | None = None) -> int:
+    """Count open positions. Prefer live MT4 status when provided — never trust ghost local tickets alone."""
+    if status is not None:
+        symbol = instance_state.instance.symbol
+        magic = instance_state.instance.magic
+        return sum(1 for position in status.open_positions if position.symbol == symbol and position.magic == magic)
     return 1 if instance_state.open_ticket is not None else 0
 
 def check_trade_allowed(*, status: StatusRecord) -> RiskRuleResult:
@@ -29,8 +34,8 @@ def check_trade_allowed(*, status: StatusRecord) -> RiskRuleResult:
         return _allowed()
     return _blocked(build_reason(REASON_ACCOUNT_NOT_TRADEABLE, 'account trading is disabled', account_id=status.account_id))
 
-def check_max_open_positions(*, instance_state: InstanceState, risk_config: RiskConfig) -> RiskRuleResult:
-    current_count = open_position_count(instance_state)
+def check_max_open_positions(*, instance_state: InstanceState, risk_config: RiskConfig, status: StatusRecord | None = None) -> RiskRuleResult:
+    current_count = open_position_count(instance_state, status=status)
     if current_count < risk_config.max_open_positions_per_instance:
         return _allowed()
     return _blocked(build_reason(REASON_RISK_MAX_POSITIONS, 'open position limit reached', open_position_count=current_count, max_open_positions_per_instance=risk_config.max_open_positions_per_instance))
@@ -50,7 +55,7 @@ def check_max_drawdown(*, risk_config: RiskConfig, drawdown_percent: float) -> R
     return _blocked(build_reason(REASON_RISK_MAX_DRAWDOWN, 'drawdown limit reached', drawdown_percent=drawdown_percent, max_drawdown_percent=risk_config.max_drawdown_percent))
 
 def evaluate_risk_rules(*, status: StatusRecord, instance_state: InstanceState, risk_config: RiskConfig, risk_context: RiskContext) -> RiskRuleResult:
-    checks = (check_trade_allowed(status=status), check_max_open_positions(instance_state=instance_state, risk_config=risk_config), check_max_daily_loss(risk_config=risk_config, daily_loss_percent=risk_context.daily_loss_percent), check_max_drawdown(risk_config=risk_config, drawdown_percent=risk_context.drawdown_percent))
+    checks = (check_trade_allowed(status=status), check_max_open_positions(instance_state=instance_state, risk_config=risk_config, status=status), check_max_daily_loss(risk_config=risk_config, daily_loss_percent=risk_context.daily_loss_percent), check_max_drawdown(risk_config=risk_config, drawdown_percent=risk_context.drawdown_percent))
     for result in checks:
         if not result.allowed:
             return result

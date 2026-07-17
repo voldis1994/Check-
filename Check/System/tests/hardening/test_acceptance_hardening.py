@@ -261,18 +261,16 @@ def test_12_external_close_without_invented_price(tmp_path: Path) -> None:
     )
     result = reconcile_position_with_status(paths, instance, state, status, timestamp_utc='2026-07-17T12:00:05.000Z')
     assert result.external_close is True
-    assert result.close_pending is True
-    assert state.open_ticket == 9
-    assert state.close_pending_reconciliation is True
-    assert state.close_pending_ticket == 9
-    # No finalized close journal with invented SL/entry price while pending.
+    assert result.close_pending is False
+    assert result.close_reconciled is True
+    assert state.open_ticket is None
+    assert state.close_pending_reconciliation is False
+    # Ghost clear journal must not invent SL/entry as close price.
     trade_files = list(journal_dir.glob('trade_*.jsonl'))
-    if trade_files:
-        for line in trade_files[0].read_text(encoding='utf-8').strip().splitlines():
-            payload = json.loads(line)
-            assert payload.get('price') in (None,) or 'price' not in payload
-            assert payload.get('price') != 1.09
-            assert payload.get('price') != 1.1
+    assert trade_files
+    for line in trade_files[0].read_text(encoding='utf-8').strip().splitlines():
+        payload = json.loads(line)
+        assert payload.get('price') not in {1.09, 1.1, 1.1000, 1.0900}
 
 
 def test_13_instance_isolation_threadpool_does_not_serialize_sleep() -> None:
