@@ -185,6 +185,8 @@ def _parse_status_positions(payload: dict[str, Any]) -> tuple[StatusPositionSnap
             kwargs['stop_loss'] = item['stop_loss']
         if 'take_profit' in item and item['take_profit'] is not None:
             kwargs['take_profit'] = item['take_profit']
+        if 'open_time_utc' in item and item['open_time_utc'] is not None:
+            kwargs['open_time_utc'] = item['open_time_utc']
         positions.append(_build_model(StatusPositionSnapshot, 'status', **kwargs))
     return tuple(positions)
 
@@ -222,7 +224,7 @@ def parse_ack(data: dict[str, Any] | str) -> AckRecord:
     payload = _ensure_mapping(data, 'ack')
     schema_version = _validate_schema_version(payload, 'ack', is_supported_protocol_schema_version)
     kwargs: dict[str, Any] = {'schema_version': schema_version, 'timestamp_utc': _require_key(payload, 'timestamp_utc', 'ack'), 'command_id': _require_key(payload, 'command_id', 'ack'), 'account_id': _require_key(payload, 'account_id', 'ack'), 'symbol': _require_key(payload, 'symbol', 'ack'), 'magic': _require_key(payload, 'magic', 'ack'), 'status': _require_key(payload, 'status', 'ack')}
-    for optional in ('ticket', 'error_code', 'error_message'):
+    for optional in ('ticket', 'error_code', 'error_message', 'fill_price', 'open_time_utc', 'volume', 'side'):
         if optional in payload and payload[optional] is not None:
             kwargs[optional] = payload[optional]
     return _build_model(AckRecord, 'ack', **kwargs)

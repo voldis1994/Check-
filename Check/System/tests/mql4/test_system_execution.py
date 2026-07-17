@@ -19,7 +19,7 @@ CONTROL_JSON_MODIFY = '{\n  "schema_version": "1.0.0",\n  "timestamp_utc": "2026
 CONTROL_JSON_CLOSE = '{\n  "schema_version": "1.0.0",\n  "timestamp_utc": "2026-07-07T06:00:00.000Z",\n  "command_id": "cmd-close-1",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "action": "CLOSE",\n  "ticket": 555,\n  "reason": "close position",\n  "decision_id": "dec-close"\n}'
 
 def test_system_execution_public_functions_are_defined(execution_source: str) -> None:
-    expected = {'SYSTEM_ResetAckResult', 'SYSTEM_BuildAckFilePath', 'SYSTEM_IsSupportedAckStatus', 'SYSTEM_BuildAckJson', 'SYSTEM_WriteAck', 'SYSTEM_SelectOrderByTicket', 'SYSTEM_IsSupportedTradeSide', 'SYSTEM_TradeCommandForSide', 'SYSTEM_SetRejectedAck', 'SYSTEM_SetFailedAck', 'SYSTEM_SetSuccessAck', 'SYSTEM_ExecuteOpen', 'SYSTEM_ExecuteModify', 'SYSTEM_ExecuteClose', 'SYSTEM_ExecuteControlCommand', 'SYSTEM_TryExecutePendingControl', 'SYSTEM_ExecutionPerformsAnalysis'}
+    expected = {'SYSTEM_ResetAckResult', 'SYSTEM_BuildAckFilePath', 'SYSTEM_IsSupportedAckStatus', 'SYSTEM_BuildAckJson', 'SYSTEM_WriteAck', 'SYSTEM_SelectOrderByTicket', 'SYSTEM_IsSupportedTradeSide', 'SYSTEM_TradeCommandForSide', 'SYSTEM_SetRejectedAck', 'SYSTEM_SetFailedAck', 'SYSTEM_SetSuccessAck', 'SYSTEM_ExecuteOpen', 'SYSTEM_ExecuteModify', 'SYSTEM_ExecuteClose', 'SYSTEM_ExecuteControlCommand', 'SYSTEM_TryExecutePendingControl', 'SYSTEM_ExecutionPerformsAnalysis', 'SYSTEM_ProcessedCommandGvName', 'SYSTEM_IsCommandProcessed', 'SYSTEM_MarkCommandProcessed', 'SYSTEM_LoadProcessedCommandId', 'SYSTEM_SetSuccessAckWithFill'}
     assert expected.issubset(set(mql_source.public_function_names(execution_source)))
 
 def test_system_build_ack_file_path_uses_instance_template() -> None:
@@ -53,6 +53,10 @@ def test_system_build_ack_json_function_includes_required_fields(execution_sourc
     body = mql_source.function_body(execution_source, 'SYSTEM_BuildAckJson')
     for field in ACK_REQUIRED_FIELDS:
         assert field in body
+    assert 'fill_price' in body
+    assert 'open_time_utc' in body
+    assert 'volume' in body
+    assert 'side' in body
 
 def test_system_build_ack_json_includes_error_fields_for_failed_status() -> None:
     json_text = execution_reference.build_ack_json(command_id='cmd-fail', account_id='12345', symbol='EURUSD', magic=100001, status=AckStatus.FAILED.value, timestamp_utc='2026-07-07T06:00:00.000Z', error_code=130, error_message='OrderSend failed')
@@ -81,6 +85,8 @@ def test_system_execute_open_function_uses_order_send_with_magic(execution_sourc
     assert 'command.magic' in body
     assert 'SYSTEM_IsSupportedTradeSide' in body
     assert 'SYSTEM_TradeCommandForSide' in body
+    assert 'OrderOpenPrice' in body
+    assert 'SYSTEM_SetSuccessAckWithFill' in body
 
 def test_open_sell_executes_with_magic_context() -> None:
     command, _ = control_reference.parse_control_command(CONTROL_JSON_OPEN_SELL)
@@ -175,6 +181,12 @@ def test_system_try_execute_pending_control_skips_processed_command_id(execution
     assert 'last_processed_command_id' in body
     assert 'SYSTEM_ReadControlCommand' in body
     assert 'SYSTEM_WriteAck' in body
+    assert 'SYSTEM_IsCommandProcessed' in body
+    assert 'SYSTEM_MarkCommandProcessed' in body
+    mark_pos = body.find('SYSTEM_MarkCommandProcessed')
+    write_positions = [idx for idx in range(len(body)) if body.startswith('SYSTEM_WriteAck', idx)]
+    assert mark_pos >= 0
+    assert any(write_pos > mark_pos for write_pos in write_positions)
 
 def test_try_execute_pending_control_does_not_repeat_same_command_id() -> None:
     command_id, result, error = execution_reference.try_execute_pending_control(CONTROL_JSON_VALID, account_id='12345', symbol='EURUSD', magic=100001, last_processed_command_id='cmd-1', context=execution_reference.OrderExecutionContext(symbol='EURUSD', magic=100001))

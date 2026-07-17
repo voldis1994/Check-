@@ -11,6 +11,8 @@ input string SystemRootPath = "";
 
 datetime g_last_exported_bar_time = 0;
 string g_last_processed_command_id = "";
+uint g_last_sensor_status_export_ms = 0;
+int g_sensor_status_export_interval_ms = 500;
 
 int OnInit()
 {
@@ -29,6 +31,11 @@ int OnInit()
       return INIT_FAILED;
    }
 
+   string account_id = IntegerToString(AccountNumber());
+   string symbol = Symbol();
+   int magic = MagicNumber;
+   g_last_processed_command_id = SYSTEM_LoadProcessedCommandId(account_id, symbol, magic);
+   g_last_sensor_status_export_ms = GetTickCount();
    return INIT_SUCCEEDED;
 }
 
@@ -38,17 +45,27 @@ void OnTick()
    string symbol = Symbol();
    int magic = MagicNumber;
 
-   if(SYSTEM_IsNewM1Bar(symbol, g_last_exported_bar_time))
+   uint now_ms = GetTickCount();
+   uint elapsed_ms = now_ms - g_last_sensor_status_export_ms;
+   if(elapsed_ms >= (uint)g_sensor_status_export_interval_ms)
    {
-      if(!SYSTEM_ExportMarketAndSensor(account_id, symbol, magic))
-      {
-         Print("SYSTEM export failed for ", symbol, " magic=", magic);
-         return;
-      }
+      if(!SYSTEM_ExportSensorReading(account_id, symbol, magic))
+         Print("SYSTEM sensor export failed for ", symbol, " magic=", magic);
 
       if(!SYSTEM_ExportStatus(account_id, symbol, magic))
-      {
          Print("SYSTEM status export failed for account ", account_id);
+
+      if(!SYSTEM_ExportClosedTrade(account_id, symbol, magic))
+         Print("SYSTEM closed trade export failed for ", symbol, " magic=", magic);
+
+      g_last_sensor_status_export_ms = now_ms;
+   }
+
+   if(SYSTEM_IsNewM1Bar(symbol, g_last_exported_bar_time))
+   {
+      if(!SYSTEM_ExportMarketBar(account_id, symbol, magic, 1))
+      {
+         Print("SYSTEM market export failed for ", symbol, " magic=", magic);
          return;
       }
 

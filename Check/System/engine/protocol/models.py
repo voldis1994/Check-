@@ -405,6 +405,7 @@ class StatusPositionSnapshot:
     entry_price: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None
+    open_time_utc: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'symbol', _validate_symbol(self.symbol))
@@ -424,6 +425,8 @@ class StatusPositionSnapshot:
             object.__setattr__(self, 'stop_loss', _require_number(self.stop_loss, 'open_positions.stop_loss'))
         if self.take_profit is not None:
             object.__setattr__(self, 'take_profit', _require_number(self.take_profit, 'open_positions.take_profit'))
+        if self.open_time_utc is not None:
+            object.__setattr__(self, 'open_time_utc', _require_non_empty_string(self.open_time_utc, 'open_positions.open_time_utc'))
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {'symbol': self.symbol, 'magic': self.magic, 'ticket': self.ticket, 'side': self.side, 'volume': self.volume}
@@ -433,6 +436,8 @@ class StatusPositionSnapshot:
             data['stop_loss'] = self.stop_loss
         if self.take_profit is not None:
             data['take_profit'] = self.take_profit
+        if self.open_time_utc is not None:
+            data['open_time_utc'] = self.open_time_utc
         return data
 
 @dataclass(frozen=True)
@@ -602,6 +607,10 @@ class AckRecord:
     ticket: int | None = None
     error_code: int | None = None
     error_message: str | None = None
+    fill_price: float | None = None
+    open_time_utc: str | None = None
+    volume: float | None = None
+    side: str | None = None
 
     def __post_init__(self) -> None:
         schema_version = _require_non_empty_string(self.schema_version, 'schema_version')
@@ -623,6 +632,17 @@ class AckRecord:
             object.__setattr__(self, 'error_code', _require_int(self.error_code, 'error_code'))
         if self.error_message is not None:
             object.__setattr__(self, 'error_message', _require_non_empty_string(self.error_message, 'error_message'))
+        if self.fill_price is not None:
+            object.__setattr__(self, 'fill_price', _require_number(self.fill_price, 'fill_price'))
+        if self.open_time_utc is not None:
+            object.__setattr__(self, 'open_time_utc', _require_non_empty_string(self.open_time_utc, 'open_time_utc'))
+        if self.volume is not None:
+            object.__setattr__(self, 'volume', _require_number(self.volume, 'volume'))
+        if self.side is not None:
+            side = _require_non_empty_string(self.side, 'side')
+            if side not in {Side.BUY.value, Side.SELL.value}:
+                raise ValidationError('side is invalid', module='protocol.models', context={'value': side})
+            object.__setattr__(self, 'side', side)
 
     @property
     def instance_key(self) -> InstanceKey:
@@ -636,6 +656,14 @@ class AckRecord:
             data['error_code'] = self.error_code
         if self.error_message is not None:
             data['error_message'] = self.error_message
+        if self.fill_price is not None:
+            data['fill_price'] = self.fill_price
+        if self.open_time_utc is not None:
+            data['open_time_utc'] = self.open_time_utc
+        if self.volume is not None:
+            data['volume'] = self.volume
+        if self.side is not None:
+            data['side'] = self.side
         return data
 
 @dataclass(frozen=True)

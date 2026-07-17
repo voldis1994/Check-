@@ -43,13 +43,17 @@ def build_market_csv(*, symbol: str, scenario: MarketScenario='bullish', timesta
         lines[-1] = lines[-1].replace(rows[-1][0], timestamp_utc, 1)
     return '\n'.join(lines) + '\n'
 
-def build_sensor_csv(*, symbol: str, scenario: MarketScenario='bullish', timestamp_utc: str='2026-07-07T06:02:00.000Z') -> str:
+def build_sensor_csv(*, symbol: str, scenario: MarketScenario='bullish', timestamp_utc: str='2026-07-07T06:02:00.000Z', close_override: float | None=None) -> str:
     if scenario == 'bullish':
         readings = [('2026-07-07T06:00:00.000Z', 1.1014, 1.10155, 0.00015, 15), ('2026-07-07T06:01:00.000Z', 1.1021, 1.1023, 0.0002, 20), ('2026-07-07T06:02:00.000Z', 1.1029, 1.10315, 0.00025, 25)]
     else:
         readings = [('2026-07-07T06:00:00.000Z', 1.1024, 1.10255, 0.00015, 15), ('2026-07-07T06:01:00.000Z', 1.1011, 1.1013, 0.0002, 20), ('2026-07-07T06:02:00.000Z', 1.0994, 1.09965, 0.00025, 25)]
     lines = ['time_utc,bid,ask,spread,spread_points,symbol,digits,point']
     for time_value, bid, ask, spread, spread_points in readings:
+        if close_override is not None and time_value == readings[-1][0]:
+            half = spread / 2.0
+            bid = close_override - half
+            ask = close_override + half
         lines.append(f'{time_value},{bid:.5f},{ask:.5f},{spread:.5f},{spread_points},{symbol},5,0.00001')
     if timestamp_utc != readings[-1][0]:
         lines[-1] = lines[-1].replace(readings[-1][0], timestamp_utc, 1)
@@ -89,7 +93,10 @@ class MT4Simulator:
         if control.action == OrderAction.OPEN.value:
             if ack_record.ticket is None or control.side is None or control.volume is None:
                 return
-            self._open_positions[key] = {'symbol': control.symbol, 'magic': control.magic, 'ticket': ack_record.ticket, 'side': control.side, 'volume': control.volume, 'entry_price': control.stop_loss, 'stop_loss': control.stop_loss, 'take_profit': control.take_profit}
+            position: dict[str, object] = {'symbol': control.symbol, 'magic': control.magic, 'ticket': ack_record.ticket, 'side': control.side, 'volume': control.volume, 'stop_loss': control.stop_loss, 'take_profit': control.take_profit}
+            if ack_record.fill_price is not None:
+                position['entry_price'] = ack_record.fill_price
+            self._open_positions[key] = position
         elif control.action == OrderAction.MODIFY.value:
             position = self._open_positions.get(key)
             if position is None:
@@ -118,7 +125,7 @@ class MT4Simulator:
         status_path = account_dir / instance.status_filename()
         universe_path = account_dir / 'universe.json'
         atomic_write_text(market_path, build_market_csv(symbol=instance.symbol, scenario=market_scenario, timestamp_utc=timestamp_utc, close_override=close_override))
-        atomic_write_text(sensor_path, build_sensor_csv(symbol=instance.symbol, scenario=market_scenario, timestamp_utc=timestamp_utc))
+        atomic_write_text(sensor_path, build_sensor_csv(symbol=instance.symbol, scenario=market_scenario, timestamp_utc=timestamp_utc, close_override=close_override))
         atomic_write_text(status_path, build_status_json(account_id=instance.account_id, scenario=status_scenario, timestamp_utc=timestamp_utc, open_positions=self._position_payload(instance)))
         atomic_write_text(universe_path, build_universe_json(timestamp_utc=timestamp_utc))
         return ExportTickResult(instance=instance, market_path=market_path, sensor_path=sensor_path, status_path=status_path, universe_path=universe_path)

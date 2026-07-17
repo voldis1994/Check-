@@ -29,14 +29,22 @@ def test_system_ea_requires_m1_timeframe_on_init(ea_source: str) -> None:
 def test_system_ea_initializes_paths_on_init(ea_source: str) -> None:
     assert 'SYSTEM_InitPaths()' in ea_source
 
-def test_system_ea_exports_on_new_m1_bar(ea_source: str) -> None:
+def test_system_ea_exports_market_and_universe_on_new_m1_bar(ea_source: str) -> None:
     assert 'SYSTEM_IsNewM1Bar' in ea_source
-    assert 'SYSTEM_ExportMarketAndSensor' in ea_source
+    assert 'SYSTEM_ExportMarketBar' in ea_source
+    assert 'SYSTEM_ExportUniverse' in ea_source
     assert 'g_last_exported_bar_time' in ea_source
 
-def test_system_ea_exports_status_and_universe_on_new_m1_bar(ea_source: str) -> None:
+def test_system_ea_throttles_sensor_and_status_export(ea_source: str) -> None:
+    assert 'SYSTEM_ExportSensorReading' in ea_source
     assert 'SYSTEM_ExportStatus' in ea_source
-    assert 'SYSTEM_ExportUniverse' in ea_source
+    assert 'SYSTEM_ExportClosedTrade' in ea_source
+    assert 'g_sensor_status_export_interval_ms' in ea_source
+    assert 'GetTickCount' in ea_source
+
+def test_system_ea_loads_processed_command_id_on_init(ea_source: str) -> None:
+    assert 'SYSTEM_LoadProcessedCommandId' in ea_source
+    assert 'g_last_processed_command_id' in ea_source
 
 def test_system_ea_uses_account_symbol_and_magic_for_export(ea_source: str) -> None:
     assert 'AccountNumber()' in ea_source

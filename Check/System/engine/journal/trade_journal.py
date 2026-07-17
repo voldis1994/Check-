@@ -125,9 +125,9 @@ def log_trade_intent(paths: SystemPaths, instance: Instance, params: TradeIntent
 def log_trade_ack(paths: SystemPaths, instance: Instance, ack_record: AckRecord, *, timestamp_utc: str | None=None, price: float | None=None) -> TradeJournalEntry:
     return update_trade_journal_ack(paths, instance, ack_record, timestamp_utc=timestamp_utc, price=price)
 
-def log_external_position_close(paths: SystemPaths, instance: Instance, *, ticket: int | None, side: str | None, volume: float | None, timestamp_utc: str | None=None, price: float | None=None, stop_loss: float | None=None) -> TradeJournalEntry:
-    reason = build_reason(REASON_EXTERNAL_POSITION_CLOSE, 'position closed on MT4 without Python CLOSE command', ticket=ticket)
-    entry = TradeJournalEntry(trade_id=str(uuid4()), timestamp_utc=timestamp_utc or now_utc(), account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic, event=TradeEvent.CLOSE.value, command_id=f'external-close-{uuid4()}', ack_status=AckStatus.SUCCESS.value, reason=reason, side=side, volume=volume, ticket=ticket, price=price, stop_loss=stop_loss)
+def log_external_position_close(paths: SystemPaths, instance: Instance, *, ticket: int | None, side: str | None, volume: float | None, timestamp_utc: str | None=None, price: float | None=None, stop_loss: float | None=None, reason: str | None=None) -> TradeJournalEntry:
+    resolved_reason = reason or build_reason(REASON_EXTERNAL_POSITION_CLOSE, 'position closed on MT4 without Python CLOSE command', ticket=ticket)
+    entry = TradeJournalEntry(trade_id=str(uuid4()), timestamp_utc=timestamp_utc or now_utc(), account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic, event=TradeEvent.CLOSE.value, command_id=f'external-close-{uuid4()}', ack_status=AckStatus.SUCCESS.value, reason=resolved_reason, side=side, volume=volume, ticket=ticket, price=price, stop_loss=stop_loss)
     append_trade_journal_entry(paths, instance, entry)
     return entry
 

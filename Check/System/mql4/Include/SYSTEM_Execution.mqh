@@ -7,6 +7,7 @@
 #include <SYSTEM_Status.mqh>
 
 #define SYSTEM_ACK_FILENAME_TEMPLATE "ack_%s_%d.json"
+#define SYSTEM_PROCESSED_CMD_FILENAME_TEMPLATE "processed_cmd_%s_%d.txt"
 #define SYSTEM_ACK_STATUS_SUCCESS "SUCCESS"
 #define SYSTEM_ACK_STATUS_FAILED "FAILED"
 #define SYSTEM_ACK_STATUS_REJECTED "REJECTED"
@@ -21,6 +22,11 @@ struct SYSTEM_AckResult
    int error_code;
    string error_message;
    bool has_ticket;
+   double fill_price;
+   bool has_fill_price;
+   datetime open_time;
+   double volume;
+   string side;
 };
 
 void SYSTEM_ResetAckResult(SYSTEM_AckResult &result)
@@ -30,12 +36,100 @@ void SYSTEM_ResetAckResult(SYSTEM_AckResult &result)
    result.error_code = 0;
    result.error_message = "";
    result.has_ticket = false;
+   result.fill_price = 0.0;
+   result.has_fill_price = false;
+   result.open_time = 0;
+   result.volume = 0.0;
+   result.side = "";
 }
 
 string SYSTEM_BuildAckFilePath(const string account_id, const string symbol, const int magic)
 {
    string filename = StringFormat(SYSTEM_ACK_FILENAME_TEMPLATE, symbol, magic);
    return SYSTEM_JoinPath(SYSTEM_BuildAccountDir(account_id), filename);
+}
+
+string SYSTEM_BuildProcessedCommandFilePath(const string account_id, const string symbol, const int magic)
+{
+   string filename = StringFormat(SYSTEM_PROCESSED_CMD_FILENAME_TEMPLATE, symbol, magic);
+   return SYSTEM_JoinPath(SYSTEM_BuildAccountDir(account_id), filename);
+}
+
+string SYSTEM_ProcessedCommandGvName(const string account_id, const string symbol, const int magic)
+{
+   return "SYSTEM_CMD_" + account_id + "_" + symbol + "_" + IntegerToString(magic);
+}
+
+double SYSTEM_CommandIdHash(const string command_id)
+{
+   double hash = 5381.0;
+   int length = StringLen(command_id);
+   for(int index = 0; index < length; index++)
+      hash = hash * 33.0 + (double)StringGetCharacter(command_id, index);
+   return hash;
+}
+
+string SYSTEM_LoadProcessedCommandId(const string account_id, const string symbol, const int magic)
+{
+   string path = SYSTEM_BuildProcessedCommandFilePath(account_id, symbol, magic);
+   string content = "";
+   if(!SYSTEM_ReadTextFile(path, content))
+      return "";
+   if(StringLen(content) == 0)
+      return "";
+
+   int end = StringLen(content);
+   while(end > 0)
+   {
+      int ch = StringGetCharacter(content, end - 1);
+      if(ch != '\n' && ch != '\r' && ch != ' ' && ch != '\t')
+         break;
+      end--;
+   }
+   if(end <= 0)
+      return "";
+   return StringSubstr(content, 0, end);
+}
+
+bool SYSTEM_IsCommandProcessed(
+   const string account_id,
+   const string symbol,
+   const int magic,
+   const string command_id
+)
+{
+   if(StringLen(command_id) == 0)
+      return false;
+
+   string gv_name = SYSTEM_ProcessedCommandGvName(account_id, symbol, magic);
+   if(GlobalVariableCheck(gv_name))
+   {
+      if(GlobalVariableGet(gv_name) == SYSTEM_CommandIdHash(command_id))
+         return true;
+   }
+
+   string persisted = SYSTEM_LoadProcessedCommandId(account_id, symbol, magic);
+   return persisted == command_id;
+}
+
+void SYSTEM_MarkCommandProcessed(
+   const string account_id,
+   const string symbol,
+   const int magic,
+   const string command_id
+)
+{
+   if(StringLen(command_id) == 0)
+      return;
+
+   string gv_name = SYSTEM_ProcessedCommandGvName(account_id, symbol, magic);
+   GlobalVariableSet(gv_name, SYSTEM_CommandIdHash(command_id));
+
+   if(SYSTEM_EnsureAccountDirectories(account_id))
+   {
+      string path = SYSTEM_BuildProcessedCommandFilePath(account_id, symbol, magic);
+      SYSTEM_AtomicWriteText(path, command_id + "\n");
+   }
 }
 
 bool SYSTEM_IsSupportedAckStatus(const string status)
@@ -54,10 +148,19 @@ string SYSTEM_BuildAckJson(
    const int ticket,
    const bool has_ticket,
    const int error_code,
-   const string error_message
+   const string error_message,
+   const double fill_price,
+   const bool has_fill_price,
+   const datetime open_time,
+   const double volume,
+   const string side
 )
 {
    string timestamp_utc = SYSTEM_FormatTimeUtc(TimeCurrent());
+   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   if(digits <= 0)
+      digits = 5;
+
    string json = "{\n";
    json = json + "  \"account_id\": \"" + SYSTEM_EscapeJsonString(account_id) + "\",\n";
    json = json + "  \"command_id\": \"" + SYSTEM_EscapeJsonString(command_id) + "\",\n";
@@ -68,6 +171,14 @@ string SYSTEM_BuildAckJson(
    json = json + "  \"timestamp_utc\": \"" + timestamp_utc + "\"";
    if(has_ticket)
       json = json + ",\n  \"ticket\": " + IntegerToString(ticket);
+   if(has_fill_price)
+      json = json + ",\n  \"fill_price\": " + SYSTEM_FormatJsonNumber(fill_price, digits);
+   if(open_time > 0)
+      json = json + ",\n  \"open_time_utc\": \"" + SYSTEM_FormatTimeUtc(open_time) + "\"";
+   if(volume > 0.0)
+      json = json + ",\n  \"volume\": " + SYSTEM_FormatJsonNumber(volume, 2);
+   if(StringLen(side) > 0)
+      json = json + ",\n  \"side\": \"" + SYSTEM_EscapeJsonString(side) + "\"";
    if(error_code != 0)
       json = json + ",\n  \"error_code\": " + IntegerToString(error_code);
    if(StringLen(error_message) > 0)
@@ -103,7 +214,12 @@ bool SYSTEM_WriteAck(
       result.ticket,
       result.has_ticket,
       result.error_code,
-      result.error_message
+      result.error_message,
+      result.fill_price,
+      result.has_fill_price,
+      result.open_time,
+      result.volume,
+      result.side
    );
    return SYSTEM_AtomicWriteText(path, payload);
 }
@@ -157,6 +273,23 @@ void SYSTEM_SetSuccessAck(SYSTEM_AckResult &result, const int ticket)
    result.status = SYSTEM_ACK_STATUS_SUCCESS;
    result.ticket = ticket;
    result.has_ticket = ticket > 0;
+}
+
+void SYSTEM_SetSuccessAckWithFill(
+   SYSTEM_AckResult &result,
+   const int ticket,
+   const double fill_price,
+   const datetime open_time,
+   const double volume,
+   const string side
+)
+{
+   SYSTEM_SetSuccessAck(result, ticket);
+   result.fill_price = fill_price;
+   result.has_fill_price = true;
+   result.open_time = open_time;
+   result.volume = volume;
+   result.side = side;
 }
 
 bool SYSTEM_ExecuteOpen(
@@ -213,7 +346,22 @@ bool SYSTEM_ExecuteOpen(
       return false;
    }
 
-   SYSTEM_SetSuccessAck(result, ticket);
+   if(OrderSelect(ticket, SELECT_BY_TICKET))
+   {
+      string fill_side = (OrderType() == OP_BUY) ? SYSTEM_SIDE_BUY : SYSTEM_SIDE_SELL;
+      SYSTEM_SetSuccessAckWithFill(
+         result,
+         ticket,
+         OrderOpenPrice(),
+         OrderOpenTime(),
+         OrderLots(),
+         fill_side
+      );
+   }
+   else
+   {
+      SYSTEM_SetSuccessAck(result, ticket);
+   }
    return true;
 }
 
@@ -350,14 +498,29 @@ bool SYSTEM_TryExecutePendingControl(
    if(!SYSTEM_ReadControlCommand(account_id, symbol, magic, command, error_message))
       return false;
 
-   if(command.command_id == last_processed_command_id)
+   if(command.command_id == last_processed_command_id
+      || SYSTEM_IsCommandProcessed(account_id, symbol, magic, command.command_id))
+   {
+      SYSTEM_SetSuccessAck(result, 0);
+      SYSTEM_WriteAck(account_id, symbol, magic, command.command_id, result);
       return false;
+   }
 
    SYSTEM_ExecuteControlCommand(command, result, error_message);
+   bool success = (result.status == SYSTEM_ACK_STATUS_SUCCESS);
+
+   if(success)
+      SYSTEM_MarkCommandProcessed(account_id, symbol, magic, command.command_id);
+
    if(!SYSTEM_WriteAck(account_id, symbol, magic, command.command_id, result))
    {
       error_message = "failed to write ack file";
       SYSTEM_ExportStatusWithLastError(account_id, symbol, magic, error_message);
+      if(success)
+      {
+         processed_command_id = command.command_id;
+         return true;
+      }
       return false;
    }
 

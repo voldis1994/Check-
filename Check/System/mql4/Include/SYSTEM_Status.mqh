@@ -8,6 +8,7 @@
 #define SYSTEM_PROTOCOL_SCHEMA_VERSION "1.0.0"
 #define SYSTEM_EA_VERSION "1.0.0"
 #define SYSTEM_STATUS_FILENAME_TEMPLATE "status_%s.json"
+#define SYSTEM_CLOSED_FILENAME_TEMPLATE "closed_%s_%d.json"
 
 string SYSTEM_GetProtocolSchemaVersion()
 {
@@ -40,6 +41,12 @@ string SYSTEM_EscapeJsonString(const string value)
 string SYSTEM_BuildStatusFilePath(const string account_id)
 {
    string filename = StringFormat(SYSTEM_STATUS_FILENAME_TEMPLATE, account_id);
+   return SYSTEM_JoinPath(SYSTEM_BuildAccountDir(account_id), filename);
+}
+
+string SYSTEM_BuildClosedTradeFilePath(const string account_id, const string symbol, const int magic)
+{
+   string filename = StringFormat(SYSTEM_CLOSED_FILENAME_TEMPLATE, symbol, magic);
    return SYSTEM_JoinPath(SYSTEM_BuildAccountDir(account_id), filename);
 }
 
@@ -91,7 +98,8 @@ string SYSTEM_BuildOpenPositionEntryJson(
    const double volume,
    const double entry_price,
    const double stop_loss,
-   const double take_profit
+   const double take_profit,
+   const datetime open_time
 )
 {
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
@@ -106,8 +114,10 @@ string SYSTEM_BuildOpenPositionEntryJson(
    json = json + "      \"volume\": " + SYSTEM_FormatJsonNumber(volume, 2) + ",\n";
    json = json + "      \"entry_price\": " + SYSTEM_FormatJsonNumber(entry_price, digits) + ",\n";
    json = json + "      \"stop_loss\": " + SYSTEM_FormatJsonNumber(stop_loss, digits) + ",\n";
-   json = json + "      \"take_profit\": " + SYSTEM_FormatJsonNumber(take_profit, digits) + "\n";
-   json = json + "    }";
+   json = json + "      \"take_profit\": " + SYSTEM_FormatJsonNumber(take_profit, digits);
+   if(open_time > 0)
+      json = json + ",\n      \"open_time_utc\": \"" + SYSTEM_FormatTimeUtc(open_time) + "\"";
+   json = json + "\n    }";
    return json;
 }
 
@@ -137,7 +147,8 @@ string SYSTEM_BuildOpenPositionsJson()
          OrderLots(),
          OrderOpenPrice(),
          OrderStopLoss(),
-         OrderTakeProfit()
+         OrderTakeProfit(),
+         OrderOpenTime()
       );
       count++;
    }
@@ -227,6 +238,152 @@ bool SYSTEM_ExportStatusWithLastError(
       last_error,
       symbol,
       magic
+   );
+   return SYSTEM_AtomicWriteText(path, payload);
+}
+
+string SYSTEM_DetermineCloseReason()
+{
+   double close_price = OrderClosePrice();
+   double stop_loss = OrderStopLoss();
+   double take_profit = OrderTakeProfit();
+   double point = MarketInfo(OrderSymbol(), MODE_POINT);
+   if(point <= 0.0)
+      point = 0.00001;
+   double tolerance = point * 3.0;
+
+   if(stop_loss > 0.0 && MathAbs(close_price - stop_loss) <= tolerance)
+      return "stop_loss";
+   if(take_profit > 0.0 && MathAbs(close_price - take_profit) <= tolerance)
+      return "take_profit";
+   return "closed";
+}
+
+bool SYSTEM_FindLastClosedOrderForInstance(
+   const string symbol,
+   const int magic,
+   int &ticket,
+   double &close_price,
+   datetime &close_time,
+   double &profit,
+   double &commission,
+   double &swap,
+   string &close_reason
+)
+{
+   ticket = 0;
+   close_price = 0.0;
+   close_time = 0;
+   profit = 0.0;
+   commission = 0.0;
+   swap = 0.0;
+   close_reason = "";
+
+   datetime best_close_time = 0;
+   bool found = false;
+
+   for(int index = OrdersHistoryTotal() - 1; index >= 0; index--)
+   {
+      if(!OrderSelect(index, SELECT_BY_POS, MODE_HISTORY))
+         continue;
+      if(OrderSymbol() != symbol)
+         continue;
+      if(OrderMagicNumber() != magic)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      if(OrderCloseTime() <= 0)
+         continue;
+
+      if(!found || OrderCloseTime() > best_close_time)
+      {
+         found = true;
+         best_close_time = OrderCloseTime();
+         ticket = OrderTicket();
+         close_price = OrderClosePrice();
+         close_time = OrderCloseTime();
+         profit = OrderProfit();
+         commission = OrderCommission();
+         swap = OrderSwap();
+         close_reason = SYSTEM_DetermineCloseReason();
+      }
+   }
+   return found;
+}
+
+string SYSTEM_BuildClosedTradeJson(
+   const string account_id,
+   const string symbol,
+   const int magic,
+   const int ticket,
+   const double close_price,
+   const datetime close_time,
+   const double profit,
+   const double commission,
+   const double swap,
+   const string close_reason
+)
+{
+   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   if(digits <= 0)
+      digits = 5;
+
+   string json = "{\n";
+   json = json + "  \"account_id\": \"" + SYSTEM_EscapeJsonString(account_id) + "\",\n";
+   json = json + "  \"symbol\": \"" + SYSTEM_EscapeJsonString(symbol) + "\",\n";
+   json = json + "  \"magic\": " + IntegerToString(magic) + ",\n";
+   json = json + "  \"ticket\": " + IntegerToString(ticket) + ",\n";
+   json = json + "  \"close_price\": " + SYSTEM_FormatJsonNumber(close_price, digits) + ",\n";
+   json = json + "  \"close_time_utc\": \"" + SYSTEM_FormatTimeUtc(close_time) + "\",\n";
+   json = json + "  \"profit\": " + SYSTEM_FormatJsonNumber(profit, 2) + ",\n";
+   json = json + "  \"commission\": " + SYSTEM_FormatJsonNumber(commission, 2) + ",\n";
+   json = json + "  \"swap\": " + SYSTEM_FormatJsonNumber(swap, 2);
+   if(StringLen(close_reason) > 0)
+      json = json + ",\n  \"close_reason\": \"" + SYSTEM_EscapeJsonString(close_reason) + "\"";
+   json = json + "\n}\n";
+   return json;
+}
+
+bool SYSTEM_ExportClosedTrade(const string account_id, const string symbol, const int magic)
+{
+   if(StringLen(account_id) == 0 || StringLen(symbol) == 0)
+      return false;
+   if(!SYSTEM_EnsureAccountDirectories(account_id))
+      return false;
+
+   int ticket = 0;
+   double close_price = 0.0;
+   datetime close_time = 0;
+   double profit = 0.0;
+   double commission = 0.0;
+   double swap = 0.0;
+   string close_reason = "";
+
+   if(!SYSTEM_FindLastClosedOrderForInstance(
+      symbol,
+      magic,
+      ticket,
+      close_price,
+      close_time,
+      profit,
+      commission,
+      swap,
+      close_reason
+   ))
+      return true;
+
+   string path = SYSTEM_BuildClosedTradeFilePath(account_id, symbol, magic);
+   string payload = SYSTEM_BuildClosedTradeJson(
+      account_id,
+      symbol,
+      magic,
+      ticket,
+      close_price,
+      close_time,
+      profit,
+      commission,
+      swap,
+      close_reason
    );
    return SYSTEM_AtomicWriteText(path, payload);
 }

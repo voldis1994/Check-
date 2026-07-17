@@ -273,12 +273,13 @@ def test_run_instance_cycle_account_not_tradeable_produces_block_without_trade(t
 def test_run_instance_trade_management_phase_returns_modify_for_breakeven_progress(tmp_path: Path) -> None:
     runtime, instance = _startup_runtime(tmp_path)
     instance_memory = runtime.memory.get_or_create(instance)
-    instance_memory.instance_state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.1, entry_price=1.1, stop_loss=1.098, take_profit=1.104)
+    instance_memory.instance_state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.1, entry_price=1.1, stop_loss=1.098, take_profit=1.104, position_last_bar_utc=FIXTURE_CYCLE_UTC)
     loaded = load_instance_cycle_data(runtime.paths, instance, use_global_universe=False)
     market_bars = validate_market_for_cycle(loaded.market_raw)
     assert not isinstance(market_bars, ValidationResult)
     bullish_bars = (*market_bars[:-1], NormalizedMarketBar(time_utc=market_bars[-1].time_utc, open=1.1018, high=1.1022, low=1.1015, close=1.102, volume=market_bars[-1].volume, symbol=market_bars[-1].symbol, timeframe=market_bars[-1].timeframe, digits=market_bars[-1].digits, point=market_bars[-1].point, bar_index=market_bars[-1].bar_index))
-    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=bullish_bars, runtime=runtime)
+    sensor = SensorReading(time_utc=FIXTURE_CYCLE_UTC, bid=1.102, ask=1.1022, spread=0.0002, spread_points=20.0, symbol='EURUSD', digits=5, point=1e-05)
+    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=bullish_bars, runtime=runtime, sensor_reading=sensor, market_bar_time_utc=FIXTURE_CYCLE_UTC, current_utc=FIXTURE_CYCLE_UTC)
     assert management_result.action == OrderAction.MODIFY.value
     assert management_result.stop_loss is not None
     assert management_result.stop_loss > 1.098
@@ -304,10 +305,11 @@ def test_run_instance_trade_management_phase_trails_without_broker_take_profit(t
     runtime, instance = _startup_runtime(tmp_path)
     runtime.config = replace(runtime.config, trade_management=replace(runtime.config.trade_management, use_fixed_take_profit=False, allow_close=False))
     instance_memory = runtime.memory.get_or_create(instance)
-    instance_memory.instance_state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.01, entry_price=1.1, stop_loss=1.098, take_profit=0.0)
+    instance_memory.instance_state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.01, entry_price=1.1, stop_loss=1.098, take_profit=0.0, position_last_bar_utc='2026-07-07T06:03:00.000Z')
     instance_memory.instance_state.update_instrument(digits=5, point=1e-05, pip=0.0001)
     market_bars = tuple((NormalizedMarketBar(time_utc=datetime(2026, 7, 7, 6, index, tzinfo=timezone.utc), open=1.1 + index * 0.0002, high=1.101 + index * 0.0002, low=1.0995 + index * 0.0002, close=1.1005 + index * 0.0002, volume=100.0, symbol='EURUSD', timeframe='M1', digits=5, point=1e-05, bar_index=index) for index in range(5)))
-    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime)
+    sensor = SensorReading(time_utc='2026-07-07T06:04:00.000Z', bid=1.1005 + 4 * 0.0002, ask=1.1007 + 4 * 0.0002, spread=0.0002, spread_points=20.0, symbol='EURUSD', digits=5, point=1e-05)
+    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, sensor_reading=sensor, market_bar_time_utc='2026-07-07T06:04:00.000Z', current_utc='2026-07-07T06:04:00.000Z')
     assert management_result.action == OrderAction.MODIFY.value
     assert management_result.stop_loss is not None
     assert management_result.stop_loss > 1.098

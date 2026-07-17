@@ -13,6 +13,8 @@ class NewsFilterResult:
     reason: str | None
 
 def evaluate_news_filter(universe: UniverseRecord, *, block_high_impact_news: bool) -> NewsFilterResult:
+    if universe.metadata is not None and universe.metadata.get('news_data_available') is False:
+        return NewsFilterResult(news_acceptable=True, news_window_active=universe.news_window_active, news_impact_level=universe.news_impact_level, block_high_impact_news=block_high_impact_news, reason=None)
     high_impact_news_window = universe.news_window_active and universe.news_impact_level == NewsImpactLevel.HIGH.value
     news_acceptable = not (block_high_impact_news and high_impact_news_window)
     reason: str | None = None
