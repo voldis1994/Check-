@@ -26,9 +26,13 @@ class InstanceState:
     position_take_profit: float | None = None
     position_reference_take_profit: float | None = None
     position_bars_open: int = 0
+    position_open_time_utc: str | None = None
+    position_last_bar_utc: str | None = None
     partial_close_applied: bool = False
     last_command_id: str = ''
     last_ack_status: str = ''
+    pending_execution_command_id: str | None = None
+    duplicate_position_anomaly: bool = False
     instrument_digits: int = 0
     instrument_point: float = 0.0
     instrument_pip: float = 0.0
@@ -51,7 +55,7 @@ class InstanceState:
         self.last_command_id = command_id
         self.last_ack_status = ack_status
 
-    def update_position(self, *, open_ticket: int, position_side: str, position_volume: float, entry_price: float | None=None, stop_loss: float | None=None, take_profit: float | None=None) -> None:
+    def update_position(self, *, open_ticket: int, position_side: str, position_volume: float, entry_price: float | None=None, fill_price: float | None=None, stop_loss: float | None=None, take_profit: float | None=None, open_time_utc: str | None=None, position_last_bar_utc: str | None=None) -> None:
         if open_ticket < 0:
             raise _validation_error('open_ticket must be >= 0', open_ticket=open_ticket)
         if position_volume <= 0:
@@ -59,13 +63,17 @@ class InstanceState:
         self.open_ticket = open_ticket
         self.position_side = position_side
         self.position_volume = position_volume
-        if entry_price is not None:
-            self.position_entry_price = entry_price
+        resolved_entry = fill_price if fill_price is not None else entry_price
+        if resolved_entry is not None:
+            self.position_entry_price = resolved_entry
         if stop_loss is not None:
             self.position_stop_loss = stop_loss
         if take_profit is not None:
             self.position_take_profit = take_profit
+        if open_time_utc is not None:
+            self.position_open_time_utc = open_time_utc
         self.position_bars_open = 1
+        self.position_last_bar_utc = position_last_bar_utc
         self.partial_close_applied = False
 
     def update_position_levels(self, *, stop_loss: float, take_profit: float) -> None:
@@ -88,6 +96,18 @@ class InstanceState:
         if self.open_ticket is not None:
             self.position_bars_open += 1
 
+    def sync_position_bars_for_market_bar(self, bar_utc: str) -> bool:
+        if self.open_ticket is None:
+            return False
+        if self.position_last_bar_utc == bar_utc:
+            return False
+        if self.position_last_bar_utc is not None:
+            self.position_bars_open += 1
+            self.position_last_bar_utc = bar_utc
+            return True
+        self.position_last_bar_utc = bar_utc
+        return False
+
     def clear_position(self) -> None:
         self.open_ticket = None
         self.position_side = None
@@ -97,7 +117,10 @@ class InstanceState:
         self.position_take_profit = None
         self.position_reference_take_profit = None
         self.position_bars_open = 0
+        self.position_open_time_utc = None
+        self.position_last_bar_utc = None
         self.partial_close_applied = False
+        self.duplicate_position_anomaly = False
 
     def update_instrument(self, *, digits: int, point: float, pip: float) -> None:
         self.instrument_digits = digits
@@ -134,6 +157,14 @@ class InstanceState:
             data['position_bars_open'] = self.position_bars_open
             if self.partial_close_applied:
                 data['partial_close_applied'] = True
+        if self.position_open_time_utc is not None:
+            data['position_open_time_utc'] = self.position_open_time_utc
+        if self.position_last_bar_utc is not None:
+            data['position_last_bar_utc'] = self.position_last_bar_utc
+        if self.pending_execution_command_id is not None:
+            data['pending_execution_command_id'] = self.pending_execution_command_id
+        if self.duplicate_position_anomaly:
+            data['duplicate_position_anomaly'] = True
         if self.day_start_balance is not None:
             data['day_start_balance'] = self.day_start_balance
         if self.peak_equity is not None:
@@ -180,6 +211,16 @@ class InstanceState:
         if position_bars_open is not None:
             state.position_bars_open = int(position_bars_open)
         state.partial_close_applied = bool(payload.get('partial_close_applied', False))
+        position_open_time_utc = payload.get('position_open_time_utc')
+        if position_open_time_utc is not None:
+            state.position_open_time_utc = str(position_open_time_utc)
+        position_last_bar_utc = payload.get('position_last_bar_utc')
+        if position_last_bar_utc is not None:
+            state.position_last_bar_utc = str(position_last_bar_utc)
+        pending_execution_command_id = payload.get('pending_execution_command_id')
+        if pending_execution_command_id is not None:
+            state.pending_execution_command_id = str(pending_execution_command_id)
+        state.duplicate_position_anomaly = bool(payload.get('duplicate_position_anomaly', False))
         state.last_command_id = str(payload.get('last_command_id', state.last_command_id))
         state.last_ack_status = str(payload.get('last_ack_status', state.last_ack_status))
         state.instrument_digits = int(payload.get('instrument_digits', state.instrument_digits))

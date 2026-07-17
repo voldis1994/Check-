@@ -63,11 +63,13 @@ def parse_ai_decision_json(text: str) -> AIDecision | None:
     try:
         bias = str(payload['bias'])
         confidence = float(payload['confidence'])
-        allow_buy = bool(payload['allow_buy'])
-        allow_sell = bool(payload['allow_sell'])
-        allow_close = bool(payload['allow_close'])
+        allow_buy = payload['allow_buy']
+        allow_sell = payload['allow_sell']
+        allow_close = payload['allow_close']
         reason = str(payload['reason'])
     except Exception:
+        return None
+    if not isinstance(allow_buy, bool) or not isinstance(allow_sell, bool) or not isinstance(allow_close, bool):
         return None
     if bias not in _BIAS_ALLOWED:
         return None
@@ -81,15 +83,17 @@ def _build_openai_prompt(*, system_signal: str, market_context: dict[str, Any]) 
     context_text = json.dumps(market_context, ensure_ascii=False, default=str)
     return f'You are a strict decision layer for a trading system.\nYou must output ONLY valid JSON with this exact schema:\n{{\n  "bias": "BULLISH|BEARISH|NEUTRAL|AVOID",\n  "confidence": 0.0, \n  "allow_buy": true, \n  "allow_sell": false, \n  "allow_close": true, \n  "reason": "..." \n}}\n\nRules reminder:\n- If you say bias=AVOID, the final decision must be BLOCK.\n- If you set allow_buy/allow_sell to false, the system signal must be blocked.\n- Do NOT output any additional keys.\n- Output MUST be parseable JSON.\n\nSystem signal: {system_signal}\nMarket context: {context_text}\n'
 
-def _call_openai(*, api_key: str, prompt: str, timeout_s: int, retry_max: int, retry_delay_ms: int) -> str:
+def _call_openai(*, api_key: str, prompt: str, timeout_s: float, retry_max: int, retry_delay_ms: int) -> str:
     url = 'https://api.openai.com/v1/chat/completions'
     data = {'model': 'gpt-4o-mini', 'temperature': 0.0, 'messages': [{'role': 'system', 'content': 'Return strictly valid JSON only.'}, {'role': 'user', 'content': prompt}]}
     payload = json.dumps(data).encode('utf-8')
     req = urllib.request.Request(url=url, data=payload, method='POST', headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'})
     last_error: Exception | None = None
+    total_budget = float(timeout_s)
+    per_attempt = max(0.5, total_budget / (retry_max + 1))
     for attempt in range(retry_max + 1):
         try:
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            with urllib.request.urlopen(req, timeout=per_attempt) as resp:
                 raw = resp.read().decode('utf-8', errors='replace')
             obj = json.loads(raw)
             content = obj['choices'][0]['message']['content']
@@ -110,10 +114,10 @@ def _call_openai(*, api_key: str, prompt: str, timeout_s: int, retry_max: int, r
         raise last_error
     raise RuntimeError('OpenAI request failed without error detail')
 
-def _timeout_seconds(ai_config: AIConfig | None) -> int:
+def _timeout_seconds(ai_config: AIConfig | None) -> float:
     if ai_config is None:
-        return 10
-    return max(1, int(ai_config.timeout_ms / 1000))
+        return 10.0
+    return max(0.5, float(ai_config.timeout_ms) / 1000.0)
 
 def get_ai_decision(*, system_signal: str, market_context: dict[str, Any], ai_config: AIConfig | None=None, skip_reason: str | None=None) -> AIQueryResult:
     if ai_config is not None and ai_config.mode == 'off':

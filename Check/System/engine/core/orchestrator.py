@@ -1,16 +1,16 @@
 from __future__ import annotations
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+import threading
 from typing import Any, Iterable, MutableMapping
 from engine.core.clock import now_utc
 from engine.core.cycle import InstanceCycleResult, run_instance_cycle
 from engine.core.instance import Instance
 from engine.core.lifecycle import LiveRuntime, discover_instances, load_runtime_memory, log_runtime_event, register_account_loggers, spread_snapshot_from_record
-from engine.core.logging_setup import log_event
 from engine.core.history import archive_market_snapshot
 from engine.core.monitoring import MonitoringState, log_runtime_monitoring_summary, observe_instance_cycle
 from engine.core.performance import PerformanceState, flush_runtime_performance, observe_instance_performance
-from engine.core.retry import RetryAlertContext, build_retry_policy
 from engine.journal.error_journal import log_error
 from engine.journal.rotation import rotate_account_journals
 from engine.protocol.constants import ErrorType
@@ -62,6 +62,12 @@ def list_registered_instances(runtime: LiveRuntime) -> tuple[Instance, ...]:
     return tuple((item.instance for item in runtime.memory.items().values()))
 
 def run_instance_cycle_isolated(runtime: LiveRuntime, instance: Instance, *, use_global_universe: bool | None=None, timestamp_utc: str | None=None, cache: MutableMapping[str, Any] | None=None) -> InstanceCycleResult:
+    """Run one instance cycle in isolation.
+
+    Each instance owns distinct market/sensor/control/ack/state paths keyed by
+    (account_id, symbol, magic). Concurrent workers must not share mutable
+    per-instance state; shared monitoring aggregation is lock-guarded by the caller.
+    """
     try:
         return run_instance_cycle(runtime, instance, use_global_universe=use_global_universe, timestamp_utc=timestamp_utc, cache=cache)
     except Exception as exc:
@@ -78,18 +84,35 @@ def run_runtime_cycles(runtime: LiveRuntime, *, instances: Iterable[Instance] | 
         target_instances = register_runtime_instances(runtime, instances)
     resolved_timestamp = timestamp_utc or now_utc()
     log_runtime_event(runtime, level='INFO', module=MODULE_NAME, message=f'runtime cycle begin instances={len(target_instances)}')
-    results: list[InstanceCycleResult] = []
     shared_cache: dict[str, Any] = {} if cache is None else cache
     monitoring_state = MonitoringState()
     performance_state = PerformanceState()
-    for instance in target_instances:
-        if runtime.shutdown_requested:
-            break
-        result = run_instance_cycle_isolated(runtime, instance, use_global_universe=use_global_universe, timestamp_utc=resolved_timestamp, cache=shared_cache)
-        monitoring_state = observe_instance_cycle(runtime, instance, result, cache=shared_cache, state=monitoring_state, measured_ack_latency_ms=result.ack_latency_ms)
-        if result.performance_timings is not None:
-            _, performance_state = observe_instance_performance(runtime, instance, result.performance_timings, state=performance_state)
-        results.append(result)
+    # Instance cycles are isolated by instance_key. Same-account instances share
+    # status/universe/journal paths, so serialize per account while allowing
+    # cross-account parallelism. Shared monitoring/performance updates use a lock.
+    monitor_lock = threading.Lock()
+    account_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+    results_by_index: dict[int, InstanceCycleResult] = {}
+    instance_list = list(target_instances)
+    worker_count = min(8, max(1, len(instance_list))) if instance_list else 1
+
+    def _run_indexed(index: int, instance: Instance) -> tuple[int, InstanceCycleResult]:
+        with account_locks[instance.account_id]:
+            result = run_instance_cycle_isolated(runtime, instance, use_global_universe=use_global_universe, timestamp_utc=resolved_timestamp, cache=shared_cache)
+        with monitor_lock:
+            nonlocal monitoring_state, performance_state
+            monitoring_state = observe_instance_cycle(runtime, instance, result, cache=shared_cache, state=monitoring_state, measured_ack_latency_ms=result.ack_latency_ms)
+            if result.performance_timings is not None:
+                _, performance_state = observe_instance_performance(runtime, instance, result.performance_timings, state=performance_state)
+        return (index, result)
+
+    if instance_list and not runtime.shutdown_requested:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(_run_indexed, index, instance) for index, instance in enumerate(instance_list)]
+            for future in as_completed(futures):
+                index, result = future.result()
+                results_by_index[index] = result
+    results = [results_by_index[index] for index in range(len(instance_list)) if index in results_by_index]
     completed_count = sum((1 for result in results if result.completed))
     failed_count = len(results) - completed_count
     log_runtime_event(runtime, level='INFO', module=MODULE_NAME, message=f'runtime cycle end instances={len(results)} completed={completed_count} failed={failed_count}')
