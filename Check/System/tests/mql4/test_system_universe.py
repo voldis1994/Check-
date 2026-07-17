@@ -44,12 +44,21 @@ def test_system_detect_trading_session_function_uses_time_gmt(universe_source: s
     assert 'TimeGMT' in body
     assert 'SYSTEM_SESSION_LONDON' in body
 
-def test_system_detect_market_regime_returns_allowed_regime() -> None:
-    assert status_reference.detect_market_regime() == 'ranging'
+def test_system_detect_market_regime_returns_allowed_regimes() -> None:
+    assert status_reference.detect_market_regime(atr=1.0, median_range=1.0, close_move=0.5) == 'ranging'
+    assert status_reference.detect_market_regime(atr=2.0, median_range=1.0, close_move=0.5) == 'volatile'
+    assert status_reference.detect_market_regime(atr=0.4, median_range=1.0, close_move=0.1) == 'quiet'
+    assert status_reference.detect_market_regime(atr=1.0, median_range=1.0, close_move=2.5) == 'trending'
 
-def test_system_detect_market_regime_function_returns_allowed_value(universe_source: str) -> None:
+def test_system_detect_market_regime_function_is_not_constant_ranging(universe_source: str) -> None:
     body = mql_source.function_body(universe_source, 'SYSTEM_DetectMarketRegime')
     assert 'SYSTEM_REGIME_RANGING' in body
+    assert 'SYSTEM_REGIME_VOLATILE' in body
+    assert 'SYSTEM_REGIME_QUIET' in body
+    assert 'SYSTEM_REGIME_TRENDING' in body
+    assert 'iHigh' in body
+    assert 'iLow' in body
+    assert 'iClose' in body
 
 def test_system_build_universe_json_contains_required_fields_and_schema_version() -> None:
     payload_text = status_reference.build_universe_json(session='LONDON', market_regime='trending', news_window_active=False, timestamp_utc='2026-07-07T06:00:00.000Z')
@@ -72,6 +81,22 @@ def test_system_build_universe_json_from_context_uses_detectors(universe_source:
     body = mql_source.function_body(universe_source, 'SYSTEM_BuildUniverseJsonFromContext')
     assert 'SYSTEM_DetectTradingSession' in body
     assert 'SYSTEM_DetectMarketRegime' in body
+    assert 'news_data_available' in body
+    assert 'disabled_no_calendar' in body
+
+def test_system_build_universe_json_includes_honest_news_metadata() -> None:
+    payload_text = status_reference.build_universe_json(
+        session='LONDON',
+        market_regime='ranging',
+        news_window_active=False,
+        timestamp_utc='2026-07-07T06:00:00.000Z',
+        metadata={'news_data_available': False, 'news_filter': 'disabled_no_calendar'},
+    )
+    payload = json.loads(payload_text)
+    assert payload['news_window_active'] is False
+    assert payload['metadata']['news_data_available'] is False
+    assert payload['metadata']['news_filter'] == 'disabled_no_calendar'
+    assert validate_universe_json(payload_text).is_valid
 
 def test_system_export_universe_uses_atomic_write(universe_source: str) -> None:
     body = mql_source.function_body(universe_source, 'SYSTEM_ExportUniverse')

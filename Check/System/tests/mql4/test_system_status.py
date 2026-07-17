@@ -11,7 +11,7 @@ def status_source() -> str:
     return mql_source.load_mqh('SYSTEM_Status.mqh')
 
 def test_system_status_public_functions_are_defined(status_source: str) -> None:
-    expected = {'SYSTEM_GetProtocolSchemaVersion', 'SYSTEM_GetEaVersion', 'SYSTEM_FormatJsonBoolean', 'SYSTEM_FormatJsonNumber', 'SYSTEM_EscapeJsonString', 'SYSTEM_BuildStatusFilePath', 'SYSTEM_BuildStatusJson', 'SYSTEM_BuildStatusJsonFromAccount', 'SYSTEM_ExportStatus', 'SYSTEM_ExportStatusWithLastError', 'SYSTEM_StatusPerformsAnalysis'}
+    expected = {'SYSTEM_GetProtocolSchemaVersion', 'SYSTEM_GetEaVersion', 'SYSTEM_FormatJsonBoolean', 'SYSTEM_FormatJsonNumber', 'SYSTEM_EscapeJsonString', 'SYSTEM_BuildStatusFilePath', 'SYSTEM_BuildStatusJson', 'SYSTEM_BuildStatusJsonFromAccount', 'SYSTEM_ExportStatus', 'SYSTEM_ExportStatusWithLastError', 'SYSTEM_StatusPerformsAnalysis', 'SYSTEM_ExportClosedTrade', 'SYSTEM_BuildClosedTradeFilePath'}
     assert expected.issubset(set(mql_source.public_function_names(status_source)))
 
 def test_system_get_protocol_schema_version_matches_protocol(status_source: str) -> None:
@@ -63,6 +63,16 @@ def test_system_status_exports_all_account_open_positions(status_source: str) ->
     assert 'OrderSymbol()' in body
     assert 'OrderMagicNumber()' in body
     assert 'open_positions' in body
+    entry_body = mql_source.function_body(status_source, 'SYSTEM_BuildOpenPositionEntryJson')
+    assert 'open_time_utc' in entry_body
+
+def test_system_export_closed_trade_writes_closed_json(status_source: str) -> None:
+    body = mql_source.function_body(status_source, 'SYSTEM_ExportClosedTrade')
+    assert 'SYSTEM_FindLastClosedOrderForInstance' in body
+    assert 'SYSTEM_BuildClosedTradeJson' in body
+    assert 'SYSTEM_AtomicWriteText' in body
+    path_body = mql_source.function_body(status_source, 'SYSTEM_BuildClosedTradeFilePath')
+    assert 'SYSTEM_CLOSED_FILENAME_TEMPLATE' in path_body
 
 def test_system_status_exports_open_positions_field(status_source: str) -> None:
     body = mql_source.function_body(status_source, 'SYSTEM_FindOpenPositionForInstance')

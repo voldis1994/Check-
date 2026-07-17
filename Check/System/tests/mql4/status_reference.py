@@ -40,11 +40,21 @@ def detect_trading_session(hour_utc: int) -> str:
         return 'NEW_YORK'
     return 'OFF'
 
-def detect_market_regime() -> str:
+def detect_market_regime(*, atr: float, median_range: float, close_move: float) -> str:
+    if median_range <= 0:
+        return 'ranging'
+    if atr > 1.6 * median_range:
+        return 'volatile'
+    if atr < 0.55 * median_range:
+        return 'quiet'
+    if abs(close_move) > 2.0 * atr:
+        return 'trending'
     return 'ranging'
 
-def build_universe_json(*, session: str, market_regime: str, news_window_active: bool, timestamp_utc: str, news_impact_level: str | None='low') -> str:
+def build_universe_json(*, session: str, market_regime: str, news_window_active: bool, timestamp_utc: str, news_impact_level: str | None='low', metadata: dict[str, object] | None=None) -> str:
     payload: dict[str, object] = {'market_regime': market_regime, 'news_window_active': news_window_active, 'schema_version': protocol_schema_version(), 'session': session, 'timestamp_utc': timestamp_utc}
     if news_impact_level:
         payload['news_impact_level'] = news_impact_level
+    if metadata is not None:
+        payload['metadata'] = metadata
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n'

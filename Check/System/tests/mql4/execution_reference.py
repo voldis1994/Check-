@@ -121,14 +121,22 @@ def execute_control_command(command: control_reference.ControlCommandData, conte
         return execute_close(command, context)
     return set_rejected_ack(AckResult(), 'unsupported control action')
 
-def try_execute_pending_control(json_text: str, *, account_id: str, symbol: str, magic: int, last_processed_command_id: str, context: OrderExecutionContext, tmp_exists: bool=False, file_exists: bool=True, write_ack: Callable[[str, AckResult], bool] | None=None) -> tuple[str | None, AckResult | None, str]:
+def try_execute_pending_control(json_text: str, *, account_id: str, symbol: str, magic: int, last_processed_command_id: str, context: OrderExecutionContext, tmp_exists: bool=False, file_exists: bool=True, write_ack: Callable[[str, AckResult], bool] | None=None, processed_store: dict[str, str] | None=None) -> tuple[str | None, AckResult | None, str]:
     command, error = control_reference.read_control_command(json_text, account_id=account_id, symbol=symbol, magic=magic, tmp_exists=tmp_exists, file_exists=file_exists)
     if command is None:
         return (None, None, error)
-    if command.command_id == last_processed_command_id:
+    store_key = f'{account_id}:{symbol}:{magic}'
+    store = processed_store if processed_store is not None else {}
+    if command.command_id == last_processed_command_id or store.get(store_key) == command.command_id:
+        if write_ack is not None:
+            write_ack(command.command_id, set_success_ack(0))
         return (None, None, '')
     result = execute_control_command(command, context)
+    if result.status == AckStatus.SUCCESS.value:
+        store[store_key] = command.command_id
     if write_ack is not None and (not write_ack(command.command_id, result)):
+        if result.status == AckStatus.SUCCESS.value:
+            return (command.command_id, result, 'failed to write ack file')
         return (None, None, 'failed to write ack file')
     return (command.command_id, result, '')
 
