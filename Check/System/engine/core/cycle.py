@@ -8,7 +8,7 @@ from engine.core.instance import Instance
 from engine.core.lifecycle import LiveRuntime
 from engine.core.paths import SystemPaths
 from engine.core.performance import CycleTimingSnapshot, monotonic_elapsed_ms
-from engine.core.position_sync import find_status_positions, reconcile_position_with_status
+from engine.core.position_sync import find_status_position, find_status_positions, reconcile_position_with_status
 from engine.core.retry import RetryAlertContext, RetryPolicy, build_retry_policy
 from engine.ai_decision_layer import AIDecisionMeta, AIQueryResult, apply_ai_to_decision_result, apply_risk_block_to_decision_result, get_ai_decision
 from engine.risk.precheck import should_call_ai_layer
@@ -30,6 +30,12 @@ from engine.protocol.parser import parse_sensor_csv, parse_universe
 from engine.reason import build_reason
 from engine.risk.engine import RiskEngineResult, RiskEngineTradeParams, run_risk_engine
 from engine.risk.trade_management import OpenPosition, TradeManagementConfig, TradeManagementResult, evaluate_trade_management
+from engine.risk.money_step_trailing import (
+    MONEY_TRAILING_STATE_MISSING,
+    MoneyStepTrailingState,
+    compute_net_profit_money,
+    merge_technical_and_money_step_trailing,
+)
 from engine.decision.filters.news_filter import NEWS_FILTER_INACTIVE_REASON, evaluate_news_filter
 from engine.state.instance_state import InstanceState
 from engine.state.memory import InstanceMemory
@@ -115,7 +121,7 @@ def is_sensor_fresh(sensor_reading: SensorReading | None, now_utc: str, threshol
     freshness_ms = compute_data_freshness_ms(sensor_reading.time_utc, now_utc)
     return not is_data_stale(freshness_ms, threshold_ms)
 
-def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None, ai_allow_close: bool=True, sensor_reading: SensorReading | None=None, market_bar_time_utc: str | None=None, current_utc: str | None=None) -> TradeManagementResult:
+def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None, ai_allow_close: bool=True, sensor_reading: SensorReading | None=None, market_bar_time_utc: str | None=None, current_utc: str | None=None, status: StatusRecord | None=None) -> TradeManagementResult:
     if not runtime.config.trade_management.enabled:
         return TradeManagementResult(action=OrderAction.NONE.value, reason='')
     resolved_trade_params = trade_params or build_risk_trade_params(runtime)
@@ -130,10 +136,14 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     pip = instance_memory.instance_state.instrument_pip
     if pip <= 0 and market_bars:
         pip = market_bars[-1].point * 10.0
+    point = instance_memory.instance_state.instrument_point
+    if point <= 0 and market_bars:
+        point = market_bars[-1].point
     resolved_now = current_utc or now_utc()
     threshold_ms = runtime.config.runtime.data_stale_threshold_ms
     price = resolve_trade_management_price(position_side=instance_memory.instance_state.position_side or Side.BUY.value, sensor_reading=sensor_reading, market_bars=market_bars)
-    if price is None or not is_sensor_fresh(sensor_reading, resolved_now, threshold_ms):
+    sensor_fresh = is_sensor_fresh(sensor_reading, resolved_now, threshold_ms)
+    if price is None or not sensor_fresh:
         if sensor_reading is None:
             reason = 'trade_management_skipped: missing sensor price'
         elif price is None:
@@ -143,7 +153,90 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
             freshness_ms = compute_data_freshness_ms(sensor_reading.time_utc, resolved_now)
             reason = f'trade_management_skipped: stale sensor price freshness_ms={freshness_ms} threshold_ms={threshold_ms}'
         return TradeManagementResult(action=OrderAction.NONE.value, reason=reason)
-    return evaluate_trade_management(position=position, current_price=price, swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management, pip=pip), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
+    technical = evaluate_trade_management(position=position, current_price=price, swing_low=structure.swing_low, swing_high=structure.swing_high, config=build_trade_management_config(resolved_trade_params, trailing_buffer=runtime.config.analysis.stop_loss_buffer, settings=runtime.config.trade_management, pip=pip), digits=digits, allow_close=runtime.config.trade_management.allow_close and ai_allow_close, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
+    money_params = runtime.config.trade_management.money_step_trailing.to_params()
+    if position is None or not money_params.enabled:
+        return technical
+    if not money_params.is_runnable():
+        # Enabled with invalid values: refuse money-step (no invented defaults); keep technical trailing.
+        return technical
+    state = instance_memory.instance_state
+    status_position = None
+    if status is not None and state.open_ticket is not None:
+        status_position = find_status_position(status, instance_memory.instance, open_ticket=state.open_ticket)
+    profit = float(status_position.profit) if status_position is not None and status_position.profit is not None else 0.0
+    swap = float(status_position.swap) if status_position is not None and status_position.swap is not None else 0.0
+    commission = float(status_position.commission) if status_position is not None and status_position.commission is not None else 0.0
+    net_profit = compute_net_profit_money(profit=profit, swap=swap, commission=commission)
+    open_price = position.entry_price
+    current_sl = position.stop_loss
+    volume = position.volume
+    tick_value = status.tick_value if status is not None else None
+    tick_size = status.tick_size if status is not None else None
+    stop_level = status.stop_level if status is not None else None
+    freeze_level = status.freeze_level if status is not None else None
+    price_tolerance = max(point, 10 ** (-digits) if digits > 0 else 0.0, 1e-05)
+    modify_tp = position.take_profit if runtime.config.trade_management.use_fixed_take_profit else 0.0
+    money_state = MoneyStepTrailingState(
+        peak_net_profit_money=state.peak_net_profit_money,
+        money_trailing_step_index=state.money_trailing_step_index,
+        locked_profit_money=state.locked_profit_money,
+        last_money_trailing_sl=state.last_money_trailing_sl,
+    )
+    state_missing = bool(state.money_trailing_state_missing)
+    if state_missing:
+        log_error(
+            runtime.paths,
+            instance_memory.instance,
+            module=MODULE_NAME,
+            error_type=ErrorType.VALIDATION.value,
+            message=MONEY_TRAILING_STATE_MISSING,
+            context={'ticket': state.open_ticket, 'reason': MONEY_TRAILING_STATE_MISSING},
+        )
+    pending_modify_sl = None
+    if state.pending_execution_command_id is not None and state.last_money_trailing_sl is not None:
+        pending_modify_sl = state.last_money_trailing_sl
+    merge = merge_technical_and_money_step_trailing(
+        technical_result=technical,
+        params=money_params,
+        state=money_state,
+        side=position.side,
+        open_price=open_price,
+        current_sl=current_sl,
+        current_price=price,
+        net_profit_money=net_profit,
+        current_swap=swap,
+        current_commission=commission,
+        tick_value=tick_value,
+        tick_size=tick_size,
+        volume=volume,
+        digits=digits,
+        point=point,
+        stop_level=stop_level,
+        freeze_level=freeze_level,
+        price_tolerance=price_tolerance,
+        modify_take_profit=modify_tp,
+        sensor_fresh=sensor_fresh,
+        pending_modify_sl=pending_modify_sl,
+        state_missing=state_missing,
+    )
+    state.apply_money_trailing_state(
+        peak_net_profit_money=merge.state.peak_net_profit_money,
+        money_trailing_step_index=merge.state.money_trailing_step_index,
+        locked_profit_money=merge.state.locked_profit_money,
+        last_money_trailing_sl=merge.state.last_money_trailing_sl,
+        ticket=state.open_ticket,
+    )
+    if merge.skip_reason == 'money_step_trailing_blocked_invalid_tick':
+        log_error(
+            runtime.paths,
+            instance_memory.instance,
+            module=MODULE_NAME,
+            error_type=ErrorType.VALIDATION.value,
+            message='money step trailing blocked: invalid tick value/size or volume',
+            context={'tick_value': tick_value, 'tick_size': tick_size, 'volume': volume, 'ticket': state.open_ticket},
+        )
+    return merge.management_result
 
 def _build_ai_market_context(*, decision_result: DecisionResult, spread_snapshot: SpreadModelSnapshot, market_bars: tuple[NormalizedMarketBar, ...]) -> dict[str, object]:
     return {'relative_spread': spread_snapshot.relative_spread, 'last_close': market_bars[-1].close, 'last_time_utc': str(market_bars[-1].time_utc), 'system_reason': decision_result.reason, 'buy_score': decision_result.buy_score, 'sell_score': decision_result.sell_score}
@@ -427,7 +520,7 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     management_executed_close = False
     management_blocked = status_stale or stale_sensor_blocks_trailing or instance_memory.instance_state.close_pending_reconciliation
     if not management_blocked and instance_memory.instance_state.open_ticket is not None:
-        management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, trade_params=resolved_trade_params, ai_allow_close=True, sensor_reading=sensor_reading, market_bar_time_utc=market_data_utc, current_utc=resolved_timestamp)
+        management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, trade_params=resolved_trade_params, ai_allow_close=True, sensor_reading=sensor_reading, market_bar_time_utc=market_data_utc, current_utc=resolved_timestamp, status=status)
     if runtime.allow_control_writes and should_execute_management_action(management_result.action) and not status_stale:
         if timeout_guard.is_exceeded():
             instance_memory.instance_state.save(runtime.paths)

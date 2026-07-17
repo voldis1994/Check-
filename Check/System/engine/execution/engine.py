@@ -192,6 +192,9 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
     log_ack_failure(paths, instance, ack_record)
     candidate_entry_price = resolve_entry_price_for_open(decision_result, order_command)
     resolved_entry_price = ack_record.fill_price if ack_record.fill_price is not None else candidate_entry_price
+    if order_command.action == OrderAction.CLOSE.value and interpretation.is_success:
+        from engine.core.position_sync import _archive_money_trailing_state
+        _archive_money_trailing_state(paths, instance, instance_state)
     apply_ack_to_instance_state(instance_state, order_command, ack_record, entry_price=resolved_entry_price, reference_take_profit=resolve_reference_take_profit_for_open(decision_result, order_command), position_last_bar_utc=position_last_bar_utc)
     trade_entry = log_trade_ack(paths, instance, ack_record, timestamp_utc=resolved_timestamp, price=resolved_entry_price if order_command.action == OrderAction.OPEN.value else None)
     archive_processed_control(paths, instance)

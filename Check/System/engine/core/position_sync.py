@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from engine.core.atomic_io import atomic_write_json
 from engine.core.instance import Instance
 from engine.core.paths import SystemPaths
 from engine.execution.order_comment import order_comment_matches_expected
@@ -142,6 +143,17 @@ def _position_is_active_in_status(status: StatusRecord, instance: Instance, *, o
     position = find_status_position(status, instance, open_ticket=open_ticket)
     return position is not None and position.ticket == open_ticket
 
+def _archive_money_trailing_state(paths: SystemPaths, instance: Instance, instance_state: InstanceState) -> None:
+    snapshot = instance_state.money_trailing_snapshot()
+    ticket = snapshot.get('ticket')
+    if ticket is None and instance_state.open_ticket is None:
+        return
+    paths.ensure_instance_directories(instance.account_id, instance.symbol, instance.magic)
+    archive_dir = paths.instance_history_dir(instance.account_id, instance.symbol, instance.magic)
+    archive_path = archive_dir / f'money_trailing_{ticket}.json'
+    atomic_write_json(archive_path, snapshot, pretty=True)
+
+
 def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance_state: InstanceState, *, timestamp_utc: str) -> bool:
     ticket = instance_state.close_pending_ticket
     if ticket is None:
@@ -150,7 +162,51 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
     if closed is None:
         return False
     if closed.symbol != instance.symbol or closed.magic != instance.magic or closed.ticket != ticket:
-        log_error(paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='closed trade record identity mismatch; skipping reconciliation', context={'closed_symbol': closed.symbol, 'expected_symbol': instance.symbol, 'closed_magic': closed.magic, 'expected_magic': instance.magic, 'closed_ticket': closed.ticket, 'expected_ticket': ticket})
+        log_error(
+            paths,
+            instance,
+            module=MODULE_NAME,
+            error_type=ErrorType.PROTOCOL.value,
+            message='closed trade record identity mismatch; skipping reconciliation',
+            context={
+                'closed_symbol': closed.symbol,
+                'expected_symbol': instance.symbol,
+                'closed_magic': closed.magic,
+                'expected_magic': instance.magic,
+                'closed_ticket': closed.ticket,
+                'expected_ticket': ticket,
+            },
+        )
+        return False
+    if closed.side is not None and instance_state.close_pending_side is not None and closed.side != instance_state.close_pending_side:
+        log_error(
+            paths,
+            instance,
+            module=MODULE_NAME,
+            error_type=ErrorType.PROTOCOL.value,
+            message='closed trade side mismatch; keeping close_pending_reconciliation',
+            context={
+                'closed_side': closed.side,
+                'expected_side': instance_state.close_pending_side,
+                'ticket': ticket,
+                'reason': REASON_CLOSE_PENDING_RECONCILIATION,
+            },
+        )
+        return False
+    if closed.volume is not None and instance_state.close_pending_volume is not None and not _volumes_match(closed.volume, instance_state.close_pending_volume):
+        log_error(
+            paths,
+            instance,
+            module=MODULE_NAME,
+            error_type=ErrorType.PROTOCOL.value,
+            message='closed trade volume mismatch; keeping close_pending_reconciliation',
+            context={
+                'closed_volume': closed.volume,
+                'expected_volume': instance_state.close_pending_volume,
+                'ticket': ticket,
+                'reason': REASON_CLOSE_PENDING_RECONCILIATION,
+            },
+        )
         return False
     side = closed.side if closed.side is not None else instance_state.close_pending_side
     volume = closed.volume if closed.volume is not None else instance_state.close_pending_volume
@@ -165,6 +221,8 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
         close_reason=closed.close_reason or '',
         symbol=closed.symbol,
         magic=closed.magic,
+        side=side or '',
+        volume=volume if volume is not None else 0.0,
     )
     log_external_position_close(
         paths,
@@ -177,6 +235,7 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
         stop_loss=None,
         reason=reason,
     )
+    _archive_money_trailing_state(paths, instance, instance_state)
     instance_state.clear_close_pending()
     instance_state.clear_position()
     return True

@@ -275,6 +275,9 @@ class MoneyStepTrailingSettings:
         object.__setattr__(self, 'lock_increment_money', _require_number(self.lock_increment_money, 'trade_management.money_step_trailing.lock_increment_money'))
 
     def is_runnable(self) -> bool:
+        return self.to_params().is_runnable()
+
+    def to_params(self):
         from engine.risk.money_step_trailing import MoneyStepTrailingParams
         return MoneyStepTrailingParams(
             enabled=self.enabled,
@@ -282,7 +285,7 @@ class MoneyStepTrailingSettings:
             profit_step_money=self.profit_step_money,
             initial_locked_profit_money=self.initial_locked_profit_money,
             lock_increment_money=self.lock_increment_money,
-        ).is_runnable()
+        )
 
     def to_dict(self) -> dict[str, float | bool]:
         return {

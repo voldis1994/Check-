@@ -59,6 +59,8 @@ class InstanceState:
     money_trailing_step_index: int = -1
     locked_profit_money: float = 0.0
     last_money_trailing_sl: float | None = None
+    money_trailing_ticket: int | None = None
+    money_trailing_state_missing: bool = False
 
     def path(self, paths: SystemPaths) -> Path:
         return paths.account_state_dir(self.instance.account_id) / self.instance.instance_state_filename()
@@ -78,6 +80,8 @@ class InstanceState:
             raise _validation_error('open_ticket must be >= 0', open_ticket=open_ticket)
         if position_volume <= 0:
             raise _validation_error('position_volume must be > 0', position_volume=position_volume)
+        if self.money_trailing_ticket is not None and self.money_trailing_ticket != open_ticket:
+            self.clear_money_trailing_state()
         self.open_ticket = open_ticket
         self.position_side = position_side
         self.position_volume = position_volume
@@ -93,6 +97,8 @@ class InstanceState:
         self.position_bars_open = 1
         self.position_last_bar_utc = position_last_bar_utc
         self.partial_close_applied = False
+        if self.money_trailing_ticket is None:
+            self.money_trailing_ticket = open_ticket
 
     def update_position_levels(self, *, stop_loss: float, take_profit: float) -> None:
         self.position_stop_loss = stop_loss
@@ -176,6 +182,42 @@ class InstanceState:
         self.close_pending_volume = volume
         self.close_pending_since_utc = since_utc
 
+    def money_trailing_snapshot(self) -> dict[str, Any]:
+        return {
+            'ticket': self.money_trailing_ticket if self.money_trailing_ticket is not None else self.open_ticket,
+            'peak_net_profit_money': self.peak_net_profit_money,
+            'money_trailing_step_index': self.money_trailing_step_index,
+            'locked_profit_money': self.locked_profit_money,
+            'last_money_trailing_sl': self.last_money_trailing_sl,
+        }
+
+    def clear_money_trailing_state(self) -> None:
+        self.peak_net_profit_money = 0.0
+        self.money_trailing_step_index = -1
+        self.locked_profit_money = 0.0
+        self.last_money_trailing_sl = None
+        self.money_trailing_ticket = None
+        self.money_trailing_state_missing = False
+
+    def apply_money_trailing_state(
+        self,
+        *,
+        peak_net_profit_money: float,
+        money_trailing_step_index: int,
+        locked_profit_money: float,
+        last_money_trailing_sl: float | None,
+        ticket: int | None = None,
+    ) -> None:
+        self.peak_net_profit_money = peak_net_profit_money
+        self.money_trailing_step_index = money_trailing_step_index
+        self.locked_profit_money = locked_profit_money
+        self.last_money_trailing_sl = last_money_trailing_sl
+        if ticket is not None:
+            self.money_trailing_ticket = ticket
+        elif self.open_ticket is not None:
+            self.money_trailing_ticket = self.open_ticket
+        self.money_trailing_state_missing = False
+
     def clear_position(self) -> None:
         self.open_ticket = None
         self.position_side = None
@@ -189,10 +231,7 @@ class InstanceState:
         self.position_last_bar_utc = None
         self.partial_close_applied = False
         self.duplicate_position_anomaly = False
-        self.peak_net_profit_money = 0.0
-        self.money_trailing_step_index = -1
-        self.locked_profit_money = 0.0
-        self.last_money_trailing_sl = None
+        self.clear_money_trailing_state()
 
     def update_instrument(self, *, digits: int, point: float, pip: float) -> None:
         self.instrument_digits = digits
@@ -279,6 +318,10 @@ class InstanceState:
             data['locked_profit_money'] = self.locked_profit_money
         if self.last_money_trailing_sl is not None:
             data['last_money_trailing_sl'] = self.last_money_trailing_sl
+        if self.money_trailing_ticket is not None:
+            data['money_trailing_ticket'] = self.money_trailing_ticket
+        if self.money_trailing_state_missing:
+            data['money_trailing_state_missing'] = True
         return data
 
     def save(self, paths: SystemPaths) -> None:
@@ -393,4 +436,19 @@ class InstanceState:
         last_money_trailing_sl = payload.get('last_money_trailing_sl')
         if last_money_trailing_sl is not None:
             state.last_money_trailing_sl = float(last_money_trailing_sl)
+        money_trailing_ticket = payload.get('money_trailing_ticket')
+        if money_trailing_ticket is not None:
+            state.money_trailing_ticket = int(money_trailing_ticket)
+        elif state.open_ticket is not None and (
+            state.peak_net_profit_money != 0.0
+            or state.money_trailing_step_index != -1
+            or state.locked_profit_money != 0.0
+            or state.last_money_trailing_sl is not None
+        ):
+            state.money_trailing_ticket = state.open_ticket
+        state.money_trailing_state_missing = bool(payload.get('money_trailing_state_missing', False))
+        if state.open_ticket is not None and state.money_trailing_ticket is not None and state.money_trailing_ticket != state.open_ticket:
+            state.clear_money_trailing_state()
+            state.money_trailing_ticket = state.open_ticket
+            state.money_trailing_state_missing = True
         return state
