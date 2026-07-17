@@ -149,6 +149,10 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
     closed = find_closed_trade_for_ticket(paths, instance, ticket=ticket)
     if closed is None:
         return False
+    if closed.symbol != instance.symbol or closed.magic != instance.magic or closed.ticket != ticket:
+        log_error(paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='closed trade record identity mismatch; skipping reconciliation', context={'closed_symbol': closed.symbol, 'expected_symbol': instance.symbol, 'closed_magic': closed.magic, 'expected_magic': instance.magic, 'closed_ticket': closed.ticket, 'expected_ticket': ticket})
+        return False
+    side = closed.side if closed.side is not None else instance_state.close_pending_side
     volume = closed.volume if closed.volume is not None else instance_state.close_pending_volume
     reason = build_reason(
         REASON_EXTERNAL_POSITION_CLOSE,
@@ -166,7 +170,7 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
         paths,
         instance,
         ticket=closed.ticket,
-        side=instance_state.close_pending_side or instance_state.position_side,
+        side=side or instance_state.position_side,
         volume=volume,
         timestamp_utc=closed.close_time_utc or timestamp_utc,
         price=closed.close_price,

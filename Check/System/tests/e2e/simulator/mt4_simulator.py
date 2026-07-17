@@ -136,11 +136,34 @@ class MT4Simulator:
             return None
         return parse_control(control_path.read_text(encoding='utf-8'))
 
-    def build_ack_for_control(self, control: ControlCommand, *, status: str=AckStatus.SUCCESS.value, ticket: int | None=None, error_code: int | None=None, error_message: str | None=None, timestamp_utc: str='2026-07-07T06:03:00.000Z') -> AckRecord:
+    def build_ack_for_control(self, control: ControlCommand, *, status: str=AckStatus.SUCCESS.value, ticket: int | None=None, fill_price: float | None=None, error_code: int | None=None, error_message: str | None=None, timestamp_utc: str='2026-07-07T06:03:00.000Z') -> AckRecord:
         resolved_ticket = ticket
         if status == AckStatus.SUCCESS.value and resolved_ticket is None:
             resolved_ticket = self.next_ticket()
-        return AckRecord(schema_version=PROTOCOL_SCHEMA_VERSION, timestamp_utc=timestamp_utc, command_id=control.command_id, account_id=control.account_id, symbol=control.symbol, magic=control.magic, status=status, ticket=resolved_ticket, error_code=error_code, error_message=error_message)
+        kwargs: dict[str, object] = {
+            'schema_version': PROTOCOL_SCHEMA_VERSION,
+            'timestamp_utc': timestamp_utc,
+            'command_id': control.command_id,
+            'account_id': control.account_id,
+            'symbol': control.symbol,
+            'magic': control.magic,
+            'status': status,
+            'ticket': resolved_ticket,
+            'error_code': error_code,
+            'error_message': error_message,
+        }
+        if status == AckStatus.SUCCESS.value and control.action == OrderAction.OPEN.value:
+            if control.side is not None:
+                kwargs['side'] = control.side
+            if control.volume is not None:
+                kwargs['volume'] = control.volume
+            if fill_price is not None:
+                kwargs['fill_price'] = fill_price
+            elif control.side == 'BUY':
+                kwargs['fill_price'] = 1.10315
+            else:
+                kwargs['fill_price'] = 1.10290
+        return AckRecord(**kwargs)
 
     def write_ack(self, instance: Instance, ack_record: AckRecord) -> Path:
         if ack_record.instance_key.as_tuple() != instance.instance_key:
@@ -151,11 +174,11 @@ class MT4Simulator:
         atomic_write_text(ack_path, write_ack(ack_record))
         return ack_path
 
-    def fulfill_control(self, instance: Instance, *, status: str=AckStatus.SUCCESS.value, ticket: int | None=None, error_code: int | None=None, error_message: str | None=None, timestamp_utc: str='2026-07-07T06:03:00.000Z') -> AckRecord | None:
+    def fulfill_control(self, instance: Instance, *, status: str=AckStatus.SUCCESS.value, ticket: int | None=None, fill_price: float | None=None, error_code: int | None=None, error_message: str | None=None, timestamp_utc: str='2026-07-07T06:03:00.000Z') -> AckRecord | None:
         control = self.read_control(instance)
         if control is None:
             return None
-        ack_record = self.build_ack_for_control(control, status=status, ticket=ticket, error_code=error_code, error_message=error_message, timestamp_utc=timestamp_utc)
+        ack_record = self.build_ack_for_control(control, status=status, ticket=ticket, fill_price=fill_price, error_code=error_code, error_message=error_message, timestamp_utc=timestamp_utc)
         self.write_ack(instance, ack_record)
         self._sync_position_from_ack(control, ack_record)
         self.refresh_status(instance, timestamp_utc=timestamp_utc)

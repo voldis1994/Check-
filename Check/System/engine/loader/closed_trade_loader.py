@@ -22,6 +22,8 @@ class ClosedTradeRecord:
     swap: float
     close_reason: str | None = None
     volume: float | None = None
+    side: str | None = None
+    order_comment: str | None = None
 
 def build_closed_trade_path(paths: SystemPaths, instance: Instance) -> Path:
     return paths.account_dir(instance.account_id) / f'closed_{instance.symbol}_{instance.magic}.json'
@@ -41,6 +43,10 @@ def parse_closed_trade_payload(payload: dict[str, Any]) -> ClosedTradeRecord:
     close_reason = payload.get('close_reason')
     volume_raw = payload.get('volume')
     volume = _require_number(volume_raw, 'volume') if volume_raw is not None else None
+    side_raw = payload.get('side')
+    side = str(side_raw) if side_raw is not None else None
+    order_comment_raw = payload.get('order_comment')
+    order_comment = str(order_comment_raw) if order_comment_raw is not None else None
     return ClosedTradeRecord(
         account_id=str(payload.get('account_id', '')),
         symbol=str(payload.get('symbol', '')),
@@ -53,6 +59,8 @@ def parse_closed_trade_payload(payload: dict[str, Any]) -> ClosedTradeRecord:
         swap=_require_number(payload.get('swap', 0.0), 'swap'),
         close_reason=str(close_reason) if close_reason is not None else None,
         volume=volume,
+        side=side,
+        order_comment=order_comment,
     )
 
 def load_closed_trade(paths: SystemPaths, instance: Instance) -> ClosedTradeRecord | None:

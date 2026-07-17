@@ -42,14 +42,21 @@ def _patch_fixed_command_id(monkeypatch: pytest.MonkeyPatch) -> None:
         return FIXED_COMMAND_ID if counter['value'] == 1 else f'cmd-integration-exec-{counter['value']}'
     monkeypatch.setattr('engine.execution.command.uuid4', _uuid4)
 
-def _ack_payload(*, status: str, command_id: str=FIXED_COMMAND_ID, ticket: int | None=555, error_code: int | None=None, error_message: str | None=None) -> str:
+def _ack_payload(*, status: str, command_id: str=FIXED_COMMAND_ID, ticket: int | None=555, fill_price: float | None=None, side: str | None=None, volume: float | None=None, error_code: int | None=None, error_message: str | None=None) -> str:
     ticket_field = f',\n  "ticket": {ticket}' if ticket is not None else ''
     error_fields = ''
     if error_code is not None:
         error_fields += f',\n  "error_code": {error_code}'
     if error_message is not None:
         error_fields += f',\n  "error_message": "{error_message}"'
-    return f'{{\n  "schema_version": "{PROTOCOL_SCHEMA_VERSION}",\n  "timestamp_utc": "2026-07-07T06:03:00.000Z",\n  "command_id": "{command_id}",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "status": "{status}"{ticket_field}{error_fields}\n}}'
+    fill_fields = ''
+    if fill_price is not None:
+        fill_fields += f',\n  "fill_price": {fill_price}'
+    if side is not None:
+        fill_fields += f',\n  "side": "{side}"'
+    if volume is not None:
+        fill_fields += f',\n  "volume": {volume}'
+    return f'{{\n  "schema_version": "{PROTOCOL_SCHEMA_VERSION}",\n  "timestamp_utc": "2026-07-07T06:03:00.000Z",\n  "command_id": "{command_id}",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "status": "{status}"{ticket_field}{fill_fields}{error_fields}\n}}'
 
 def _write_ack(paths: SystemPaths, instance: Instance, payload: str) -> None:
     paths.ensure_account_directories(instance.account_id)
@@ -83,7 +90,7 @@ def _assert_tradeable_decision(decision_result: DecisionResult, risk_engine_resu
 def test_control_file_is_created(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_fixed_command_id(monkeypatch)
     runtime, instance = _startup_runtime(tmp_path)
-    result = run_instance_execution_pipeline(runtime, instance, use_global_universe=False, ack_payload=_ack_payload(status=AckStatus.SUCCESS.value, ticket=555))
+    result = run_instance_execution_pipeline(runtime, instance, use_global_universe=False, ack_payload=_ack_payload(status=AckStatus.SUCCESS.value, ticket=555, fill_price=1.10315, side='BUY', volume=0.01))
     assert result.decision_completed
     assert result.execution_completed
     assert result.decision_result is not None
@@ -103,7 +110,7 @@ def test_control_file_is_created(tmp_path, monkeypatch: pytest.MonkeyPatch) -> N
 def test_simulated_ack_updates_instance_state(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_fixed_command_id(monkeypatch)
     runtime, instance = _startup_runtime(tmp_path)
-    result = run_instance_execution_pipeline(runtime, instance, use_global_universe=False, ack_payload=_ack_payload(status=AckStatus.SUCCESS.value, ticket=777))
+    result = run_instance_execution_pipeline(runtime, instance, use_global_universe=False, ack_payload=_ack_payload(status=AckStatus.SUCCESS.value, ticket=777, fill_price=1.10315, side='BUY', volume=0.01))
     assert result.decision_completed
     assert result.execution_completed
     assert result.decision_result is not None
@@ -127,7 +134,7 @@ def test_simulated_ack_updates_instance_state(tmp_path, monkeypatch: pytest.Monk
 def test_trade_journal_full_cycle(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_fixed_command_id(monkeypatch)
     runtime, instance = _startup_runtime(tmp_path)
-    result = run_instance_execution_pipeline(runtime, instance, use_global_universe=False, ack_payload=_ack_payload(status=AckStatus.SUCCESS.value, ticket=888))
+    result = run_instance_execution_pipeline(runtime, instance, use_global_universe=False, ack_payload=_ack_payload(status=AckStatus.SUCCESS.value, ticket=888, fill_price=1.10315, side='BUY', volume=0.01))
     assert result.decision_completed
     assert result.execution_completed
     assert result.decision_result is not None

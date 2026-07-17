@@ -55,6 +55,10 @@ class InstanceState:
     cycle_count: int = 0
     last_cycle_utc: str = ''
     last_seen_market_bar_utc: str = ''
+    peak_net_profit_money: float = 0.0
+    money_trailing_step_index: int = -1
+    locked_profit_money: float = 0.0
+    last_money_trailing_sl: float | None = None
 
     def path(self, paths: SystemPaths) -> Path:
         return paths.account_state_dir(self.instance.account_id) / self.instance.instance_state_filename()
@@ -185,6 +189,10 @@ class InstanceState:
         self.position_last_bar_utc = None
         self.partial_close_applied = False
         self.duplicate_position_anomaly = False
+        self.peak_net_profit_money = 0.0
+        self.money_trailing_step_index = -1
+        self.locked_profit_money = 0.0
+        self.last_money_trailing_sl = None
 
     def update_instrument(self, *, digits: int, point: float, pip: float) -> None:
         self.instrument_digits = digits
@@ -263,6 +271,14 @@ class InstanceState:
             data['peak_equity'] = self.peak_equity
         if self.last_seen_market_bar_utc:
             data['last_seen_market_bar_utc'] = self.last_seen_market_bar_utc
+        if self.peak_net_profit_money != 0.0:
+            data['peak_net_profit_money'] = self.peak_net_profit_money
+        if self.money_trailing_step_index != -1:
+            data['money_trailing_step_index'] = self.money_trailing_step_index
+        if self.locked_profit_money != 0.0:
+            data['locked_profit_money'] = self.locked_profit_money
+        if self.last_money_trailing_sl is not None:
+            data['last_money_trailing_sl'] = self.last_money_trailing_sl
         return data
 
     def save(self, paths: SystemPaths) -> None:
@@ -365,4 +381,16 @@ class InstanceState:
         state.cycle_count = int(payload.get('cycle_count', state.cycle_count))
         state.last_cycle_utc = str(payload.get('last_cycle_utc', state.last_cycle_utc))
         state.last_seen_market_bar_utc = str(payload.get('last_seen_market_bar_utc', payload.get('last_executed_market_bar_utc', state.last_seen_market_bar_utc)))
+        peak_net_profit_money = payload.get('peak_net_profit_money')
+        if peak_net_profit_money is not None:
+            state.peak_net_profit_money = float(peak_net_profit_money)
+        money_trailing_step_index = payload.get('money_trailing_step_index')
+        if money_trailing_step_index is not None:
+            state.money_trailing_step_index = int(money_trailing_step_index)
+        locked_profit_money = payload.get('locked_profit_money')
+        if locked_profit_money is not None:
+            state.locked_profit_money = float(locked_profit_money)
+        last_money_trailing_sl = payload.get('last_money_trailing_sl')
+        if last_money_trailing_sl is not None:
+            state.last_money_trailing_sl = float(last_money_trailing_sl)
         return state

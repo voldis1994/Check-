@@ -62,14 +62,21 @@ def _wait_decision_result() -> DecisionResult:
 def _allow_risk_result() -> RiskEngineResult:
     return RiskEngineResult(result=RiskResult.ALLOW.value, reason='', position_size=0.1, stop_loss=1.0988, take_profit=1.1117)
 
-def _ack_payload(*, status: str, command_id: str=FIXED_COMMAND_ID, ticket: int | None=555, error_code: int | None=None, error_message: str | None=None) -> str:
+def _ack_payload(*, status: str, command_id: str=FIXED_COMMAND_ID, ticket: int | None=555, fill_price: float | None=None, side: str | None=None, volume: float | None=None, error_code: int | None=None, error_message: str | None=None) -> str:
     ticket_field = f',\n  "ticket": {ticket}' if ticket is not None else ''
     error_fields = ''
     if error_code is not None:
         error_fields += f',\n  "error_code": {error_code}'
     if error_message is not None:
         error_fields += f',\n  "error_message": "{error_message}"'
-    return f'{{\n  "schema_version": "{PROTOCOL_SCHEMA_VERSION}",\n  "timestamp_utc": "2026-07-07T06:00:00.000Z",\n  "command_id": "{command_id}",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "status": "{status}"{ticket_field}{error_fields}\n}}'
+    fill_fields = ''
+    if fill_price is not None:
+        fill_fields += f',\n  "fill_price": {fill_price}'
+    if side is not None:
+        fill_fields += f',\n  "side": "{side}"'
+    if volume is not None:
+        fill_fields += f',\n  "volume": {volume}'
+    return f'{{\n  "schema_version": "{PROTOCOL_SCHEMA_VERSION}",\n  "timestamp_utc": "2026-07-07T06:00:00.000Z",\n  "command_id": "{command_id}",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "status": "{status}"{ticket_field}{fill_fields}{error_fields}\n}}'
 
 def _write_ack(paths: SystemPaths, instance: Instance, payload: str) -> None:
     paths.ensure_account_directories(instance.account_id)
@@ -123,7 +130,7 @@ def test_wait_for_ack_polls_until_ack_becomes_available() -> None:
 def test_apply_ack_to_instance_state_updates_execution_and_position_on_success_open() -> None:
     state = _instance_state()
     order_command = _open_order_command()
-    ack_record = MagicMock(command_id=FIXED_COMMAND_ID, status=AckStatus.SUCCESS.value, ticket=555)
+    ack_record = MagicMock(command_id=FIXED_COMMAND_ID, status=AckStatus.SUCCESS.value, ticket=555, fill_price=1.1031, side=Side.BUY.value, volume=0.1)
     apply_ack_to_instance_state(state, order_command, ack_record, entry_price=1.1031)
     assert state.last_command_id == FIXED_COMMAND_ID
     assert state.last_ack_status == AckStatus.SUCCESS.value
@@ -215,7 +222,7 @@ def test_run_execution_engine_buy_allow_success_updates_control_state_and_trade_
     paths = SystemPaths(root_path=tmp_path)
     instance = _instance()
     state = _instance_state()
-    _write_ack(paths, instance, _ack_payload(status=AckStatus.SUCCESS.value, ticket=555))
+    _write_ack(paths, instance, _ack_payload(status=AckStatus.SUCCESS.value, ticket=555, fill_price=1.1031, side=Side.BUY.value, volume=0.1))
     result = run_execution_engine(paths=paths, instance=instance, instance_state=state, decision_result=_buy_decision_result(), risk_engine_result=_allow_risk_result(), runtime=_runtime_config(), timestamp_utc='2026-07-07T06:00:00.000Z')
     assert isinstance(result, ExecutionResult)
     assert result.control_published is True
@@ -275,7 +282,7 @@ def test_run_execution_engine_trade_journal_reflects_full_intent_to_ack_cycle(tm
     paths = SystemPaths(root_path=tmp_path)
     instance = _instance()
     state = _instance_state()
-    _write_ack(paths, instance, _ack_payload(status=AckStatus.SUCCESS.value, ticket=777))
+    _write_ack(paths, instance, _ack_payload(status=AckStatus.SUCCESS.value, ticket=777, fill_price=1.1031, side=Side.BUY.value, volume=0.1))
     run_execution_engine(paths=paths, instance=instance, instance_state=state, decision_result=_buy_decision_result(), risk_engine_result=_allow_risk_result(), runtime=_runtime_config(), timestamp_utc='2026-07-07T06:00:00.000Z')
     journal_path = build_trade_journal_path(paths, instance)
     lines = journal_path.read_text(encoding='utf-8').splitlines()

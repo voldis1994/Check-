@@ -8,12 +8,12 @@ from engine.core.instance import Instance
 from engine.core.lifecycle import LiveRuntime
 from engine.core.paths import SystemPaths
 from engine.core.performance import CycleTimingSnapshot, monotonic_elapsed_ms
-from engine.core.position_sync import reconcile_position_with_status
+from engine.core.position_sync import find_status_positions, reconcile_position_with_status
 from engine.core.retry import RetryAlertContext, RetryPolicy, build_retry_policy
 from engine.ai_decision_layer import AIDecisionMeta, AIQueryResult, apply_ai_to_decision_result, apply_risk_block_to_decision_result, get_ai_decision
 from engine.risk.precheck import should_call_ai_layer
 from engine.decision.engine import DecisionResult, run_decision_engine
-from engine.execution.engine import ExecutionResult, run_execution_engine
+from engine.execution.engine import ExecutionResult, is_valid_open_fill_ack, run_execution_engine
 from engine.journal.decision_journal import log_decision
 from engine.journal.error_journal import log_error
 from engine.loader.market_loader import RawMarketData, load_market_data
@@ -495,7 +495,8 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
             return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
         trade_intended = True
         execution_started = time.monotonic()
-        entry_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, runtime=runtime.config.runtime, management_result=_noop_management_result(), timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='entry execution io'), position_last_bar_utc=market_data_utc)
+        entry_preexisting_tickets = tuple(p.ticket for p in find_status_positions(status, instance))
+        entry_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, runtime=runtime.config.runtime, management_result=_noop_management_result(), timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='entry execution io'), position_last_bar_utc=market_data_utc, preexisting_tickets=entry_preexisting_tickets)
         entry_latency = int((time.monotonic() - execution_started) * 1000)
         ack_latency_ms = entry_latency if ack_latency_ms is None else ack_latency_ms + entry_latency
         execution_result = entry_execution
@@ -508,7 +509,10 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
             else:
                 ack_received = True
                 if ack.is_success:
-                    broker_execution_confirmed = True
+                    if ack.ack_record is not None:
+                        broker_execution_confirmed = is_valid_open_fill_ack(ack.ack_record)
+                    else:
+                        broker_execution_confirmed = True
                 if ack.is_failed or ack.is_rejected:
                     execution_failed = True
         trade_executed = broker_execution_confirmed

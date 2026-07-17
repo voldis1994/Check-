@@ -37,6 +37,7 @@ class AckStatus(StrEnum):
     FAILED = 'FAILED'
     REJECTED = 'REJECTED'
     TIMEOUT = 'TIMEOUT'
+    ALREADY_PROCESSED = 'ALREADY_PROCESSED'
 
 class TradeEvent(StrEnum):
     OPEN = 'OPEN'
@@ -166,7 +167,7 @@ def is_valid_order_action(value: str) -> bool:
     return value in OrderAction._value2member_map_
 
 def is_valid_ack_status(value: str) -> bool:
-    return value in {AckStatus.SUCCESS.value, AckStatus.FAILED.value, AckStatus.REJECTED.value}
+    return value in {AckStatus.SUCCESS.value, AckStatus.FAILED.value, AckStatus.REJECTED.value, AckStatus.ALREADY_PROCESSED.value}
 
 def is_valid_reason_code(value: str) -> bool:
     return value in ALL_REASON_CODES

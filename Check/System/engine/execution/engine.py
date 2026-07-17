@@ -63,33 +63,52 @@ def resolve_reference_take_profit_for_open(decision_result: DecisionResult, orde
         return decision_result.sell_candidate.take_profit
     return None
 
+def is_valid_open_fill_ack(ack_record: AckRecord) -> bool:
+    if ack_record.status != AckStatus.SUCCESS.value:
+        return False
+    if ack_record.ticket is None or ack_record.ticket <= 0:
+        return False
+    fill_price = ack_record.fill_price
+    if fill_price is None or isinstance(fill_price, bool) or not isinstance(fill_price, (int, float)):
+        return False
+    side = ack_record.side
+    if not isinstance(side, str) or side not in {Side.BUY.value, Side.SELL.value}:
+        return False
+    volume = ack_record.volume
+    if volume is None or isinstance(volume, bool) or not isinstance(volume, (int, float)) or volume <= 0:
+        return False
+    return True
+
 def apply_ack_to_instance_state(instance_state: InstanceState, order_command: OrderCommand, ack_record: AckRecord, *, entry_price: float | None=None, reference_take_profit: float | None=None, position_last_bar_utc: str | None=None) -> None:
     instance_state.update_execution(command_id=ack_record.command_id, ack_status=ack_record.status)
-    instance_state.clear_pending_execution()
-    if ack_record.status != AckStatus.SUCCESS.value:
-        return
-    if order_command.action == OrderAction.OPEN.value and ack_record.ticket is not None:
-        ack_side = getattr(ack_record, 'side', None)
-        ack_volume = getattr(ack_record, 'volume', None)
-        ack_fill = getattr(ack_record, 'fill_price', None)
-        ack_open_time = getattr(ack_record, 'open_time_utc', None)
-        side = ack_side if isinstance(ack_side, str) else order_command.side
-        volume = float(ack_volume) if isinstance(ack_volume, (int, float)) and not isinstance(ack_volume, bool) else order_command.volume
-        fill_price = float(ack_fill) if isinstance(ack_fill, (int, float)) and not isinstance(ack_fill, bool) else entry_price
-        open_time_utc = ack_open_time if isinstance(ack_open_time, str) else None
-        if side is not None and volume is not None:
-            instance_state.update_position(open_ticket=ack_record.ticket, position_side=side, position_volume=volume, fill_price=fill_price, entry_price=entry_price, stop_loss=order_command.stop_loss, take_profit=order_command.take_profit, open_time_utc=open_time_utc, position_last_bar_utc=position_last_bar_utc)
-            if reference_take_profit is not None and reference_take_profit > 0:
-                instance_state.position_reference_take_profit = reference_take_profit
-        return
-    if order_command.action == OrderAction.MODIFY.value and order_command.stop_loss is not None and (order_command.take_profit is not None):
-        instance_state.update_position_levels(stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
-        return
-    if order_command.action == OrderAction.CLOSE.value:
-        if order_command.volume is not None and instance_state.position_volume is not None and (order_command.volume < instance_state.position_volume):
-            instance_state.reduce_position_volume(volume=order_command.volume)
-        else:
-            instance_state.clear_position()
+    if order_command.action == OrderAction.OPEN.value:
+        if is_valid_open_fill_ack(ack_record):
+            instance_state.clear_pending_execution()
+            ack_side = ack_record.side
+            ack_volume = ack_record.volume
+            ack_fill = ack_record.fill_price
+            ack_open_time = ack_record.open_time_utc
+            side = ack_side if isinstance(ack_side, str) else order_command.side
+            volume = float(ack_volume) if isinstance(ack_volume, (int, float)) and not isinstance(ack_volume, bool) else order_command.volume
+            fill_price = float(ack_fill) if isinstance(ack_fill, (int, float)) and not isinstance(ack_fill, bool) else entry_price
+            open_time_utc = ack_open_time if isinstance(ack_open_time, str) else None
+            if side is not None and volume is not None:
+                instance_state.update_position(open_ticket=ack_record.ticket, position_side=side, position_volume=volume, fill_price=fill_price, entry_price=entry_price, stop_loss=order_command.stop_loss, take_profit=order_command.take_profit, open_time_utc=open_time_utc, position_last_bar_utc=position_last_bar_utc)
+                if reference_take_profit is not None and reference_take_profit > 0:
+                    instance_state.position_reference_take_profit = reference_take_profit
+        elif ack_record.status in {AckStatus.FAILED.value, AckStatus.REJECTED.value}:
+            instance_state.clear_pending_execution()
+        # ALREADY_PROCESSED or SUCCESS with invalid/zero fill: keep pending
+    else:
+        instance_state.clear_pending_execution()
+        if ack_record.status == AckStatus.SUCCESS.value:
+            if order_command.action == OrderAction.MODIFY.value and order_command.stop_loss is not None and (order_command.take_profit is not None):
+                instance_state.update_position_levels(stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
+            elif order_command.action == OrderAction.CLOSE.value:
+                if order_command.volume is not None and instance_state.position_volume is not None and (order_command.volume < instance_state.position_volume):
+                    instance_state.reduce_position_volume(volume=order_command.volume)
+                else:
+                    instance_state.clear_position()
 
 def log_ack_failure(paths: SystemPaths, instance: Instance, ack_record: AckRecord) -> None:
     if ack_record.status not in {AckStatus.FAILED.value, AckStatus.REJECTED.value}:
@@ -104,7 +123,7 @@ def log_ack_failure(paths: SystemPaths, instance: Instance, ack_record: AckRecor
 def _requires_trade_execution(order_command: OrderCommand) -> bool:
     return order_command.action in {OrderAction.OPEN.value, OrderAction.MODIFY.value, OrderAction.CLOSE.value}
 
-def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_state: InstanceState, decision_result: DecisionResult, risk_engine_result: RiskEngineResult, runtime: RuntimeConfig, management_result: TradeManagementResult | None=None, timestamp_utc: str | None=None, started_monotonic: float | None=None, monotonic_fn: Callable[[], float]=time.monotonic, sleep_fn: Callable[[float], None]=time.sleep, poll_interval_ms: int=50, retry_alert_context: RetryAlertContext | None=None, position_last_bar_utc: str | None=None) -> ExecutionResult:
+def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_state: InstanceState, decision_result: DecisionResult, risk_engine_result: RiskEngineResult, runtime: RuntimeConfig, management_result: TradeManagementResult | None=None, timestamp_utc: str | None=None, started_monotonic: float | None=None, monotonic_fn: Callable[[], float]=time.monotonic, sleep_fn: Callable[[float], None]=time.sleep, poll_interval_ms: int=50, retry_alert_context: RetryAlertContext | None=None, position_last_bar_utc: str | None=None, preexisting_tickets: tuple[int, ...]=()) -> ExecutionResult:
     resolved_timestamp = timestamp_utc or now_utc()
     order_command = resolve_order_command(decision_result, risk_engine_result, management_result, ticket=instance_state.open_ticket, side=instance_state.position_side)
     if instance_state.last_command_id:
@@ -116,6 +135,20 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
         return ExecutionResult(order_command=order_command, control_published=False, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)
     if not _requires_trade_execution(order_command):
         return ExecutionResult(order_command=order_command, control_published=False, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)
+    if order_command.action == OrderAction.OPEN.value:
+        from engine.execution.order_comment import build_open_order_comment
+        _pending_comment = order_command.order_comment or build_open_order_comment(order_command.command_id)
+        instance_state.set_pending_execution(
+            command_id=order_command.command_id,
+            decision_id=order_command.decision_id,
+            since_utc=resolved_timestamp,
+            comment=_pending_comment,
+            symbol=instance.symbol,
+            magic=instance.magic,
+            side=order_command.side,
+            volume=order_command.volume,
+            preexisting_tickets=preexisting_tickets,
+        )
     publish_control(paths, instance, order_command, timestamp_utc=resolved_timestamp, retry_policy=retry_policy, retry_alert_context=retry_alert_context)
     log_trade_intent(paths, instance, build_trade_intent_params(order_command), timestamp_utc=resolved_timestamp)
     ack_timeout = build_ack_timeout_config(runtime)
@@ -148,7 +181,7 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
                 magic=instance.magic,
                 side=order_command.side,
                 volume=order_command.volume,
-                preexisting_tickets=(),
+                preexisting_tickets=preexisting_tickets,
             )
         archive_processed_control(paths, instance)
         archive_processed_ack(paths, instance)
