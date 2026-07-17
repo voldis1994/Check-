@@ -239,7 +239,7 @@ def test_12_external_close_without_invented_price(tmp_path: Path) -> None:
     result = reconcile_position_with_status(paths, instance, state, status, timestamp_utc='2026-07-17T12:00:05.000Z')
     assert result.external_close is True
     assert result.close_pending is True
-    assert state.open_ticket is None
+    assert state.open_ticket == 9
     assert state.close_pending_reconciliation is True
     assert state.close_pending_ticket == 9
     # No finalized close journal with invented SL/entry price while pending.

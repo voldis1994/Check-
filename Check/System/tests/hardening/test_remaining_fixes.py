@@ -101,7 +101,7 @@ def test_04_stale_status_reason_constant_and_cycle_gate() -> None:
     assert 'stale status timestamp' in cycle_src
     # stale status blocks reconcile + TM + OPEN
     assert 'if not status_stale:' in cycle_src
-    assert 'management_blocked = status_stale' in cycle_src
+    assert 'management_blocked = status_stale or stale_sensor_blocks_trailing or instance_memory.instance_state.close_pending_reconciliation' in cycle_src
 
 
 def test_05_stale_status_still_allows_observability_path() -> None:
@@ -116,8 +116,10 @@ def test_06_stale_universe_blocks_entry_not_trailing() -> None:
     cycle_src = (SYSTEM_ROOT / 'engine' / 'core' / 'cycle.py').read_text(encoding='utf-8')
     assert 'REASON_STALE_UNIVERSE_TIMESTAMP' in cycle_src
     assert 'universe_stale' in cycle_src
-    # Trailing/TM is gated by status_stale/sensor, not universe_stale alone
-    assert 'management_blocked = status_stale or stale_sensor_blocks_trailing' in cycle_src
+    # Trailing/TM is gated by status_stale/sensor/close_pending, not universe_stale alone
+    mgmt_line = [line for line in cycle_src.splitlines() if 'management_blocked =' in line][0]
+    assert 'status_stale' in mgmt_line
+    assert 'universe_stale' not in mgmt_line
     assert 'stale universe blocks new entry' in cycle_src
 
 
@@ -138,6 +140,7 @@ def test_07_closed_trade_match_journals_real_close(tmp_path: Path) -> None:
                 'profit': 12.5,
                 'commission': -0.2,
                 'swap': -0.1,
+                'volume': 0.01,
                 'close_reason': 'stop_loss',
             }
         ),
@@ -149,6 +152,7 @@ def test_07_closed_trade_match_journals_real_close(tmp_path: Path) -> None:
     result = reconcile_position_with_status(paths, instance, state, status, timestamp_utc='2026-07-17T12:06:00.000Z')
     assert result.close_reconciled is True
     assert state.close_pending_reconciliation is False
+    assert state.open_ticket is None
     journal = list((paths.account_journal_dir(instance.account_id)).glob('trade_*.jsonl'))
     assert journal
     line = journal[0].read_text(encoding='utf-8').strip().splitlines()[-1]
@@ -169,11 +173,15 @@ def test_08_close_pending_kept_when_closed_file_missing(tmp_path: Path) -> None:
     assert result.close_pending is True
     assert state.close_pending_reconciliation is True
     assert state.close_pending_ticket == 77
-    assert state.open_ticket is None
+    # Active position state retained until closed-trade history confirms.
+    assert state.open_ticket == 77
+    assert state.position_entry_price == pytest.approx(1.2)
     # Still pending next cycle
     result2 = reconcile_position_with_status(paths, instance, state, _status(positions=()), timestamp_utc='2026-07-17T12:07:00.000Z')
     assert state.close_pending_reconciliation is True
+    assert state.open_ticket == 77
     assert result2.close_reconciled is False
+    assert result2.close_pending is True
 
 
 def test_09_never_invent_sl_or_entry_as_close_price(tmp_path: Path) -> None:
@@ -183,6 +191,7 @@ def test_09_never_invent_sl_or_entry_as_close_price(tmp_path: Path) -> None:
     state = InstanceState(instance)
     state.update_position(open_ticket=9, position_side='BUY', position_volume=0.01, entry_price=1.1000, stop_loss=1.0900)
     reconcile_position_with_status(paths, instance, state, _status(positions=()), timestamp_utc='2026-07-17T12:06:00.000Z')
+    assert state.open_ticket == 9
     journal_files = list(paths.account_journal_dir(instance.account_id).glob('trade_*.jsonl'))
     for path in journal_files:
         for line in path.read_text(encoding='utf-8').splitlines():
@@ -258,9 +267,11 @@ def test_14_pending_execution_blocks_open_reason() -> None:
 
 def test_15_ack_timeout_sets_pending_does_not_clear() -> None:
     exec_src = (SYSTEM_ROOT / 'engine' / 'execution' / 'engine.py').read_text(encoding='utf-8')
-    assert 'instance_state.pending_execution_command_id = order_command.command_id' in exec_src
+    assert 'set_pending_execution' in exec_src
+    assert 'OrderAction.OPEN.value' in exec_src
     # Timeout path must not clear pending
     timeout_block = exec_src.split('if not ack_ready:')[1].split('ack_record = read_ack_for_command')[0]
+    assert 'clear_pending_execution' not in timeout_block
     assert 'pending_execution_command_id = None' not in timeout_block
 
 
@@ -271,7 +282,7 @@ def test_16_ack_timeout_status_reconcile_confirms_broker(tmp_path: Path) -> None
     state = InstanceState(instance)
     state.instrument_digits = 5
     state.instrument_point = 0.00001
-    state.pending_execution_command_id = 'pending-open'
+    state.set_pending_execution(command_id='pending-open', side='BUY', volume=0.01)
     status = _status(
         positions=(
             StatusPositionSnapshot(
@@ -292,6 +303,58 @@ def test_16_ack_timeout_status_reconcile_confirms_broker(tmp_path: Path) -> None
     assert state.open_ticket == 555
     assert state.position_entry_price == pytest.approx(1.1003)
     assert state.pending_execution_command_id is None
+
+
+def test_16b_same_ticket_does_not_clear_pending_after_modify_timeout(tmp_path: Path) -> None:
+    paths = SystemPaths(tmp_path)
+    instance = Instance('12345', 'EURUSD', 100001)
+    paths.ensure_account_directories(instance.account_id)
+    state = InstanceState(instance)
+    state.instrument_digits = 5
+    state.instrument_point = 0.00001
+    state.update_position(open_ticket=555, position_side='BUY', position_volume=0.01, entry_price=1.1, stop_loss=1.09)
+    state.set_pending_execution(command_id='pending-open', side='BUY', volume=0.01)
+    status = _status(
+        positions=(
+            StatusPositionSnapshot(
+                symbol='EURUSD',
+                magic=100001,
+                ticket=555,
+                side='BUY',
+                volume=0.01,
+                entry_price=1.1,
+                stop_loss=1.088,
+                take_profit=0.0,
+            ),
+        )
+    )
+    result = reconcile_position_with_status(paths, instance, state, status, timestamp_utc='2026-07-17T12:00:05.000Z')
+    assert result.broker_execution_confirmed is False
+    assert state.pending_execution_command_id == 'pending-open'
+
+
+def test_16c_pending_side_mismatch_does_not_confirm(tmp_path: Path) -> None:
+    paths = SystemPaths(tmp_path)
+    instance = Instance('12345', 'EURUSD', 100001)
+    paths.ensure_account_directories(instance.account_id)
+    state = InstanceState(instance)
+    state.set_pending_execution(command_id='pending-open', side='BUY', volume=0.01)
+    status = _status(
+        positions=(
+            StatusPositionSnapshot(
+                symbol='EURUSD',
+                magic=100001,
+                ticket=555,
+                side='SELL',
+                volume=0.01,
+                entry_price=1.1003,
+            ),
+        )
+    )
+    result = reconcile_position_with_status(paths, instance, state, status, timestamp_utc='2026-07-17T12:00:05.000Z')
+    assert result.broker_execution_confirmed is False
+    assert state.open_ticket is None
+    assert state.pending_execution_command_id == 'pending-open'
 
 
 def test_17_apply_status_position_deduplicated() -> None:
@@ -319,6 +382,67 @@ def test_18_news_filter_inactive_when_disabled() -> None:
     assert 'news filter inactive' in cycle_src
 
 
+def test_19_close_pending_blocks_open_in_cycle_source() -> None:
+    cycle_src = (SYSTEM_ROOT / 'engine' / 'core' / 'cycle.py').read_text(encoding='utf-8')
+    assert 'close_pending_reconciliation' in cycle_src
+    assert 'close pending reconciliation blocks new OPEN' in cycle_src
+    assert 'REASON_CLOSE_PENDING_RECONCILIATION' in cycle_src
+
+
+@pytest.mark.no_ai_mock
+def test_20_ai_wall_clock_budget_includes_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine import ai_decision_layer as mdl
+
+    sleeps: list[float] = []
+    calls = {'n': 0}
+
+    class _Mono:
+        def __init__(self) -> None:
+            self.t = 1000.0
+
+        def __call__(self) -> float:
+            return self.t
+
+        def advance(self, dt: float) -> None:
+            self.t += dt
+
+    mono = _Mono()
+
+    def _fake_urlopen(req, timeout=None):  # noqa: ANN001
+        calls['n'] += 1
+        mono.advance(float(timeout or 0.1))
+        raise TimeoutError('boom')
+
+    def _fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        mono.advance(seconds)
+
+    monkeypatch.setattr(mdl.time, 'monotonic', mono)
+    monkeypatch.setattr(mdl.time, 'sleep', _fake_sleep)
+    monkeypatch.setattr(mdl.urllib.request, 'urlopen', _fake_urlopen)
+    with pytest.raises(TimeoutError):
+        mdl._call_openai(api_key='k', prompt='p', timeout_s=1.0, retry_max=5, retry_delay_ms=500)
+    # Retries must not accumulate sleep beyond the shared budget.
+    assert sum(sleeps) <= 1.0 + 1e-9
+    assert calls['n'] >= 1
+    assert mono.t - 1000.0 <= 1.0 + 1e-6
+
+
+def test_21_no_fixed_take_profit_in_live_config() -> None:
+    system_json = json.loads((SYSTEM_ROOT / 'config' / 'system.json').read_text(encoding='utf-8'))
+    assert system_json['trade_management']['use_fixed_take_profit'] is False
+    assert system_json['trade_management']['enabled'] is True
+
+
+def test_22_fixed_lot_is_sole_size_source() -> None:
+    system_json = json.loads((SYSTEM_ROOT / 'config' / 'system.json').read_text(encoding='utf-8'))
+    assert system_json['risk']['fixed_lot_volume'] == pytest.approx(0.01)
+    assert 'max_risk_per_trade_percent' not in system_json['risk']
+    engine_src = (SYSTEM_ROOT / 'engine' / 'risk' / 'engine.py').read_text(encoding='utf-8')
+    assert 'calculate_position_size' not in engine_src
+    assert 'fixed_lot_volume' in engine_src
+
+
 def test_closed_trade_parser_fields() -> None:
     record = parse_closed_trade_payload(
         {
@@ -331,10 +455,12 @@ def test_closed_trade_parser_fields() -> None:
             'profit': 1.0,
             'commission': -0.1,
             'swap': 0.0,
+            'volume': 0.02,
         }
     )
     assert record.ticket == 9
     assert record.close_price == pytest.approx(1.2)
+    assert record.volume == pytest.approx(0.02)
 
 
 def test_risk_trade_params_have_no_max_risk(tmp_path: Path) -> None:

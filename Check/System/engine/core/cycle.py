@@ -23,7 +23,7 @@ from engine.loader.universe_loader import RawUniverseData, load_universe_data
 from engine.normalizer.instrument_params import derive_instrument_params, detect_params_change
 from engine.normalizer.market_normalizer import NormalizedMarketBar, normalize_market_csv
 from engine.normalizer.spread_model import SpreadModelSnapshot, update_spread_model_from_sensor
-from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_INSTANCE_CONFLICT, REASON_STALE_STATUS_TIMESTAMP, REASON_STALE_UNIVERSE_TIMESTAMP, RiskResult, Side
+from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_CLOSE_PENDING_RECONCILIATION, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_INSTANCE_CONFLICT, REASON_STALE_STATUS_TIMESTAMP, REASON_STALE_UNIVERSE_TIMESTAMP, RiskResult, Side
 from engine.protocol.errors import DataIOError, SystemError
 from engine.protocol.models import SensorReading, StatusRecord, TradeManagementSettings, UniverseRecord
 from engine.protocol.parser import parse_sensor_csv, parse_universe
@@ -422,9 +422,10 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     trade_executed = False
     ack_latency_ms: int | None = None
     # Trade management FIRST (before entry/AI), when status+sensor are fresh and a position is open.
+    # Skip TM while close_pending_reconciliation — ticket is missing from status until history confirms.
     management_result = _noop_management_result()
     management_executed_close = False
-    management_blocked = status_stale or stale_sensor_blocks_trailing
+    management_blocked = status_stale or stale_sensor_blocks_trailing or instance_memory.instance_state.close_pending_reconciliation
     if not management_blocked and instance_memory.instance_state.open_ticket is not None:
         management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, trade_params=resolved_trade_params, ai_allow_close=True, sensor_reading=sensor_reading, market_bar_time_utc=market_data_utc, current_utc=resolved_timestamp)
     if runtime.allow_control_writes and should_execute_management_action(management_result.action) and not status_stale:
@@ -466,6 +467,9 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         if instance_memory.instance_state.pending_execution_command_id is not None:
             effective_risk = _block_open_risk_result(build_reason(REASON_EXECUTION_OUTCOME_UNRESOLVED, 'pending execution outcome blocks new OPEN', pending_command_id=instance_memory.instance_state.pending_execution_command_id))
             log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.EXECUTION.value, message='new OPEN blocked due to unresolved pending execution', context={'reason': REASON_EXECUTION_OUTCOME_UNRESOLVED, 'pending_command_id': instance_memory.instance_state.pending_execution_command_id})
+        elif instance_memory.instance_state.close_pending_reconciliation:
+            effective_risk = _block_open_risk_result(build_reason(REASON_CLOSE_PENDING_RECONCILIATION, 'close pending reconciliation blocks new OPEN', ticket=instance_memory.instance_state.close_pending_ticket))
+            log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='new OPEN blocked due to close pending reconciliation', context={'reason': REASON_CLOSE_PENDING_RECONCILIATION, 'ticket': instance_memory.instance_state.close_pending_ticket})
         elif status_stale:
             effective_risk = _block_open_risk_result(build_reason(REASON_STALE_STATUS_TIMESTAMP, 'stale status blocks new OPEN', status_content_freshness_ms=status_content_freshness_ms, threshold_ms=stale_threshold_ms))
             log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='new OPEN blocked due to stale status', context={'reason': REASON_STALE_STATUS_TIMESTAMP, 'status_content_freshness_ms': status_content_freshness_ms, 'threshold_ms': stale_threshold_ms})

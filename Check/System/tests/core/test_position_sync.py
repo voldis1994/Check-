@@ -49,7 +49,7 @@ def test_reconcile_position_with_status_clears_state_on_external_close(tmp_path:
     assert result.external_close is True
     assert result.close_pending is True
     assert result.trade_journal_logged is False
-    assert state.open_ticket is None
+    assert state.open_ticket == 555
     assert state.close_pending_reconciliation is True
     assert state.close_pending_ticket == 555
 

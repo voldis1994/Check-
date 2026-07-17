@@ -40,6 +40,10 @@ def normalize_volume_to_step(*, volume: float, volume_step: float) -> float:
     return round(normalized, 10)
 
 def calculate_position_size(*, equity: float, max_risk_per_trade_percent: float, entry_price: float, stop_loss: float, point: float, pip: float, volume_step: float, units_per_lot: float=100000.0) -> PositionSizingResult:
+    """Deprecated / inactive: live risk path uses fixed_lot_volume only.
+
+    Kept for unit-test isolation of the historical formula. Do not call from the live cycle.
+    """
     if pip <= 0:
         raise _validation_error('pip must be > 0', pip=pip)
     if equity <= 0:

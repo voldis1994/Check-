@@ -32,6 +32,8 @@ class InstanceState:
     last_command_id: str = ''
     last_ack_status: str = ''
     pending_execution_command_id: str | None = None
+    pending_execution_side: str | None = None
+    pending_execution_volume: float | None = None
     duplicate_position_anomaly: bool = False
     close_pending_reconciliation: bool = False
     close_pending_ticket: int | None = None
@@ -113,6 +115,16 @@ class InstanceState:
         self.position_last_bar_utc = bar_utc
         return False
 
+    def clear_pending_execution(self) -> None:
+        self.pending_execution_command_id = None
+        self.pending_execution_side = None
+        self.pending_execution_volume = None
+
+    def set_pending_execution(self, *, command_id: str, side: str | None=None, volume: float | None=None) -> None:
+        self.pending_execution_command_id = command_id
+        self.pending_execution_side = side
+        self.pending_execution_volume = volume
+
     def clear_close_pending(self) -> None:
         self.close_pending_reconciliation = False
         self.close_pending_ticket = None
@@ -182,6 +194,10 @@ class InstanceState:
             data['position_last_bar_utc'] = self.position_last_bar_utc
         if self.pending_execution_command_id is not None:
             data['pending_execution_command_id'] = self.pending_execution_command_id
+        if self.pending_execution_side is not None:
+            data['pending_execution_side'] = self.pending_execution_side
+        if self.pending_execution_volume is not None:
+            data['pending_execution_volume'] = self.pending_execution_volume
         if self.duplicate_position_anomaly:
             data['duplicate_position_anomaly'] = True
         if self.close_pending_reconciliation:
@@ -249,6 +265,12 @@ class InstanceState:
         pending_execution_command_id = payload.get('pending_execution_command_id')
         if pending_execution_command_id is not None:
             state.pending_execution_command_id = str(pending_execution_command_id)
+        pending_execution_side = payload.get('pending_execution_side')
+        if pending_execution_side is not None:
+            state.pending_execution_side = str(pending_execution_side)
+        pending_execution_volume = payload.get('pending_execution_volume')
+        if pending_execution_volume is not None:
+            state.pending_execution_volume = float(pending_execution_volume)
         state.duplicate_position_anomaly = bool(payload.get('duplicate_position_anomaly', False))
         state.close_pending_reconciliation = bool(payload.get('close_pending_reconciliation', False))
         close_pending_ticket = payload.get('close_pending_ticket')

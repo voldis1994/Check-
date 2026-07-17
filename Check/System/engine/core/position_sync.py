@@ -50,6 +50,21 @@ def _prices_differ(left: float | None, right: float | None, *, tolerance: float)
         return True
     return abs(left - right) > tolerance
 
+def _volumes_match(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return True
+    return abs(left - right) <= 1e-09
+
+def _status_matches_pending_open(instance_state: InstanceState, position: StatusPositionSnapshot) -> bool:
+    """Confirm OPEN after ACK timeout using symbol/magic (already filtered) + side/volume/open_time when known."""
+    if instance_state.pending_execution_command_id is None:
+        return False
+    if instance_state.pending_execution_side is not None and position.side != instance_state.pending_execution_side:
+        return False
+    if not _volumes_match(instance_state.pending_execution_volume, position.volume):
+        return False
+    return True
+
 def _apply_status_position_to_state(instance_state: InstanceState, position: StatusPositionSnapshot, *, preserve_bars: bool=False) -> bool:
     tolerance = _price_tolerance(instance_state)
     changed = False
@@ -88,6 +103,7 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
     closed = find_closed_trade_for_ticket(paths, instance, ticket=ticket)
     if closed is None:
         return False
+    volume = closed.volume if closed.volume is not None else instance_state.close_pending_volume
     reason = build_reason(
         REASON_EXTERNAL_POSITION_CLOSE,
         'position closed on MT4; reconciled from closed trade file',
@@ -97,27 +113,30 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
         swap=closed.swap,
         close_time_utc=closed.close_time_utc,
         close_reason=closed.close_reason or '',
+        symbol=closed.symbol,
+        magic=closed.magic,
     )
     log_external_position_close(
         paths,
         instance,
         ticket=closed.ticket,
-        side=instance_state.close_pending_side,
-        volume=instance_state.close_pending_volume,
+        side=instance_state.close_pending_side or instance_state.position_side,
+        volume=volume,
         timestamp_utc=closed.close_time_utc or timestamp_utc,
         price=closed.close_price,
         stop_loss=None,
         reason=reason,
     )
     instance_state.clear_close_pending()
+    # Clear active position only after successful closed-trade reconciliation.
+    instance_state.clear_position()
     return True
 
 def _mark_position_close_pending(instance_state: InstanceState, *, timestamp_utc: str) -> None:
     if instance_state.open_ticket is None:
         return
     instance_state.set_close_pending(ticket=instance_state.open_ticket, side=instance_state.position_side, volume=instance_state.position_volume, since_utc=timestamp_utc)
-    # Clear active position so TM does not manage a missing ticket; pending fields retained for closed-file match.
-    instance_state.clear_position()
+    # Keep open_ticket / levels until closed-trade history confirms the close.
 
 def reconcile_position_with_status(paths: SystemPaths, instance: Instance, instance_state: InstanceState, status: StatusRecord, *, timestamp_utc: str) -> PositionSyncResult:
     changed = False
@@ -133,14 +152,6 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
     if status.equity > 0 and (instance_state.peak_equity is None or status.equity > instance_state.peak_equity):
         instance_state.update_risk_metrics(peak_equity=status.equity)
         changed = True
-    if instance_state.close_pending_reconciliation:
-        if _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc):
-            changed = True
-            external_close = True
-            trade_journal_logged = True
-            close_reconciled = True
-        else:
-            close_pending = True
     matches = find_status_positions(status, instance)
     if len(matches) > 1:
         instance_state.duplicate_position_anomaly = True
@@ -154,9 +165,29 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
                     break
         if ticket_match is not None:
             changed = _apply_status_position_to_state(instance_state, ticket_match, preserve_bars=True) or changed
-        return PositionSyncResult(changed=changed, external_close=False, trade_journal_logged=False, duplicate_anomaly=True, close_pending=close_pending, close_reconciled=close_reconciled, broker_execution_confirmed=broker_execution_confirmed)
+        return PositionSyncResult(changed=changed, external_close=False, trade_journal_logged=False, duplicate_anomaly=True, close_pending=instance_state.close_pending_reconciliation, close_reconciled=close_reconciled, broker_execution_confirmed=broker_execution_confirmed)
     instance_state.duplicate_position_anomaly = False
     status_position = matches[0] if matches else None
+
+    if instance_state.close_pending_reconciliation:
+        pending_ticket = instance_state.close_pending_ticket
+        ticket_reappeared = status_position is not None and (
+            (pending_ticket is not None and status_position.ticket == pending_ticket)
+            or (instance_state.open_ticket is not None and status_position.ticket == instance_state.open_ticket)
+        )
+        if ticket_reappeared and status_position is not None:
+            instance_state.clear_close_pending()
+            changed = _apply_status_position_to_state(instance_state, status_position, preserve_bars=True) or changed
+        elif _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc):
+            changed = True
+            external_close = True
+            trade_journal_logged = True
+            close_reconciled = True
+            return PositionSyncResult(changed=changed, external_close=external_close, trade_journal_logged=trade_journal_logged, duplicate_anomaly=False, close_pending=False, close_reconciled=True, broker_execution_confirmed=False)
+        else:
+            close_pending = True
+            return PositionSyncResult(changed=changed, external_close=False, trade_journal_logged=False, duplicate_anomaly=False, close_pending=True, close_reconciled=False, broker_execution_confirmed=False)
+
     if instance_state.open_ticket is not None:
         if status_position is None or status_position.ticket != instance_state.open_ticket:
             _mark_position_close_pending(instance_state, timestamp_utc=timestamp_utc)
@@ -178,21 +209,19 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
                 return PositionSyncResult(changed=True, external_close=False, trade_journal_logged=True, external_partial_close=True, duplicate_anomaly=False, close_pending=close_pending, close_reconciled=close_reconciled, broker_execution_confirmed=broker_execution_confirmed)
             changed = _apply_status_position_to_state(instance_state, status_position, preserve_bars=True) or changed
         else:
+            # Same ticket still open: update levels only. Do NOT clear pending_execution_command_id
+            # here — a MODIFY ACK timeout must not be treated as broker confirmation.
             changed = _apply_status_position_to_state(instance_state, status_position, preserve_bars=True) or changed
-            if instance_state.pending_execution_command_id is not None:
-                instance_state.pending_execution_command_id = None
+    elif status_position is not None:
+        if instance_state.pending_execution_command_id is not None:
+            if _status_matches_pending_open(instance_state, status_position):
+                changed = _apply_status_position_to_state(instance_state, status_position) or changed
+                instance_state.clear_pending_execution()
                 broker_execution_confirmed = True
                 changed = True
-    elif status_position is not None:
-        changed = _apply_status_position_to_state(instance_state, status_position) or changed
-        if instance_state.close_pending_reconciliation:
-            instance_state.clear_close_pending()
-            changed = True
-        if instance_state.pending_execution_command_id is not None:
-            # ACK-timeout OPEN confirmed by fresh status (symbol/magic/side/volume/open_time).
-            instance_state.pending_execution_command_id = None
-            broker_execution_confirmed = True
-            changed = True
+            # Mismatch: keep pending; do not adopt unrelated position as our fill.
+        else:
+            changed = _apply_status_position_to_state(instance_state, status_position) or changed
     return PositionSyncResult(changed=changed, external_close=external_close, trade_journal_logged=trade_journal_logged, duplicate_anomaly=duplicate_anomaly, close_pending=close_pending, close_reconciled=close_reconciled, broker_execution_confirmed=broker_execution_confirmed)
 
 def sync_position_with_status(instance_state: InstanceState, status: StatusRecord, instance: Instance, *, paths: SystemPaths | None=None, timestamp_utc: str | None=None) -> bool:
@@ -213,7 +242,8 @@ def sync_position_with_status(instance_state: InstanceState, status: StatusRecor
     status_position = matches[0] if matches else None
     if instance_state.open_ticket is not None:
         if not _position_is_active_in_status(status, instance, open_ticket=instance_state.open_ticket):
-            instance_state.clear_position()
+            # Without closed-trade path: mark pending and keep state (no invented close).
+            _mark_position_close_pending(instance_state, timestamp_utc=timestamp_utc or '')
             changed = True
     elif status_position is not None:
         changed = _apply_status_position_to_state(instance_state, status_position) or changed

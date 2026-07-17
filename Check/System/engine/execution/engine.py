@@ -65,7 +65,7 @@ def resolve_reference_take_profit_for_open(decision_result: DecisionResult, orde
 
 def apply_ack_to_instance_state(instance_state: InstanceState, order_command: OrderCommand, ack_record: AckRecord, *, entry_price: float | None=None, reference_take_profit: float | None=None, position_last_bar_utc: str | None=None) -> None:
     instance_state.update_execution(command_id=ack_record.command_id, ack_status=ack_record.status)
-    instance_state.pending_execution_command_id = None
+    instance_state.clear_pending_execution()
     if ack_record.status != AckStatus.SUCCESS.value:
         return
     if order_command.action == OrderAction.OPEN.value and ack_record.ticket is not None:
@@ -134,8 +134,10 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
     if not ack_ready:
         log_ack_timeout(paths, instance, command_id=order_command.command_id)
         instance_state.update_execution(command_id=order_command.command_id, ack_status=AckStatus.TIMEOUT.value)
-        # Leave open state untouched for status reconcile; do not treat timeout as failed open.
-        instance_state.pending_execution_command_id = order_command.command_id
+        # OPEN ACK timeout: keep pending until status/history reconciles. Timeout alone must not clear it.
+        # MODIFY/CLOSE timeouts do not set pending — same ticket still open is not proof of outcome.
+        if order_command.action == OrderAction.OPEN.value:
+            instance_state.set_pending_execution(command_id=order_command.command_id, side=order_command.side, volume=order_command.volume)
         archive_processed_control(paths, instance)
         archive_processed_ack(paths, instance)
         trade_entry = log_trade_ack_timeout(paths, instance, command_id=order_command.command_id, timestamp_utc=resolved_timestamp)
