@@ -171,7 +171,8 @@ def test_08_stale_sensor_blocks_freshness_helper() -> None:
 def test_09_stale_bar_gate_documented_in_cycle_source() -> None:
     # Content-timestamp stale checks live in cycle; verify helpers exist and missing sensor blocks TM price.
     assert resolve_trade_management_price(position_side='BUY', sensor_reading=None) is None
-    source = Path('engine/core/cycle.py').read_text(encoding='utf-8')
+    cycle_path = Path(__file__).resolve().parents[2] / 'engine' / 'core' / 'cycle.py'
+    source = cycle_path.read_text(encoding='utf-8')
     assert 'bar_freshness_ms' in source or 'market_data_utc' in source
     assert 'stale' in source.lower()
 
@@ -272,8 +273,8 @@ def test_14_strategy_score_modules_unchanged_by_hardening_markers() -> None:
     assert hasattr(sell, 'calculate_sell_candidate')
     assert hasattr(scorer, 'compare_candidates')
     assert hasattr(decision_engine, 'run_decision_engine')
-    buy_src = Path('engine/decision/buy.py').read_text(encoding='utf-8')
-    sell_src = Path('engine/decision/sell.py').read_text(encoding='utf-8')
+    buy_src = (Path(__file__).resolve().parents[2] / 'engine' / 'decision' / 'buy.py').read_text(encoding='utf-8')
+    sell_src = (Path(__file__).resolve().parents[2] / 'engine' / 'decision' / 'sell.py').read_text(encoding='utf-8')
     assert 'def calculate_buy_candidate' in buy_src
     assert 'def calculate_sell_candidate' in sell_src
 
