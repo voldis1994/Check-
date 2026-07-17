@@ -10,7 +10,7 @@ from engine.core.paths import SystemPaths
 from engine.core.performance import CycleTimingSnapshot, monotonic_elapsed_ms
 from engine.core.position_sync import reconcile_position_with_status
 from engine.core.retry import RetryAlertContext, RetryPolicy, build_retry_policy
-from engine.ai_decision_layer import AIDecisionMeta, AIQueryResult, apply_ai_to_decision_result, apply_risk_block_to_decision_result, get_ai_decision, resolve_ai_allow_close
+from engine.ai_decision_layer import AIDecisionMeta, AIQueryResult, apply_ai_to_decision_result, apply_risk_block_to_decision_result, get_ai_decision
 from engine.risk.precheck import should_call_ai_layer
 from engine.decision.engine import DecisionResult, run_decision_engine
 from engine.execution.engine import ExecutionResult, run_execution_engine
@@ -23,13 +23,14 @@ from engine.loader.universe_loader import RawUniverseData, load_universe_data
 from engine.normalizer.instrument_params import derive_instrument_params, detect_params_change
 from engine.normalizer.market_normalizer import NormalizedMarketBar, normalize_market_csv
 from engine.normalizer.spread_model import SpreadModelSnapshot, update_spread_model_from_sensor
-from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_INSTANCE_CONFLICT, RiskResult, Side
+from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_INSTANCE_CONFLICT, REASON_STALE_STATUS_TIMESTAMP, REASON_STALE_UNIVERSE_TIMESTAMP, RiskResult, Side
 from engine.protocol.errors import DataIOError, SystemError
 from engine.protocol.models import SensorReading, StatusRecord, TradeManagementSettings, UniverseRecord
 from engine.protocol.parser import parse_sensor_csv, parse_universe
 from engine.reason import build_reason
 from engine.risk.engine import RiskEngineResult, RiskEngineTradeParams, run_risk_engine
 from engine.risk.trade_management import OpenPosition, TradeManagementConfig, TradeManagementResult, evaluate_trade_management
+from engine.decision.filters.news_filter import NEWS_FILTER_INACTIVE_REASON, evaluate_news_filter
 from engine.state.instance_state import InstanceState
 from engine.state.memory import InstanceMemory
 from engine.validator.market_validator import ValidationResult, validate_market_csv
@@ -147,9 +148,18 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
 def _build_ai_market_context(*, decision_result: DecisionResult, spread_snapshot: SpreadModelSnapshot, market_bars: tuple[NormalizedMarketBar, ...]) -> dict[str, object]:
     return {'relative_spread': spread_snapshot.relative_spread, 'last_close': market_bars[-1].close, 'last_time_utc': str(market_bars[-1].time_utc), 'system_reason': decision_result.reason, 'buy_score': decision_result.buy_score, 'sell_score': decision_result.sell_score}
 
-def run_instance_ai_risk_pipeline(*, decision_result: DecisionResult, instance_memory: InstanceMemory, status: StatusRecord, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, spread_snapshot: SpreadModelSnapshot, trade_params: RiskEngineTradeParams | None) -> tuple[DecisionResult, RiskEngineResult, AIDecisionMeta, AIQueryResult]:
+def run_instance_ai_risk_pipeline(*, decision_result: DecisionResult, instance_memory: InstanceMemory, status: StatusRecord, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, spread_snapshot: SpreadModelSnapshot, trade_params: RiskEngineTradeParams | None, status_stale: bool=False, universe_stale: bool=False) -> tuple[DecisionResult, RiskEngineResult, AIDecisionMeta, AIQueryResult]:
+    pending_blocks = instance_memory.instance_state.pending_execution_command_id is not None
     call_ai = should_call_ai_layer(decision_result=decision_result, status=status, instance_state=instance_memory.instance_state, risk_config=runtime.config.risk)
-    ai_query = get_ai_decision(system_signal=decision_result.decision, market_context=_build_ai_market_context(decision_result=decision_result, spread_snapshot=spread_snapshot, market_bars=market_bars), ai_config=runtime.config.ai, skip_reason=None if call_ai else 'skipped_risk_precheck')
+    if status_stale or universe_stale or pending_blocks:
+        call_ai = False
+        skip_reason = 'skipped_stale_or_pending' if (status_stale or universe_stale or pending_blocks) else 'skipped_risk_precheck'
+    else:
+        skip_reason = None if call_ai else 'skipped_risk_precheck'
+    if decision_result.decision not in {Decision.BUY.value, Decision.SELL.value}:
+        call_ai = False
+        skip_reason = 'skipped_non_entry'
+    ai_query = get_ai_decision(system_signal=decision_result.decision, market_context=_build_ai_market_context(decision_result=decision_result, spread_snapshot=spread_snapshot, market_bars=market_bars), ai_config=runtime.config.ai, skip_reason=None if call_ai else skip_reason)
     decision_result, ai_meta = apply_ai_to_decision_result(decision_result=decision_result, ai_query=ai_query, ai_config=runtime.config.ai)
     risk_engine_result = run_instance_risk_phase(decision_result=decision_result, instance_memory=instance_memory, status=status, market_bars=market_bars, runtime=runtime, trade_params=trade_params)
     decision_result = apply_risk_block_to_decision_result(decision_result=decision_result, risk_engine_result=risk_engine_result)
@@ -160,7 +170,22 @@ def should_execute_management_action(order_action: str) -> bool:
 
 def build_risk_trade_params(runtime: LiveRuntime) -> RiskEngineTradeParams:
     risk = runtime.config.risk
-    return RiskEngineTradeParams(max_risk_per_trade_percent=risk.max_risk_per_trade_percent, volume_step=risk.volume_step, max_stop_loss_pips=risk.max_stop_loss_pips)
+    return RiskEngineTradeParams(volume_step=risk.volume_step, max_stop_loss_pips=risk.max_stop_loss_pips)
+
+def _noop_management_result() -> TradeManagementResult:
+    return TradeManagementResult(action=OrderAction.NONE.value, reason='')
+
+def _management_only_decision(decision_id: str='management') -> DecisionResult:
+    from engine.analysis.context import AnalysisContext
+    from engine.decision.buy import BuyCandidate
+    from engine.decision.sell import SellCandidate
+    empty_buy = BuyCandidate(valid=False, invalid_reason='management_pass', entry_price=0.0, stop_loss=0.0, take_profit=0.0, component_scores={}, buy_score=0.0)
+    empty_sell = SellCandidate(valid=False, invalid_reason='management_pass', entry_price=0.0, stop_loss=0.0, take_profit=0.0, component_scores={}, sell_score=0.0)
+    ctx = AnalysisContext(session='UNKNOWN', regime='ranging', news_active=False, context_quality=0.0, trade_environment='NEUTRAL')
+    return DecisionResult(decision_id=decision_id, decision=Decision.WAIT.value, reason='management_pass', preferred_side='NONE', buy_candidate=empty_buy, sell_candidate=empty_sell, buy_score=0.0, sell_score=0.0, analysis_context=ctx)
+
+def _blocked_risk(reason: str='') -> RiskEngineResult:
+    return RiskEngineResult(result=RiskResult.BLOCK.value, reason=reason or 'management_pass', position_size=None, stop_loss=None, take_profit=None)
 
 def resolve_use_global_universe(paths: SystemPaths) -> bool:
     return paths.universe_file.exists()
@@ -352,6 +377,10 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         _log_cycle_error(runtime.paths, instance, message='universe validation failed', context={'errors': list(universe_result.errors)})
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, market_data_utc=market_data_utc, skip_reason=f'universe_invalid:{";".join(universe_result.errors[:2])}')
     universe = universe_result
+    universe_content_freshness_ms = compute_data_freshness_ms(universe.timestamp_utc, resolved_timestamp)
+    universe_stale = is_data_stale(universe_content_freshness_ms, stale_threshold_ms)
+    if universe_stale:
+        log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='stale universe timestamp', context={'reason': REASON_STALE_UNIVERSE_TIMESTAMP, 'universe_content_freshness_ms': universe_content_freshness_ms, 'threshold_ms': stale_threshold_ms})
     status_result = validate_status_for_cycle(loaded.status_raw)
     if not status_result.is_valid or status_result.record is None:
         _log_cycle_error(runtime.paths, instance, message='status validation failed', context={'errors': list(status_result.errors)})
@@ -360,24 +389,73 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         update_instance_instrument_state(instance_memory, market_bars)
         spread_snapshot = update_instance_spread_model(instance_memory=instance_memory, spread_models=runtime.spread_models, sensor_reading=sensor_reading, lookback_bars=runtime.config.analysis.lookback_bars, timestamp_utc=resolved_timestamp)
         decision_result = run_instance_decision_phase(universe=universe, market_bars=market_bars, instance_memory=instance_memory, relative_spread=spread_snapshot.relative_spread, runtime=runtime, block_reason=block_reason, current_spread=spread_snapshot.current_spread)
-        decision_result, risk_engine_result, ai_meta, ai_query = run_instance_ai_risk_pipeline(decision_result=decision_result, instance_memory=instance_memory, status=placeholder_status, market_bars=market_bars, runtime=runtime, spread_snapshot=spread_snapshot, trade_params=trade_params)
+        decision_result, risk_engine_result, ai_meta, ai_query = run_instance_ai_risk_pipeline(decision_result=decision_result, instance_memory=instance_memory, status=placeholder_status, market_bars=market_bars, runtime=runtime, spread_snapshot=spread_snapshot, trade_params=trade_params, status_stale=True, universe_stale=universe_stale)
         effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, market_bar_time_utc=market_data_utc)
         log_decision(runtime.paths, instance, decision_result, effective_risk, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
         _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, decision_result=decision_result, risk_engine_result=risk_engine_result, decision_journal_logged=True, market_data_utc=market_data_utc, skip_reason=f'status_invalid:{";".join(status_result.errors[:2])}')
     status = status_result.record
-    reconcile_position_with_status(runtime.paths, instance, instance_memory.instance_state, status, timestamp_utc=resolved_timestamp)
+    status_content_freshness_ms = compute_data_freshness_ms(status.timestamp_utc, resolved_timestamp)
+    status_stale = is_data_stale(status_content_freshness_ms, stale_threshold_ms)
+    if status_stale:
+        log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='stale status timestamp', context={'reason': REASON_STALE_STATUS_TIMESTAMP, 'status_content_freshness_ms': status_content_freshness_ms, 'threshold_ms': stale_threshold_ms})
+    sync_result = None
+    if not status_stale:
+        sync_result = reconcile_position_with_status(runtime.paths, instance, instance_memory.instance_state, status, timestamp_utc=resolved_timestamp)
     if timeout_guard.is_exceeded():
         instance_memory.instance_state.save(runtime.paths)
         return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
     update_instance_instrument_state(instance_memory, market_bars)
     spread_snapshot = update_instance_spread_model(instance_memory=instance_memory, spread_models=runtime.spread_models, sensor_reading=sensor_reading, lookback_bars=runtime.config.analysis.lookback_bars, timestamp_utc=resolved_timestamp)
     block_reason = build_account_block_reason(status)
+    news_probe = evaluate_news_filter(universe, block_high_impact_news=runtime.config.analysis.block_high_impact_news)
+    if news_probe.reason == NEWS_FILTER_INACTIVE_REASON:
+        log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='news filter inactive', context={'reason': NEWS_FILTER_INACTIVE_REASON, 'block_high_impact_news': runtime.config.analysis.block_high_impact_news})
+    resolved_trade_params = trade_params or build_risk_trade_params(runtime)
+    execution_result: ExecutionResult | None = None
+    trade_intended = False
+    control_published = False
+    ack_received = False
+    broker_execution_confirmed = bool(sync_result.broker_execution_confirmed) if sync_result is not None else False
+    execution_failed = False
+    execution_unknown = False
+    trade_executed = False
+    ack_latency_ms: int | None = None
+    # Trade management FIRST (before entry/AI), when status+sensor are fresh and a position is open.
+    management_result = _noop_management_result()
+    management_executed_close = False
+    management_blocked = status_stale or stale_sensor_blocks_trailing
+    if not management_blocked and instance_memory.instance_state.open_ticket is not None:
+        management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, trade_params=resolved_trade_params, ai_allow_close=True, sensor_reading=sensor_reading, market_bar_time_utc=market_data_utc, current_utc=resolved_timestamp)
+    if runtime.allow_control_writes and should_execute_management_action(management_result.action) and not status_stale:
+        if timeout_guard.is_exceeded():
+            instance_memory.instance_state.save(runtime.paths)
+            return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
+        trade_intended = True
+        execution_started = time.monotonic()
+        management_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=_management_only_decision(), risk_engine_result=_blocked_risk(), runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='management execution io'), position_last_bar_utc=market_data_utc)
+        ack_latency_ms = int((time.monotonic() - execution_started) * 1000)
+        execution_result = management_execution
+        control_published = bool(management_execution.control_published)
+        ack = management_execution.ack_interpretation
+        if ack is not None:
+            if ack.is_timeout:
+                execution_unknown = True
+            else:
+                ack_received = True
+                if ack.is_success:
+                    broker_execution_confirmed = True
+                if ack.is_failed or ack.is_rejected:
+                    execution_failed = True
+        trade_executed = broker_execution_confirmed
+        if management_result.action == OrderAction.CLOSE.value:
+            management_executed_close = True
+    # Entry decision analysis AFTER trade management / MODIFY ACK.
     analysis_started = time.monotonic()
     ai_query: AIQueryResult | None = None
     try:
         decision_result = run_instance_decision_phase(universe=universe, market_bars=market_bars, instance_memory=instance_memory, relative_spread=spread_snapshot.relative_spread, runtime=runtime, block_reason=block_reason, current_spread=spread_snapshot.current_spread)
-        decision_result, risk_engine_result, ai_meta, ai_query = run_instance_ai_risk_pipeline(decision_result=decision_result, instance_memory=instance_memory, status=status, market_bars=market_bars, runtime=runtime, spread_snapshot=spread_snapshot, trade_params=trade_params)
+        decision_result, risk_engine_result, ai_meta, ai_query = run_instance_ai_risk_pipeline(decision_result=decision_result, instance_memory=instance_memory, status=status, market_bars=market_bars, runtime=runtime, spread_snapshot=spread_snapshot, trade_params=trade_params, status_stale=status_stale, universe_stale=universe_stale)
         analysis_duration_ms = monotonic_elapsed_ms(analysis_started)
         decision_duration_ms = analysis_duration_ms
     except SystemError as exc:
@@ -385,7 +463,16 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'decision_error:{exc}')
     effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, market_bar_time_utc=market_data_utc)
     if should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=effective_risk):
-        if instance_memory.instance_state.duplicate_position_anomaly:
+        if instance_memory.instance_state.pending_execution_command_id is not None:
+            effective_risk = _block_open_risk_result(build_reason(REASON_EXECUTION_OUTCOME_UNRESOLVED, 'pending execution outcome blocks new OPEN', pending_command_id=instance_memory.instance_state.pending_execution_command_id))
+            log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.EXECUTION.value, message='new OPEN blocked due to unresolved pending execution', context={'reason': REASON_EXECUTION_OUTCOME_UNRESOLVED, 'pending_command_id': instance_memory.instance_state.pending_execution_command_id})
+        elif status_stale:
+            effective_risk = _block_open_risk_result(build_reason(REASON_STALE_STATUS_TIMESTAMP, 'stale status blocks new OPEN', status_content_freshness_ms=status_content_freshness_ms, threshold_ms=stale_threshold_ms))
+            log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='new OPEN blocked due to stale status', context={'reason': REASON_STALE_STATUS_TIMESTAMP, 'status_content_freshness_ms': status_content_freshness_ms, 'threshold_ms': stale_threshold_ms})
+        elif universe_stale:
+            effective_risk = _block_open_risk_result(build_reason(REASON_STALE_UNIVERSE_TIMESTAMP, 'stale universe blocks new entry', universe_content_freshness_ms=universe_content_freshness_ms, threshold_ms=stale_threshold_ms))
+            log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='new OPEN blocked due to stale universe', context={'reason': REASON_STALE_UNIVERSE_TIMESTAMP, 'universe_content_freshness_ms': universe_content_freshness_ms, 'threshold_ms': stale_threshold_ms})
+        elif instance_memory.instance_state.duplicate_position_anomaly:
             effective_risk = _block_open_risk_result(build_reason(REASON_INSTANCE_CONFLICT, 'duplicate magic positions anomaly blocks new OPEN'))
             log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='new OPEN blocked due to duplicate position anomaly', context={'reason': REASON_INSTANCE_CONFLICT})
         elif stale_bar_blocks_open:
@@ -395,32 +482,22 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     if timeout_guard.is_exceeded():
         _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
         return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
-    resolved_trade_params = trade_params or build_risk_trade_params(runtime)
-    management_sensor = None if stale_sensor_blocks_trailing else sensor_reading
-    management_result = run_instance_trade_management_phase(instance_memory=instance_memory, market_bars=market_bars, runtime=runtime, trade_params=resolved_trade_params, ai_allow_close=resolve_ai_allow_close(ai_query) if ai_query is not None else True, sensor_reading=management_sensor, market_bar_time_utc=market_data_utc, current_utc=resolved_timestamp)
-    execution_result: ExecutionResult | None = None
-    trade_intended = False
-    control_published = False
-    ack_received = False
-    broker_execution_confirmed = False
-    execution_failed = False
-    execution_unknown = False
-    trade_executed = False
-    ack_latency_ms: int | None = None
-    if runtime.allow_control_writes:
+    if runtime.allow_control_writes and (not management_executed_close) and should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=effective_risk):
         if timeout_guard.is_exceeded():
             _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)
             return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
-        trade_intended = should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=effective_risk) or should_execute_management_action(management_result.action)
+        trade_intended = True
         execution_started = time.monotonic()
-        execution_result = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='execution io'), position_last_bar_utc=market_data_utc)
-        ack_latency_ms = int((time.monotonic() - execution_started) * 1000)
-        control_published = bool(execution_result.control_published)
-        ack = execution_result.ack_interpretation
+        entry_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, runtime=runtime.config.runtime, management_result=_noop_management_result(), timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='entry execution io'), position_last_bar_utc=market_data_utc)
+        entry_latency = int((time.monotonic() - execution_started) * 1000)
+        ack_latency_ms = entry_latency if ack_latency_ms is None else ack_latency_ms + entry_latency
+        execution_result = entry_execution
+        control_published = bool(entry_execution.control_published) or control_published
+        ack = entry_execution.ack_interpretation
         if ack is not None:
             if ack.is_timeout:
                 execution_unknown = True
-                # ACK timeout is not a failed open; pending_execution_command_id left for status reconcile.
+                # ACK timeout alone must NOT clear pending_execution_command_id.
             else:
                 ack_received = True
                 if ack.is_success:

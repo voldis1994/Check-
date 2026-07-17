@@ -16,9 +16,10 @@ def test_news_window_active_with_low_impact_remains_acceptable() -> None:
     assert result.reason is None
 
 def test_high_impact_news_window_remains_acceptable_when_blocking_disabled() -> None:
+    from engine.decision.filters.news_filter import NEWS_FILTER_INACTIVE_REASON
     result = evaluate_news_filter(_universe(news_window_active=True, news_impact_level='high'), block_high_impact_news=False)
     assert result.news_acceptable
-    assert result.reason is None
+    assert result.reason == NEWS_FILTER_INACTIVE_REASON
 
 def test_news_window_active_reason_is_generated() -> None:
     result = evaluate_news_filter(_universe(news_window_active=True, news_impact_level='high'), block_high_impact_news=True)

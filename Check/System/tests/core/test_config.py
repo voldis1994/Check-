@@ -23,9 +23,9 @@ def test_parse_config_payload_loads_analysis_and_risk_decision_parameters() -> N
     assert config.analysis.stop_loss_buffer == 0.0002
     assert config.analysis.weights.momentum == 1.0
     assert config.risk.reward_ratio == 2.0
-    assert config.risk.max_risk_per_trade_percent == 1.0
     assert config.risk.max_stop_loss_pips == 100.0
     assert config.risk.volume_step == 0.01
+    assert config.risk.fixed_lot_volume == 0.01
 
 def test_parse_config_payload_missing_required_field_raises() -> None:
     payload = valid_system_config_payload()
@@ -87,7 +87,7 @@ def test_load_system_config_missing_file_raises(tmp_path: Path) -> None:
         load_system_config(tmp_path / 'missing.json')
 
 def test_load_system_config_repository_file() -> None:
-    config = load_system_config(Path('config/system.json'))
+    config = load_system_config(Path(__file__).resolve().parents[2] / 'config' / 'system.json')
     assert config.schema_version == CONFIG_SCHEMA_VERSION
     assert config.system.name == 'SYSTEM'
     assert config.system.timeframe == 'M1'

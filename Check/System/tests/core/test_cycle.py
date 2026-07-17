@@ -59,12 +59,11 @@ def _startup_runtime(tmp_path: Path):
 def test_build_risk_trade_params_reads_from_runtime_config(tmp_path: Path) -> None:
     runtime, _instance = _startup_runtime(tmp_path)
     params = build_risk_trade_params(runtime)
-    assert params.max_risk_per_trade_percent == runtime.config.risk.max_risk_per_trade_percent
     assert params.volume_step == runtime.config.risk.volume_step
     assert params.max_stop_loss_pips == runtime.config.risk.max_stop_loss_pips
-    assert params.max_risk_per_trade_percent > 0
     assert params.volume_step > 0
     assert params.max_stop_loss_pips > 0
+    assert not hasattr(params, 'max_risk_per_trade_percent')
 
 def test_resolve_use_global_universe_checks_global_file(tmp_path: Path) -> None:
     paths = SystemPaths(tmp_path)
@@ -316,6 +315,7 @@ def test_run_instance_trade_management_phase_trails_without_broker_take_profit(t
     assert 'TRAILING' in management_result.reason or 'BREAKEVEN' in management_result.reason
 
 def test_run_instance_cycle_passes_trade_management_to_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.risk.trade_management import TradeManagementResult
     runtime, instance = _startup_runtime(tmp_path)
     instance_memory = runtime.memory.get_or_create(instance)
     instance_memory.instance_state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.1, entry_price=1.1, stop_loss=1.098, take_profit=1.104)
@@ -324,13 +324,22 @@ def test_run_instance_cycle_passes_trade_management_to_execution(tmp_path: Path,
     status_path.write_text(write_status(StatusRecord(schema_version=PROTOCOL_SCHEMA_VERSION, timestamp_utc=FIXTURE_CYCLE_UTC, account_id=instance.account_id, connected=True, trade_allowed=True, balance=10000.0, equity=10020.5, margin_free=9800.0, ea_version='1.0.0', open_positions=(StatusPositionSnapshot(symbol=instance.symbol, magic=instance.magic, ticket=555, side=Side.BUY.value, volume=0.1, entry_price=1.1, stop_loss=1.098, take_profit=1.104),))), encoding='utf-8')
     captured: dict[str, object] = {}
 
+    def _mock_tm(**kwargs: object) -> TradeManagementResult:
+        return TradeManagementResult(action=OrderAction.MODIFY.value, reason='TRADE_MANAGEMENT_TRAILING: test', stop_loss=1.099, take_profit=1.104)
+
     def _mock_run_execution_engine(**kwargs: object) -> ExecutionResult:
+        captured.setdefault('calls', [])
+        captured['calls'].append(kwargs.get('management_result'))
         captured['management_result'] = kwargs.get('management_result')
         return ExecutionResult(order_command=OrderCommand(command_id='mgmt-cmd', action=OrderAction.NONE.value, reason='', decision_id='decision-1'), control_published=True, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)
+    monkeypatch.setattr('engine.core.cycle.run_instance_trade_management_phase', _mock_tm)
     monkeypatch.setattr('engine.core.cycle.run_execution_engine', _mock_run_execution_engine)
     result = run_instance_cycle(runtime, instance, use_global_universe=False, timestamp_utc=FIXTURE_CYCLE_UTC)
     assert result.completed
-    assert captured['management_result'] is not None
+    assert 'management_result' in captured
+    mgmt = captured['management_result']
+    assert mgmt is not None
+    assert getattr(mgmt, 'action', None) == OrderAction.MODIFY.value
     assert resolve_open_position_from_state(instance_memory.instance_state) is not None
 
 def test_apply_closed_bar_entry_gate_allows_first_cycle_on_new_bar(tmp_path: Path) -> None:

@@ -33,6 +33,11 @@ class InstanceState:
     last_ack_status: str = ''
     pending_execution_command_id: str | None = None
     duplicate_position_anomaly: bool = False
+    close_pending_reconciliation: bool = False
+    close_pending_ticket: int | None = None
+    close_pending_side: str | None = None
+    close_pending_volume: float | None = None
+    close_pending_since_utc: str | None = None
     instrument_digits: int = 0
     instrument_point: float = 0.0
     instrument_pip: float = 0.0
@@ -108,6 +113,20 @@ class InstanceState:
         self.position_last_bar_utc = bar_utc
         return False
 
+    def clear_close_pending(self) -> None:
+        self.close_pending_reconciliation = False
+        self.close_pending_ticket = None
+        self.close_pending_side = None
+        self.close_pending_volume = None
+        self.close_pending_since_utc = None
+
+    def set_close_pending(self, *, ticket: int, side: str | None, volume: float | None, since_utc: str) -> None:
+        self.close_pending_reconciliation = True
+        self.close_pending_ticket = ticket
+        self.close_pending_side = side
+        self.close_pending_volume = volume
+        self.close_pending_since_utc = since_utc
+
     def clear_position(self) -> None:
         self.open_ticket = None
         self.position_side = None
@@ -165,6 +184,16 @@ class InstanceState:
             data['pending_execution_command_id'] = self.pending_execution_command_id
         if self.duplicate_position_anomaly:
             data['duplicate_position_anomaly'] = True
+        if self.close_pending_reconciliation:
+            data['close_pending_reconciliation'] = True
+            if self.close_pending_ticket is not None:
+                data['close_pending_ticket'] = self.close_pending_ticket
+            if self.close_pending_side is not None:
+                data['close_pending_side'] = self.close_pending_side
+            if self.close_pending_volume is not None:
+                data['close_pending_volume'] = self.close_pending_volume
+            if self.close_pending_since_utc is not None:
+                data['close_pending_since_utc'] = self.close_pending_since_utc
         if self.day_start_balance is not None:
             data['day_start_balance'] = self.day_start_balance
         if self.peak_equity is not None:
@@ -221,6 +250,19 @@ class InstanceState:
         if pending_execution_command_id is not None:
             state.pending_execution_command_id = str(pending_execution_command_id)
         state.duplicate_position_anomaly = bool(payload.get('duplicate_position_anomaly', False))
+        state.close_pending_reconciliation = bool(payload.get('close_pending_reconciliation', False))
+        close_pending_ticket = payload.get('close_pending_ticket')
+        if close_pending_ticket is not None:
+            state.close_pending_ticket = int(close_pending_ticket)
+        close_pending_side = payload.get('close_pending_side')
+        if close_pending_side is not None:
+            state.close_pending_side = str(close_pending_side)
+        close_pending_volume = payload.get('close_pending_volume')
+        if close_pending_volume is not None:
+            state.close_pending_volume = float(close_pending_volume)
+        close_pending_since_utc = payload.get('close_pending_since_utc')
+        if close_pending_since_utc is not None:
+            state.close_pending_since_utc = str(close_pending_since_utc)
         state.last_command_id = str(payload.get('last_command_id', state.last_command_id))
         state.last_ack_status = str(payload.get('last_ack_status', state.last_ack_status))
         state.instrument_digits = int(payload.get('instrument_digits', state.instrument_digits))

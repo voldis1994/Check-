@@ -4,7 +4,8 @@ from engine.core.instance import Instance
 from engine.core.paths import SystemPaths
 from engine.journal.error_journal import log_error
 from engine.journal.trade_journal import log_external_partial_position_close, log_external_position_close
-from engine.protocol.constants import ErrorType, REASON_CLOSE_PENDING_RECONCILIATION
+from engine.loader.closed_trade_loader import find_closed_trade_for_ticket
+from engine.protocol.constants import ErrorType, REASON_CLOSE_PENDING_RECONCILIATION, REASON_EXTERNAL_POSITION_CLOSE
 from engine.protocol.models import StatusPositionSnapshot, StatusRecord
 from engine.reason import build_reason
 from engine.state.instance_state import InstanceState
@@ -17,6 +18,9 @@ class PositionSyncResult:
     trade_journal_logged: bool = False
     external_partial_close: bool = False
     duplicate_anomaly: bool = False
+    close_pending: bool = False
+    close_reconciled: bool = False
+    broker_execution_confirmed: bool = False
 
 def find_status_positions(status: StatusRecord, instance: Instance) -> tuple[StatusPositionSnapshot, ...]:
     return tuple((position for position in status.open_positions if position.symbol == instance.symbol and position.magic == instance.magic))
@@ -71,26 +75,72 @@ def _apply_status_position_to_state(instance_state: InstanceState, position: Sta
         if position.open_time_utc is not None and instance_state.position_open_time_utc != position.open_time_utc:
             instance_state.position_open_time_utc = position.open_time_utc
             changed = True
-    if _prices_differ(instance_state.position_entry_price, position.entry_price, tolerance=tolerance) and position.entry_price is not None:
-        instance_state.position_entry_price = position.entry_price
-        changed = True
     return changed
 
 def _position_is_active_in_status(status: StatusRecord, instance: Instance, *, open_ticket: int) -> bool:
     position = find_status_position(status, instance, open_ticket=open_ticket)
     return position is not None and position.ticket == open_ticket
 
+def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance_state: InstanceState, *, timestamp_utc: str) -> bool:
+    ticket = instance_state.close_pending_ticket
+    if ticket is None:
+        return False
+    closed = find_closed_trade_for_ticket(paths, instance, ticket=ticket)
+    if closed is None:
+        return False
+    reason = build_reason(
+        REASON_EXTERNAL_POSITION_CLOSE,
+        'position closed on MT4; reconciled from closed trade file',
+        ticket=closed.ticket,
+        profit=closed.profit,
+        commission=closed.commission,
+        swap=closed.swap,
+        close_time_utc=closed.close_time_utc,
+        close_reason=closed.close_reason or '',
+    )
+    log_external_position_close(
+        paths,
+        instance,
+        ticket=closed.ticket,
+        side=instance_state.close_pending_side,
+        volume=instance_state.close_pending_volume,
+        timestamp_utc=closed.close_time_utc or timestamp_utc,
+        price=closed.close_price,
+        stop_loss=None,
+        reason=reason,
+    )
+    instance_state.clear_close_pending()
+    return True
+
+def _mark_position_close_pending(instance_state: InstanceState, *, timestamp_utc: str) -> None:
+    if instance_state.open_ticket is None:
+        return
+    instance_state.set_close_pending(ticket=instance_state.open_ticket, side=instance_state.position_side, volume=instance_state.position_volume, since_utc=timestamp_utc)
+    # Clear active position so TM does not manage a missing ticket; pending fields retained for closed-file match.
+    instance_state.clear_position()
+
 def reconcile_position_with_status(paths: SystemPaths, instance: Instance, instance_state: InstanceState, status: StatusRecord, *, timestamp_utc: str) -> PositionSyncResult:
     changed = False
     external_close = False
     trade_journal_logged = False
     duplicate_anomaly = False
+    close_pending = False
+    close_reconciled = False
+    broker_execution_confirmed = False
     if status.balance > 0 and instance_state.day_start_balance is None:
         instance_state.update_risk_metrics(day_start_balance=status.balance)
         changed = True
     if status.equity > 0 and (instance_state.peak_equity is None or status.equity > instance_state.peak_equity):
         instance_state.update_risk_metrics(peak_equity=status.equity)
         changed = True
+    if instance_state.close_pending_reconciliation:
+        if _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc):
+            changed = True
+            external_close = True
+            trade_journal_logged = True
+            close_reconciled = True
+        else:
+            close_pending = True
     matches = find_status_positions(status, instance)
     if len(matches) > 1:
         instance_state.duplicate_position_anomaly = True
@@ -104,37 +154,46 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
                     break
         if ticket_match is not None:
             changed = _apply_status_position_to_state(instance_state, ticket_match, preserve_bars=True) or changed
-        return PositionSyncResult(changed=changed, external_close=False, trade_journal_logged=False, duplicate_anomaly=True)
+        return PositionSyncResult(changed=changed, external_close=False, trade_journal_logged=False, duplicate_anomaly=True, close_pending=close_pending, close_reconciled=close_reconciled, broker_execution_confirmed=broker_execution_confirmed)
     instance_state.duplicate_position_anomaly = False
     status_position = matches[0] if matches else None
     if instance_state.open_ticket is not None:
         if status_position is None or status_position.ticket != instance_state.open_ticket:
-            reason = build_reason(REASON_CLOSE_PENDING_RECONCILIATION, 'external close pending reconciliation; close history unavailable', ticket=instance_state.open_ticket)
-            log_external_position_close(paths, instance, ticket=instance_state.open_ticket, side=instance_state.position_side, volume=instance_state.position_volume, timestamp_utc=timestamp_utc, price=None, stop_loss=instance_state.position_stop_loss, reason=reason)
-            instance_state.clear_position()
-            if instance_state.pending_execution_command_id is not None:
-                instance_state.pending_execution_command_id = None
+            _mark_position_close_pending(instance_state, timestamp_utc=timestamp_utc)
+            if _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc):
+                close_reconciled = True
+                trade_journal_logged = True
+                external_close = True
+            else:
+                close_pending = True
+                reason = build_reason(REASON_CLOSE_PENDING_RECONCILIATION, 'external close pending reconciliation; waiting for closed trade file', ticket=instance_state.close_pending_ticket)
+                log_error(paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='position missing from status; close pending reconciliation', context={'reason': reason, 'ticket': instance_state.close_pending_ticket})
             changed = True
             external_close = True
-            trade_journal_logged = True
         elif status_position.volume != instance_state.position_volume:
             if instance_state.position_volume is not None and status_position.volume < instance_state.position_volume:
                 closed_volume = instance_state.position_volume - status_position.volume
                 instance_state.reduce_position_volume(volume=closed_volume)
                 log_external_partial_position_close(paths, instance, ticket=instance_state.open_ticket, side=instance_state.position_side, closed_volume=closed_volume, remaining_volume=status_position.volume, timestamp_utc=timestamp_utc)
-                return PositionSyncResult(changed=True, external_close=False, trade_journal_logged=True, external_partial_close=True, duplicate_anomaly=False)
+                return PositionSyncResult(changed=True, external_close=False, trade_journal_logged=True, external_partial_close=True, duplicate_anomaly=False, close_pending=close_pending, close_reconciled=close_reconciled, broker_execution_confirmed=broker_execution_confirmed)
             changed = _apply_status_position_to_state(instance_state, status_position, preserve_bars=True) or changed
         else:
             changed = _apply_status_position_to_state(instance_state, status_position, preserve_bars=True) or changed
             if instance_state.pending_execution_command_id is not None:
                 instance_state.pending_execution_command_id = None
+                broker_execution_confirmed = True
                 changed = True
     elif status_position is not None:
         changed = _apply_status_position_to_state(instance_state, status_position) or changed
-        if instance_state.pending_execution_command_id is not None:
-            instance_state.pending_execution_command_id = None
+        if instance_state.close_pending_reconciliation:
+            instance_state.clear_close_pending()
             changed = True
-    return PositionSyncResult(changed=changed, external_close=external_close, trade_journal_logged=trade_journal_logged, duplicate_anomaly=duplicate_anomaly)
+        if instance_state.pending_execution_command_id is not None:
+            # ACK-timeout OPEN confirmed by fresh status (symbol/magic/side/volume/open_time).
+            instance_state.pending_execution_command_id = None
+            broker_execution_confirmed = True
+            changed = True
+    return PositionSyncResult(changed=changed, external_close=external_close, trade_journal_logged=trade_journal_logged, duplicate_anomaly=duplicate_anomaly, close_pending=close_pending, close_reconciled=close_reconciled, broker_execution_confirmed=broker_execution_confirmed)
 
 def sync_position_with_status(instance_state: InstanceState, status: StatusRecord, instance: Instance, *, paths: SystemPaths | None=None, timestamp_utc: str | None=None) -> bool:
     if paths is not None and timestamp_utc is not None:

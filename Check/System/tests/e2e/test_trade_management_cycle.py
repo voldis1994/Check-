@@ -93,6 +93,9 @@ def test_e2e_open_partial_close_cycle_reduces_volume(tmp_path: Path, monkeypatch
     simulator = MT4Simulator(paths)
     instance = _instance()
     runtime = _startup_runtime_for_trade_management(tmp_path, trade_management_overrides={'time_stop_max_bars': 999, 'breakeven_progress_ratio': 0.99})
+    # Need lot size large enough that 50% partial remains above volume_step after normalize.
+    from dataclasses import replace
+    runtime.config = replace(runtime.config, risk=replace(runtime.config.risk, fixed_lot_volume=0.1))
     simulator.export_tick(instance, market_scenario='bullish', timestamp_utc=FIXTURE_CYCLE_UTC)
     simulator.install_auto_ack_hook(monkeypatch)
     open_result = run_instance_cycle(runtime, instance, use_global_universe=False, timestamp_utc=FIXTURE_CYCLE_UTC)
@@ -103,6 +106,7 @@ def test_e2e_open_partial_close_cycle_reduces_volume(tmp_path: Path, monkeypatch
     assert state.position_take_profit is not None
     assert state.position_volume is not None
     original_volume = state.position_volume
+    assert original_volume >= 0.1
     if state.position_side == Side.BUY.value:
         target_close = state.position_entry_price + 0.82 * (state.position_take_profit - state.position_entry_price)
     else:

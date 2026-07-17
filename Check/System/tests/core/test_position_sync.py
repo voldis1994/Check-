@@ -47,8 +47,11 @@ def test_reconcile_position_with_status_clears_state_on_external_close(tmp_path:
     state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.1, entry_price=1.1015, stop_loss=1.0988, take_profit=1.1117)
     result = reconcile_position_with_status(runtime.paths, instance, state, _status_without_position(), timestamp_utc='2026-07-07T06:02:00.000Z')
     assert result.external_close is True
-    assert result.trade_journal_logged is True
+    assert result.close_pending is True
+    assert result.trade_journal_logged is False
     assert state.open_ticket is None
+    assert state.close_pending_reconciliation is True
+    assert state.close_pending_ticket == 555
 
 def test_reconcile_position_with_status_syncs_open_position_from_status(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path)

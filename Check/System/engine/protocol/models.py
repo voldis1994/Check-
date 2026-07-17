@@ -182,7 +182,6 @@ class RiskConfig:
     daily_loss_limit_enabled: bool
     drawdown_limit_enabled: bool
     reward_ratio: float
-    max_risk_per_trade_percent: float
     max_stop_loss_pips: float
     volume_step: float
     fixed_lot_volume: float
@@ -197,10 +196,6 @@ class RiskConfig:
         if reward_ratio <= 0:
             raise ValidationError('risk.reward_ratio must be > 0', module='protocol.models', context={'value': reward_ratio})
         object.__setattr__(self, 'reward_ratio', reward_ratio)
-        max_risk_per_trade_percent = _require_number(self.max_risk_per_trade_percent, 'risk.max_risk_per_trade_percent')
-        if max_risk_per_trade_percent <= 0:
-            raise ValidationError('risk.max_risk_per_trade_percent must be > 0', module='protocol.models', context={'value': max_risk_per_trade_percent})
-        object.__setattr__(self, 'max_risk_per_trade_percent', max_risk_per_trade_percent)
         max_stop_loss_pips = _require_number(self.max_stop_loss_pips, 'risk.max_stop_loss_pips')
         if max_stop_loss_pips <= 0:
             raise ValidationError('risk.max_stop_loss_pips must be > 0', module='protocol.models', context={'value': max_stop_loss_pips})
@@ -215,7 +210,7 @@ class RiskConfig:
         object.__setattr__(self, 'fixed_lot_volume', fixed_lot_volume)
 
     def to_dict(self) -> dict[str, int | float | bool]:
-        return {'max_open_positions_per_instance': self.max_open_positions_per_instance, 'max_daily_loss_percent': self.max_daily_loss_percent, 'max_drawdown_percent': self.max_drawdown_percent, 'daily_loss_limit_enabled': self.daily_loss_limit_enabled, 'drawdown_limit_enabled': self.drawdown_limit_enabled, 'reward_ratio': self.reward_ratio, 'max_risk_per_trade_percent': self.max_risk_per_trade_percent, 'max_stop_loss_pips': self.max_stop_loss_pips, 'volume_step': self.volume_step, 'fixed_lot_volume': self.fixed_lot_volume}
+        return {'max_open_positions_per_instance': self.max_open_positions_per_instance, 'max_daily_loss_percent': self.max_daily_loss_percent, 'max_drawdown_percent': self.max_drawdown_percent, 'daily_loss_limit_enabled': self.daily_loss_limit_enabled, 'drawdown_limit_enabled': self.drawdown_limit_enabled, 'reward_ratio': self.reward_ratio, 'max_stop_loss_pips': self.max_stop_loss_pips, 'volume_step': self.volume_step, 'fixed_lot_volume': self.fixed_lot_volume}
 
 @dataclass(frozen=True)
 class AnalysisConfig:

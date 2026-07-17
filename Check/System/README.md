@@ -5,7 +5,7 @@ Python M1 trading platform. Python decides. MT4 exports data and executes orders
 Recommended deploy root: `C:\Check\System` (any folder works after `UZSTADIT.bat`).
 
 Trailing: fixed pips via `trade_management.trailing_step_pips` + structure lookback.
-Lot size: `risk.fixed_lot_volume` (active). `max_risk_per_trade_percent` is unused while fixed lot > 0.
+Lot size: `risk.fixed_lot_volume` only (required > 0). Percent-equity sizing is removed from the live path.
 News filter: disabled until a real calendar is connected (`metadata.news_data_available=false`).
 
 ## New PC (full path)

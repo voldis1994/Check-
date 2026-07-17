@@ -38,7 +38,6 @@
     "daily_loss_limit_enabled": false,
     "drawdown_limit_enabled": false,
     "reward_ratio": 2.0,
-    "max_risk_per_trade_percent": 8.0,
     "max_stop_loss_pips": 25.0,
     "volume_step": 0.01,
     "fixed_lot_volume": 0.01
@@ -48,7 +47,7 @@
     "structure_lookback_bars": 15,
     "spread_relative_threshold": 2.0,
     "volatility_relative_threshold": 2.5,
-    "block_high_impact_news": true,
+    "block_high_impact_news": false,
     "stop_loss_buffer": 0.0002,
     "block_ranging_chase_entries": true,
     "ranging_extreme_threshold": 0.65,
@@ -88,7 +87,7 @@
     "mode": "advisory",
     "fail_closed": false,
     "reject_action": "BLOCK",
-    "timeout_ms": 10000,
+    "timeout_ms": 2500,
     "retry_max": 2,
     "retry_delay_ms": 500
   }

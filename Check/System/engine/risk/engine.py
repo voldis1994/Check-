@@ -7,7 +7,7 @@ from engine.protocol.constants import Decision, REASON_DATA_INVALID, REASON_INVA
 from engine.protocol.models import RiskConfig, StatusRecord
 from engine.reason import build_reason
 from engine.risk.metrics import build_risk_context
-from engine.risk.position_sizing import calculate_position_size, normalize_volume_to_step
+from engine.risk.position_sizing import normalize_volume_to_step
 from engine.risk.rules import evaluate_risk_rules
 from engine.risk.sl_tp import validate_sl_tp
 from engine.state.instance_state import InstanceState
@@ -15,7 +15,6 @@ MODULE_NAME = 'risk.engine'
 
 @dataclass(frozen=True)
 class RiskEngineTradeParams:
-    max_risk_per_trade_percent: float
     volume_step: float
     max_stop_loss_pips: float
     units_per_lot: float = 100000.0
@@ -63,14 +62,9 @@ def run_risk_engine(*, decision_result: DecisionResult, risk_config: RiskConfig,
     if not sl_tp_result.allowed:
         return _block(sl_tp_result.reason or 'stop loss or take profit validation failed')
     broker_take_profit = sl_tp_result.take_profit if use_fixed_take_profit else 0.0
-    if risk_config.fixed_lot_volume > 0:
-        # fixed_lot_volume is the active sizing mode; max_risk_per_trade_percent is unused/deprecated while fixed lot > 0.
-        volume = normalize_volume_to_step(volume=risk_config.fixed_lot_volume, volume_step=trade_params.volume_step)
-        if volume <= 0:
-            return _block(build_reason(REASON_INVALID_VOLUME, 'fixed lot volume is below broker minimum step', fixed_lot_volume=risk_config.fixed_lot_volume, volume_step=trade_params.volume_step))
-    else:
-        sizing_result = calculate_position_size(equity=status.equity, max_risk_per_trade_percent=trade_params.max_risk_per_trade_percent, entry_price=candidate.entry_price, stop_loss=sl_tp_result.stop_loss, point=point, pip=pip, volume_step=trade_params.volume_step, units_per_lot=trade_params.units_per_lot)
-        if not sizing_result.allowed:
-            return _block(sizing_result.reason or 'position sizing blocked trade')
-        volume = sizing_result.volume
+    if risk_config.fixed_lot_volume <= 0:
+        return _block(build_reason(REASON_INVALID_VOLUME, 'fixed_lot_volume must be > 0; percent equity sizing is disabled', fixed_lot_volume=risk_config.fixed_lot_volume))
+    volume = normalize_volume_to_step(volume=risk_config.fixed_lot_volume, volume_step=trade_params.volume_step)
+    if volume <= 0:
+        return _block(build_reason(REASON_INVALID_VOLUME, 'fixed lot volume is below broker minimum step', fixed_lot_volume=risk_config.fixed_lot_volume, volume_step=trade_params.volume_step))
     return _allow(position_size=volume, stop_loss=sl_tp_result.stop_loss, take_profit=broker_take_profit)
