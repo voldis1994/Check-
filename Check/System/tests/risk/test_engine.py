@@ -33,11 +33,11 @@ def _instance_state(*, with_position: bool=False) -> InstanceState:
 def _status(*, trade_allowed: bool=True, equity: float=10000.0) -> StatusRecord:
     return StatusRecord(schema_version='1.0.0', timestamp_utc='2026-07-07T06:00:00.000Z', account_id='12345', connected=True, trade_allowed=trade_allowed, balance=equity, equity=equity, margin_free=9000.0, ea_version='1.0.0')
 
-def _risk_config(*, fixed_lot_volume: float=0.0) -> RiskConfig:
-    return RiskConfig(max_open_positions_per_instance=1, max_daily_loss_percent=2.0, max_drawdown_percent=10.0, daily_loss_limit_enabled=True, drawdown_limit_enabled=True, reward_ratio=2.0, max_risk_per_trade_percent=1.0, max_stop_loss_pips=100.0, volume_step=0.01, fixed_lot_volume=fixed_lot_volume)
+def _risk_config(*, fixed_lot_volume: float=0.01) -> RiskConfig:
+    return RiskConfig(max_open_positions_per_instance=1, max_daily_loss_percent=2.0, max_drawdown_percent=10.0, daily_loss_limit_enabled=True, drawdown_limit_enabled=True, reward_ratio=2.0, max_stop_loss_pips=100.0, volume_step=0.01, fixed_lot_volume=fixed_lot_volume)
 
 def _trade_params() -> RiskEngineTradeParams:
-    return RiskEngineTradeParams(max_risk_per_trade_percent=1.0, volume_step=0.01, max_stop_loss_pips=100.0)
+    return RiskEngineTradeParams(volume_step=0.01, max_stop_loss_pips=100.0)
 
 def _system_config(**analysis_overrides: Any) -> object:
     payload = valid_system_config_payload()
@@ -118,7 +118,7 @@ def test_risk_engine_blocks_when_open_position_limit_reached() -> None:
 
 def test_risk_engine_blocks_when_stop_loss_exceeds_max_pips() -> None:
     decision_result = _buy_decision_result()
-    tight_params = RiskEngineTradeParams(max_risk_per_trade_percent=1.0, volume_step=0.01, max_stop_loss_pips=1.0)
+    tight_params = RiskEngineTradeParams(volume_step=0.01, max_stop_loss_pips=1.0)
     result = _run_with_decision(decision_result, trade_params=tight_params)
     assert result.result == RiskResult.BLOCK.value
     assert 'max_stop_loss_pips' in result.reason
@@ -132,7 +132,7 @@ def test_risk_engine_uses_zero_take_profit_when_fixed_take_profit_disabled() -> 
 def test_risk_engine_uses_fixed_lot_volume_when_configured() -> None:
     decision_result = _buy_decision_result()
     tiny_status = _status(equity=30.0)
-    tiny_params = RiskEngineTradeParams(max_risk_per_trade_percent=0.0001, volume_step=0.01, max_stop_loss_pips=100.0)
+    tiny_params = RiskEngineTradeParams(volume_step=0.01, max_stop_loss_pips=100.0)
     blocked = _run_with_decision(decision_result, status=tiny_status, trade_params=tiny_params, risk_config=_risk_config(fixed_lot_volume=0.0))
     assert blocked.result == RiskResult.BLOCK.value
     allowed = _run_with_decision(decision_result, status=tiny_status, trade_params=tiny_params, risk_config=_risk_config(fixed_lot_volume=0.01))
@@ -141,8 +141,8 @@ def test_risk_engine_uses_fixed_lot_volume_when_configured() -> None:
 
 def test_risk_engine_blocks_when_position_size_rounds_to_zero() -> None:
     decision_result = _buy_decision_result()
-    tiny_risk_params = RiskEngineTradeParams(max_risk_per_trade_percent=0.0001, volume_step=0.1, max_stop_loss_pips=100.0)
-    result = _run_with_decision(decision_result, trade_params=tiny_risk_params)
+    tiny_risk_params = RiskEngineTradeParams(volume_step=0.1, max_stop_loss_pips=100.0)
+    result = _run_with_decision(decision_result, trade_params=tiny_risk_params, risk_config=_risk_config(fixed_lot_volume=0.01))
     assert result.result == RiskResult.BLOCK.value
     assert result.reason
 

@@ -85,8 +85,19 @@ def test_system_execute_open_function_uses_order_send_with_magic(execution_sourc
     assert 'command.magic' in body
     assert 'SYSTEM_IsSupportedTradeSide' in body
     assert 'SYSTEM_TradeCommandForSide' in body
+    assert 'SYSTEM_ResolveOpenOrderComment' in body
     assert 'OrderOpenPrice' in body
     assert 'SYSTEM_SetSuccessAckWithFill' in body
+    assert 'command.reason' not in body or 'order_comment' in body
+
+
+def test_system_build_open_order_comment_helpers_exist(execution_source: str) -> None:
+    names = set(mql_source.public_function_names(execution_source))
+    assert 'SYSTEM_BuildOpenOrderComment' in names
+    assert 'SYSTEM_ResolveOpenOrderComment' in names
+    assert 'SYSTEM_UIntToHex8' in names
+    body = mql_source.function_body(execution_source, 'SYSTEM_BuildOpenOrderComment')
+    assert '31' in body
 
 def test_open_sell_executes_with_magic_context() -> None:
     command, _ = control_reference.parse_control_command(CONTROL_JSON_OPEN_SELL)

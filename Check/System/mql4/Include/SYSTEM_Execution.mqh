@@ -11,6 +11,8 @@
 #define SYSTEM_ACK_STATUS_SUCCESS "SUCCESS"
 #define SYSTEM_ACK_STATUS_FAILED "FAILED"
 #define SYSTEM_ACK_STATUS_REJECTED "REJECTED"
+#define SYSTEM_ACK_STATUS_ALREADY_PROCESSED "ALREADY_PROCESSED"
+#define SYSTEM_TICKET_MAP_FILENAME_TEMPLATE "ticket_map_%s_%d.txt"
 #define SYSTEM_SIDE_BUY "BUY"
 #define SYSTEM_SIDE_SELL "SELL"
 #define SYSTEM_DEFAULT_SLIPPAGE 3
@@ -67,6 +69,43 @@ double SYSTEM_CommandIdHash(const string command_id)
    for(int index = 0; index < length; index++)
       hash = hash * 33.0 + (double)StringGetCharacter(command_id, index);
    return hash;
+}
+
+string SYSTEM_UIntToHex8(const uint value)
+{
+   string digits = "0123456789ABCDEF";
+   string hex = "";
+   for(int i = 0; i < 8; i++)
+   {
+      int nibble = (int)((value >> (28 - i * 4)) & 0xF);
+      hex = hex + StringSubstr(digits, nibble, 1);
+   }
+   return hex;
+}
+
+string SYSTEM_BuildOpenOrderComment(const string command_id)
+{
+   // MT4 OrderComment limit is 31 chars. Prefer full command_id when it fits;
+   // otherwise use deterministic C{hex8} matching Python build_open_order_comment.
+   int length = StringLen(command_id);
+   if(length > 0 && length <= 31)
+      return command_id;
+
+   uint hash = 5381;
+   for(int index = 0; index < length; index++)
+      hash = hash * 33 + (uint)StringGetCharacter(command_id, index);
+   return "C" + SYSTEM_UIntToHex8(hash);
+}
+
+string SYSTEM_ResolveOpenOrderComment(const SYSTEM_ControlCommand &command)
+{
+   if(command.has_order_comment && StringLen(command.order_comment) > 0)
+   {
+      if(StringLen(command.order_comment) <= 31)
+         return command.order_comment;
+      return StringSubstr(command.order_comment, 0, 31);
+   }
+   return SYSTEM_BuildOpenOrderComment(command.command_id);
 }
 
 string SYSTEM_LoadProcessedCommandId(const string account_id, const string symbol, const int magic)
@@ -136,7 +175,83 @@ bool SYSTEM_IsSupportedAckStatus(const string status)
 {
    return status == SYSTEM_ACK_STATUS_SUCCESS
       || status == SYSTEM_ACK_STATUS_FAILED
-      || status == SYSTEM_ACK_STATUS_REJECTED;
+      || status == SYSTEM_ACK_STATUS_REJECTED
+      || status == SYSTEM_ACK_STATUS_ALREADY_PROCESSED;
+}
+
+string SYSTEM_BuildTicketMapFilePath(const string account_id, const string symbol, const int magic)
+{
+   string filename = StringFormat(SYSTEM_TICKET_MAP_FILENAME_TEMPLATE, symbol, magic);
+   return SYSTEM_JoinPath(SYSTEM_BuildAccountDir(account_id), filename);
+}
+
+bool SYSTEM_SaveTicketMap(
+   const string account_id,
+   const string symbol,
+   const int magic,
+   const string command_id,
+   const int ticket
+)
+{
+   if(StringLen(command_id) == 0 || ticket <= 0)
+      return false;
+   if(!SYSTEM_EnsureAccountDirectories(account_id))
+      return false;
+   string path = SYSTEM_BuildTicketMapFilePath(account_id, symbol, magic);
+   string content = command_id + "|" + IntegerToString(ticket) + "\n";
+   return SYSTEM_AtomicWriteText(path, content);
+}
+
+bool SYSTEM_LoadTicketForCommand(
+   const string account_id,
+   const string symbol,
+   const int magic,
+   const string command_id,
+   int &out_ticket
+)
+{
+   out_ticket = 0;
+   if(StringLen(command_id) == 0)
+      return false;
+   string path = SYSTEM_BuildTicketMapFilePath(account_id, symbol, magic);
+   string content = "";
+   if(!SYSTEM_ReadTextFile(path, content))
+      return false;
+   int sep = StringFind(content, "|", 0);
+   if(sep < 0)
+      return false;
+   string stored_command_id = StringSubstr(content, 0, sep);
+   StringTrimRight(stored_command_id);
+   if(stored_command_id != command_id)
+      return false;
+   string ticket_str = StringSubstr(content, sep + 1);
+   StringTrimLeft(ticket_str);
+   StringTrimRight(ticket_str);
+   int ticket_val = (int)StringToInteger(ticket_str);
+   if(ticket_val <= 0)
+      return false;
+   out_ticket = ticket_val;
+   return true;
+}
+
+int SYSTEM_FindOrderByComment(const string expected_comment, const string symbol, const int magic)
+{
+   if(StringLen(expected_comment) == 0)
+      return 0;
+   for(int index = OrdersTotal() - 1; index >= 0; index--)
+   {
+      if(!OrderSelect(index, SELECT_BY_POS, MODE_TRADES))
+         continue;
+      if(OrderSymbol() != symbol)
+         continue;
+      if(OrderMagicNumber() != magic)
+         continue;
+      if(OrderType() != OP_BUY && OrderType() != OP_SELL)
+         continue;
+      if(OrderComment() == expected_comment)
+         return OrderTicket();
+   }
+   return 0;
 }
 
 string SYSTEM_BuildAckJson(
@@ -324,6 +439,7 @@ bool SYSTEM_ExecuteOpen(
    double price = (trade_command == OP_BUY) ? MarketInfo(command.symbol, MODE_ASK) : MarketInfo(command.symbol, MODE_BID);
    double stop_loss = command.has_stop_loss ? command.stop_loss : 0.0;
    double take_profit = command.has_take_profit ? command.take_profit : 0.0;
+   string order_comment = SYSTEM_ResolveOpenOrderComment(command);
 
    int ticket = OrderSend(
       command.symbol,
@@ -333,7 +449,7 @@ bool SYSTEM_ExecuteOpen(
       SYSTEM_DEFAULT_SLIPPAGE,
       stop_loss,
       take_profit,
-      command.reason,
+      order_comment,
       command.magic,
       0,
       clrNONE
@@ -362,6 +478,7 @@ bool SYSTEM_ExecuteOpen(
    {
       SYSTEM_SetSuccessAck(result, ticket);
    }
+   SYSTEM_SaveTicketMap(command.account_id, command.symbol, command.magic, command.command_id, ticket);
    return true;
 }
 
@@ -501,7 +618,51 @@ bool SYSTEM_TryExecutePendingControl(
    if(command.command_id == last_processed_command_id
       || SYSTEM_IsCommandProcessed(account_id, symbol, magic, command.command_id))
    {
-      SYSTEM_SetSuccessAck(result, 0);
+      // For OPEN commands: attempt to recover fill details from ticket map or OrderComment.
+      if(command.action == SYSTEM_ACTION_OPEN)
+      {
+         int recovered_ticket = 0;
+         bool recovered = false;
+
+         // Try ticket map first.
+         if(SYSTEM_LoadTicketForCommand(account_id, symbol, magic, command.command_id, recovered_ticket))
+         {
+            if(SYSTEM_SelectOrderByTicket(recovered_ticket, symbol, magic))
+            {
+               string fill_side = (OrderType() == OP_BUY) ? SYSTEM_SIDE_BUY : SYSTEM_SIDE_SELL;
+               SYSTEM_SetSuccessAckWithFill(result, recovered_ticket, OrderOpenPrice(), OrderOpenTime(), OrderLots(), fill_side);
+               recovered = true;
+            }
+         }
+
+         // Fall back to OrderComment search.
+         if(!recovered)
+         {
+            string expected_comment = SYSTEM_BuildOpenOrderComment(command.command_id);
+            int comment_ticket = SYSTEM_FindOrderByComment(expected_comment, symbol, magic);
+            if(comment_ticket > 0 && SYSTEM_SelectOrderByTicket(comment_ticket, symbol, magic))
+            {
+               string fill_side = (OrderType() == OP_BUY) ? SYSTEM_SIDE_BUY : SYSTEM_SIDE_SELL;
+               SYSTEM_SetSuccessAckWithFill(result, comment_ticket, OrderOpenPrice(), OrderOpenTime(), OrderLots(), fill_side);
+               recovered = true;
+            }
+         }
+
+         if(!recovered)
+         {
+            SYSTEM_ResetAckResult(result);
+            result.status = SYSTEM_ACK_STATUS_ALREADY_PROCESSED;
+            result.ticket = 0;
+            result.has_ticket = false;
+         }
+      }
+      else
+      {
+         SYSTEM_ResetAckResult(result);
+         result.status = SYSTEM_ACK_STATUS_ALREADY_PROCESSED;
+         result.ticket = 0;
+         result.has_ticket = false;
+      }
       SYSTEM_WriteAck(account_id, symbol, magic, command.command_id, result);
       return false;
    }

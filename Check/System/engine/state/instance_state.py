@@ -32,7 +32,21 @@ class InstanceState:
     last_command_id: str = ''
     last_ack_status: str = ''
     pending_execution_command_id: str | None = None
+    pending_execution_decision_id: str | None = None
+    pending_execution_since_utc: str | None = None
+    pending_execution_comment: str | None = None
+    pending_symbol: str | None = None
+    pending_magic_number: int | None = None
+    pending_execution_side: str | None = None
+    pending_execution_volume: float | None = None
+    pending_preexisting_tickets: tuple[int, ...] = ()
+    ambiguous_pending_execution: bool = False
     duplicate_position_anomaly: bool = False
+    close_pending_reconciliation: bool = False
+    close_pending_ticket: int | None = None
+    close_pending_side: str | None = None
+    close_pending_volume: float | None = None
+    close_pending_since_utc: str | None = None
     instrument_digits: int = 0
     instrument_point: float = 0.0
     instrument_pip: float = 0.0
@@ -41,6 +55,12 @@ class InstanceState:
     cycle_count: int = 0
     last_cycle_utc: str = ''
     last_seen_market_bar_utc: str = ''
+    peak_net_profit_money: float = 0.0
+    money_trailing_step_index: int = -1
+    locked_profit_money: float = 0.0
+    last_money_trailing_sl: float | None = None
+    money_trailing_ticket: int | None = None
+    money_trailing_state_missing: bool = False
 
     def path(self, paths: SystemPaths) -> Path:
         return paths.account_state_dir(self.instance.account_id) / self.instance.instance_state_filename()
@@ -60,6 +80,8 @@ class InstanceState:
             raise _validation_error('open_ticket must be >= 0', open_ticket=open_ticket)
         if position_volume <= 0:
             raise _validation_error('position_volume must be > 0', position_volume=position_volume)
+        if self.money_trailing_ticket is not None and self.money_trailing_ticket != open_ticket:
+            self.clear_money_trailing_state()
         self.open_ticket = open_ticket
         self.position_side = position_side
         self.position_volume = position_volume
@@ -75,6 +97,8 @@ class InstanceState:
         self.position_bars_open = 1
         self.position_last_bar_utc = position_last_bar_utc
         self.partial_close_applied = False
+        if self.money_trailing_ticket is None:
+            self.money_trailing_ticket = open_ticket
 
     def update_position_levels(self, *, stop_loss: float, take_profit: float) -> None:
         self.position_stop_loss = stop_loss
@@ -108,6 +132,92 @@ class InstanceState:
         self.position_last_bar_utc = bar_utc
         return False
 
+    def clear_pending_execution(self) -> None:
+        self.pending_execution_command_id = None
+        self.pending_execution_decision_id = None
+        self.pending_execution_since_utc = None
+        self.pending_execution_comment = None
+        self.pending_symbol = None
+        self.pending_magic_number = None
+        self.pending_execution_side = None
+        self.pending_execution_volume = None
+        self.pending_preexisting_tickets = ()
+        self.ambiguous_pending_execution = False
+
+    def set_pending_execution(
+        self,
+        *,
+        command_id: str,
+        decision_id: str | None=None,
+        since_utc: str | None=None,
+        comment: str | None=None,
+        symbol: str | None=None,
+        magic: int | None=None,
+        side: str | None=None,
+        volume: float | None=None,
+        preexisting_tickets: tuple[int, ...]=(),
+    ) -> None:
+        self.pending_execution_command_id = command_id
+        self.pending_execution_decision_id = decision_id
+        self.pending_execution_since_utc = since_utc
+        self.pending_execution_comment = comment
+        self.pending_symbol = symbol
+        self.pending_magic_number = magic
+        self.pending_execution_side = side
+        self.pending_execution_volume = volume
+        self.pending_preexisting_tickets = tuple(preexisting_tickets)
+        self.ambiguous_pending_execution = False
+
+    def clear_close_pending(self) -> None:
+        self.close_pending_reconciliation = False
+        self.close_pending_ticket = None
+        self.close_pending_side = None
+        self.close_pending_volume = None
+        self.close_pending_since_utc = None
+
+    def set_close_pending(self, *, ticket: int, side: str | None, volume: float | None, since_utc: str) -> None:
+        self.close_pending_reconciliation = True
+        self.close_pending_ticket = ticket
+        self.close_pending_side = side
+        self.close_pending_volume = volume
+        self.close_pending_since_utc = since_utc
+
+    def money_trailing_snapshot(self) -> dict[str, Any]:
+        return {
+            'ticket': self.money_trailing_ticket if self.money_trailing_ticket is not None else self.open_ticket,
+            'peak_net_profit_money': self.peak_net_profit_money,
+            'money_trailing_step_index': self.money_trailing_step_index,
+            'locked_profit_money': self.locked_profit_money,
+            'last_money_trailing_sl': self.last_money_trailing_sl,
+        }
+
+    def clear_money_trailing_state(self) -> None:
+        self.peak_net_profit_money = 0.0
+        self.money_trailing_step_index = -1
+        self.locked_profit_money = 0.0
+        self.last_money_trailing_sl = None
+        self.money_trailing_ticket = None
+        self.money_trailing_state_missing = False
+
+    def apply_money_trailing_state(
+        self,
+        *,
+        peak_net_profit_money: float,
+        money_trailing_step_index: int,
+        locked_profit_money: float,
+        last_money_trailing_sl: float | None,
+        ticket: int | None = None,
+    ) -> None:
+        self.peak_net_profit_money = peak_net_profit_money
+        self.money_trailing_step_index = money_trailing_step_index
+        self.locked_profit_money = locked_profit_money
+        self.last_money_trailing_sl = last_money_trailing_sl
+        if ticket is not None:
+            self.money_trailing_ticket = ticket
+        elif self.open_ticket is not None:
+            self.money_trailing_ticket = self.open_ticket
+        self.money_trailing_state_missing = False
+
     def clear_position(self) -> None:
         self.open_ticket = None
         self.position_side = None
@@ -121,6 +231,7 @@ class InstanceState:
         self.position_last_bar_utc = None
         self.partial_close_applied = False
         self.duplicate_position_anomaly = False
+        self.clear_money_trailing_state()
 
     def update_instrument(self, *, digits: int, point: float, pip: float) -> None:
         self.instrument_digits = digits
@@ -163,14 +274,54 @@ class InstanceState:
             data['position_last_bar_utc'] = self.position_last_bar_utc
         if self.pending_execution_command_id is not None:
             data['pending_execution_command_id'] = self.pending_execution_command_id
+        if self.pending_execution_decision_id is not None:
+            data['pending_execution_decision_id'] = self.pending_execution_decision_id
+        if self.pending_execution_since_utc is not None:
+            data['pending_execution_since_utc'] = self.pending_execution_since_utc
+        if self.pending_execution_comment is not None:
+            data['pending_execution_comment'] = self.pending_execution_comment
+        if self.pending_symbol is not None:
+            data['pending_symbol'] = self.pending_symbol
+        if self.pending_magic_number is not None:
+            data['pending_magic_number'] = self.pending_magic_number
+        if self.pending_execution_side is not None:
+            data['pending_execution_side'] = self.pending_execution_side
+        if self.pending_execution_volume is not None:
+            data['pending_execution_volume'] = self.pending_execution_volume
+        if self.pending_preexisting_tickets:
+            data['pending_preexisting_tickets'] = list(self.pending_preexisting_tickets)
+        if self.ambiguous_pending_execution:
+            data['ambiguous_pending_execution'] = True
         if self.duplicate_position_anomaly:
             data['duplicate_position_anomaly'] = True
+        if self.close_pending_reconciliation:
+            data['close_pending_reconciliation'] = True
+            if self.close_pending_ticket is not None:
+                data['close_pending_ticket'] = self.close_pending_ticket
+            if self.close_pending_side is not None:
+                data['close_pending_side'] = self.close_pending_side
+            if self.close_pending_volume is not None:
+                data['close_pending_volume'] = self.close_pending_volume
+            if self.close_pending_since_utc is not None:
+                data['close_pending_since_utc'] = self.close_pending_since_utc
         if self.day_start_balance is not None:
             data['day_start_balance'] = self.day_start_balance
         if self.peak_equity is not None:
             data['peak_equity'] = self.peak_equity
         if self.last_seen_market_bar_utc:
             data['last_seen_market_bar_utc'] = self.last_seen_market_bar_utc
+        if self.peak_net_profit_money != 0.0:
+            data['peak_net_profit_money'] = self.peak_net_profit_money
+        if self.money_trailing_step_index != -1:
+            data['money_trailing_step_index'] = self.money_trailing_step_index
+        if self.locked_profit_money != 0.0:
+            data['locked_profit_money'] = self.locked_profit_money
+        if self.last_money_trailing_sl is not None:
+            data['last_money_trailing_sl'] = self.last_money_trailing_sl
+        if self.money_trailing_ticket is not None:
+            data['money_trailing_ticket'] = self.money_trailing_ticket
+        if self.money_trailing_state_missing:
+            data['money_trailing_state_missing'] = True
         return data
 
     def save(self, paths: SystemPaths) -> None:
@@ -220,7 +371,45 @@ class InstanceState:
         pending_execution_command_id = payload.get('pending_execution_command_id')
         if pending_execution_command_id is not None:
             state.pending_execution_command_id = str(pending_execution_command_id)
+        pending_execution_decision_id = payload.get('pending_execution_decision_id')
+        if pending_execution_decision_id is not None:
+            state.pending_execution_decision_id = str(pending_execution_decision_id)
+        pending_execution_since_utc = payload.get('pending_execution_since_utc')
+        if pending_execution_since_utc is not None:
+            state.pending_execution_since_utc = str(pending_execution_since_utc)
+        pending_execution_comment = payload.get('pending_execution_comment')
+        if pending_execution_comment is not None:
+            state.pending_execution_comment = str(pending_execution_comment)
+        pending_symbol = payload.get('pending_symbol')
+        if pending_symbol is not None:
+            state.pending_symbol = str(pending_symbol)
+        pending_magic_number = payload.get('pending_magic_number')
+        if pending_magic_number is not None:
+            state.pending_magic_number = int(pending_magic_number)
+        pending_execution_side = payload.get('pending_execution_side')
+        if pending_execution_side is not None:
+            state.pending_execution_side = str(pending_execution_side)
+        pending_execution_volume = payload.get('pending_execution_volume')
+        if pending_execution_volume is not None:
+            state.pending_execution_volume = float(pending_execution_volume)
+        preexisting = payload.get('pending_preexisting_tickets')
+        if isinstance(preexisting, list):
+            state.pending_preexisting_tickets = tuple(int(item) for item in preexisting)
+        state.ambiguous_pending_execution = bool(payload.get('ambiguous_pending_execution', False))
         state.duplicate_position_anomaly = bool(payload.get('duplicate_position_anomaly', False))
+        state.close_pending_reconciliation = bool(payload.get('close_pending_reconciliation', False))
+        close_pending_ticket = payload.get('close_pending_ticket')
+        if close_pending_ticket is not None:
+            state.close_pending_ticket = int(close_pending_ticket)
+        close_pending_side = payload.get('close_pending_side')
+        if close_pending_side is not None:
+            state.close_pending_side = str(close_pending_side)
+        close_pending_volume = payload.get('close_pending_volume')
+        if close_pending_volume is not None:
+            state.close_pending_volume = float(close_pending_volume)
+        close_pending_since_utc = payload.get('close_pending_since_utc')
+        if close_pending_since_utc is not None:
+            state.close_pending_since_utc = str(close_pending_since_utc)
         state.last_command_id = str(payload.get('last_command_id', state.last_command_id))
         state.last_ack_status = str(payload.get('last_ack_status', state.last_ack_status))
         state.instrument_digits = int(payload.get('instrument_digits', state.instrument_digits))
@@ -235,4 +424,31 @@ class InstanceState:
         state.cycle_count = int(payload.get('cycle_count', state.cycle_count))
         state.last_cycle_utc = str(payload.get('last_cycle_utc', state.last_cycle_utc))
         state.last_seen_market_bar_utc = str(payload.get('last_seen_market_bar_utc', payload.get('last_executed_market_bar_utc', state.last_seen_market_bar_utc)))
+        peak_net_profit_money = payload.get('peak_net_profit_money')
+        if peak_net_profit_money is not None:
+            state.peak_net_profit_money = float(peak_net_profit_money)
+        money_trailing_step_index = payload.get('money_trailing_step_index')
+        if money_trailing_step_index is not None:
+            state.money_trailing_step_index = int(money_trailing_step_index)
+        locked_profit_money = payload.get('locked_profit_money')
+        if locked_profit_money is not None:
+            state.locked_profit_money = float(locked_profit_money)
+        last_money_trailing_sl = payload.get('last_money_trailing_sl')
+        if last_money_trailing_sl is not None:
+            state.last_money_trailing_sl = float(last_money_trailing_sl)
+        money_trailing_ticket = payload.get('money_trailing_ticket')
+        if money_trailing_ticket is not None:
+            state.money_trailing_ticket = int(money_trailing_ticket)
+        elif state.open_ticket is not None and (
+            state.peak_net_profit_money != 0.0
+            or state.money_trailing_step_index != -1
+            or state.locked_profit_money != 0.0
+            or state.last_money_trailing_sl is not None
+        ):
+            state.money_trailing_ticket = state.open_ticket
+        state.money_trailing_state_missing = bool(payload.get('money_trailing_state_missing', False))
+        if state.open_ticket is not None and state.money_trailing_ticket is not None and state.money_trailing_ticket != state.open_ticket:
+            state.clear_money_trailing_state()
+            state.money_trailing_ticket = state.open_ticket
+            state.money_trailing_state_missing = True
         return state

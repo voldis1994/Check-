@@ -182,7 +182,6 @@ class RiskConfig:
     daily_loss_limit_enabled: bool
     drawdown_limit_enabled: bool
     reward_ratio: float
-    max_risk_per_trade_percent: float
     max_stop_loss_pips: float
     volume_step: float
     fixed_lot_volume: float
@@ -197,10 +196,6 @@ class RiskConfig:
         if reward_ratio <= 0:
             raise ValidationError('risk.reward_ratio must be > 0', module='protocol.models', context={'value': reward_ratio})
         object.__setattr__(self, 'reward_ratio', reward_ratio)
-        max_risk_per_trade_percent = _require_number(self.max_risk_per_trade_percent, 'risk.max_risk_per_trade_percent')
-        if max_risk_per_trade_percent <= 0:
-            raise ValidationError('risk.max_risk_per_trade_percent must be > 0', module='protocol.models', context={'value': max_risk_per_trade_percent})
-        object.__setattr__(self, 'max_risk_per_trade_percent', max_risk_per_trade_percent)
         max_stop_loss_pips = _require_number(self.max_stop_loss_pips, 'risk.max_stop_loss_pips')
         if max_stop_loss_pips <= 0:
             raise ValidationError('risk.max_stop_loss_pips must be > 0', module='protocol.models', context={'value': max_stop_loss_pips})
@@ -215,7 +210,7 @@ class RiskConfig:
         object.__setattr__(self, 'fixed_lot_volume', fixed_lot_volume)
 
     def to_dict(self) -> dict[str, int | float | bool]:
-        return {'max_open_positions_per_instance': self.max_open_positions_per_instance, 'max_daily_loss_percent': self.max_daily_loss_percent, 'max_drawdown_percent': self.max_drawdown_percent, 'daily_loss_limit_enabled': self.daily_loss_limit_enabled, 'drawdown_limit_enabled': self.drawdown_limit_enabled, 'reward_ratio': self.reward_ratio, 'max_risk_per_trade_percent': self.max_risk_per_trade_percent, 'max_stop_loss_pips': self.max_stop_loss_pips, 'volume_step': self.volume_step, 'fixed_lot_volume': self.fixed_lot_volume}
+        return {'max_open_positions_per_instance': self.max_open_positions_per_instance, 'max_daily_loss_percent': self.max_daily_loss_percent, 'max_drawdown_percent': self.max_drawdown_percent, 'daily_loss_limit_enabled': self.daily_loss_limit_enabled, 'drawdown_limit_enabled': self.drawdown_limit_enabled, 'reward_ratio': self.reward_ratio, 'max_stop_loss_pips': self.max_stop_loss_pips, 'volume_step': self.volume_step, 'fixed_lot_volume': self.fixed_lot_volume}
 
 @dataclass(frozen=True)
 class AnalysisConfig:
@@ -265,6 +260,44 @@ class AnalysisConfig:
         return {'lookback_bars': self.lookback_bars, 'structure_lookback_bars': self.structure_lookback_bars, 'spread_relative_threshold': self.spread_relative_threshold, 'volatility_relative_threshold': self.volatility_relative_threshold, 'block_high_impact_news': self.block_high_impact_news, 'stop_loss_buffer': self.stop_loss_buffer, 'block_ranging_chase_entries': self.block_ranging_chase_entries, 'ranging_extreme_threshold': self.ranging_extreme_threshold, 'ranging_recent_momentum_bars': self.ranging_recent_momentum_bars, 'weights': self.weights.to_dict()}
 
 @dataclass(frozen=True)
+class MoneyStepTrailingSettings:
+    enabled: bool
+    activation_profit_money: float
+    profit_step_money: float
+    initial_locked_profit_money: float
+    lock_increment_money: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'enabled', _require_bool(self.enabled, 'trade_management.money_step_trailing.enabled'))
+        object.__setattr__(self, 'activation_profit_money', _require_number(self.activation_profit_money, 'trade_management.money_step_trailing.activation_profit_money'))
+        object.__setattr__(self, 'profit_step_money', _require_number(self.profit_step_money, 'trade_management.money_step_trailing.profit_step_money'))
+        object.__setattr__(self, 'initial_locked_profit_money', _require_number(self.initial_locked_profit_money, 'trade_management.money_step_trailing.initial_locked_profit_money'))
+        object.__setattr__(self, 'lock_increment_money', _require_number(self.lock_increment_money, 'trade_management.money_step_trailing.lock_increment_money'))
+
+    def is_runnable(self) -> bool:
+        return self.to_params().is_runnable()
+
+    def to_params(self):
+        from engine.risk.money_step_trailing import MoneyStepTrailingParams
+        return MoneyStepTrailingParams(
+            enabled=self.enabled,
+            activation_profit_money=self.activation_profit_money,
+            profit_step_money=self.profit_step_money,
+            initial_locked_profit_money=self.initial_locked_profit_money,
+            lock_increment_money=self.lock_increment_money,
+        )
+
+    def to_dict(self) -> dict[str, float | bool]:
+        return {
+            'enabled': self.enabled,
+            'activation_profit_money': self.activation_profit_money,
+            'profit_step_money': self.profit_step_money,
+            'initial_locked_profit_money': self.initial_locked_profit_money,
+            'lock_increment_money': self.lock_increment_money,
+        }
+
+
+@dataclass(frozen=True)
 class TradeManagementSettings:
     enabled: bool
     allow_close: bool
@@ -275,6 +308,7 @@ class TradeManagementSettings:
     time_stop_max_bars: int
     trailing_lookback_bars: int
     trailing_step_pips: float
+    money_step_trailing: MoneyStepTrailingSettings
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'enabled', _require_bool(self.enabled, 'trade_management.enabled'))
@@ -298,9 +332,11 @@ class TradeManagementSettings:
         if trailing_step_pips < 0:
             raise ValidationError('trade_management.trailing_step_pips must be >= 0', module='protocol.models', context={'value': trailing_step_pips})
         object.__setattr__(self, 'trailing_step_pips', trailing_step_pips)
+        if not isinstance(self.money_step_trailing, MoneyStepTrailingSettings):
+            raise ValidationError('trade_management.money_step_trailing must be MoneyStepTrailingSettings', module='protocol.models', context={'value_type': type(self.money_step_trailing).__name__})
 
-    def to_dict(self) -> dict[str, int | float | bool]:
-        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'use_fixed_take_profit': self.use_fixed_take_profit, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars, 'trailing_lookback_bars': self.trailing_lookback_bars, 'trailing_step_pips': self.trailing_step_pips}
+    def to_dict(self) -> dict[str, int | float | bool | dict[str, float | bool]]:
+        return {'enabled': self.enabled, 'allow_close': self.allow_close, 'use_fixed_take_profit': self.use_fixed_take_profit, 'breakeven_progress_ratio': self.breakeven_progress_ratio, 'partial_close_progress_ratio': self.partial_close_progress_ratio, 'partial_close_volume_ratio': self.partial_close_volume_ratio, 'time_stop_max_bars': self.time_stop_max_bars, 'trailing_lookback_bars': self.trailing_lookback_bars, 'trailing_step_pips': self.trailing_step_pips, 'money_step_trailing': self.money_step_trailing.to_dict()}
 
 @dataclass(frozen=True)
 class JournalConfig:
@@ -406,6 +442,10 @@ class StatusPositionSnapshot:
     stop_loss: float | None = None
     take_profit: float | None = None
     open_time_utc: str | None = None
+    order_comment: str | None = None
+    profit: float | None = None
+    swap: float | None = None
+    commission: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'symbol', _validate_symbol(self.symbol))
@@ -427,6 +467,14 @@ class StatusPositionSnapshot:
             object.__setattr__(self, 'take_profit', _require_number(self.take_profit, 'open_positions.take_profit'))
         if self.open_time_utc is not None:
             object.__setattr__(self, 'open_time_utc', _require_non_empty_string(self.open_time_utc, 'open_positions.open_time_utc'))
+        if self.order_comment is not None:
+            object.__setattr__(self, 'order_comment', _require_non_empty_string(self.order_comment, 'open_positions.order_comment'))
+        if self.profit is not None:
+            object.__setattr__(self, 'profit', _require_number(self.profit, 'open_positions.profit'))
+        if self.swap is not None:
+            object.__setattr__(self, 'swap', _require_number(self.swap, 'open_positions.swap'))
+        if self.commission is not None:
+            object.__setattr__(self, 'commission', _require_number(self.commission, 'open_positions.commission'))
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {'symbol': self.symbol, 'magic': self.magic, 'ticket': self.ticket, 'side': self.side, 'volume': self.volume}
@@ -438,6 +486,14 @@ class StatusPositionSnapshot:
             data['take_profit'] = self.take_profit
         if self.open_time_utc is not None:
             data['open_time_utc'] = self.open_time_utc
+        if self.order_comment is not None:
+            data['order_comment'] = self.order_comment
+        if self.profit is not None:
+            data['profit'] = self.profit
+        if self.swap is not None:
+            data['swap'] = self.swap
+        if self.commission is not None:
+            data['commission'] = self.commission
         return data
 
 @dataclass(frozen=True)
@@ -453,6 +509,10 @@ class StatusRecord:
     ea_version: str
     last_error: str | None = None
     open_positions: tuple[StatusPositionSnapshot, ...] = ()
+    tick_value: float | None = None
+    tick_size: float | None = None
+    stop_level: int | None = None
+    freeze_level: int | None = None
 
     def __post_init__(self) -> None:
         schema_version = _require_non_empty_string(self.schema_version, 'schema_version')
@@ -474,6 +534,14 @@ class StatusRecord:
         for position in self.open_positions:
             if not isinstance(position, StatusPositionSnapshot):
                 raise ValidationError('open_positions entries must be StatusPositionSnapshot', module='protocol.models', context={'value_type': type(position).__name__})
+        if self.tick_value is not None:
+            object.__setattr__(self, 'tick_value', _require_number(self.tick_value, 'tick_value'))
+        if self.tick_size is not None:
+            object.__setattr__(self, 'tick_size', _require_number(self.tick_size, 'tick_size'))
+        if self.stop_level is not None:
+            object.__setattr__(self, 'stop_level', _require_int(self.stop_level, 'stop_level', minimum=0))
+        if self.freeze_level is not None:
+            object.__setattr__(self, 'freeze_level', _require_int(self.freeze_level, 'freeze_level', minimum=0))
 
     def to_dict(self) -> dict[str, Any]:
         data = {'schema_version': self.schema_version, 'timestamp_utc': self.timestamp_utc, 'account_id': self.account_id, 'connected': self.connected, 'trade_allowed': self.trade_allowed, 'balance': self.balance, 'equity': self.equity, 'margin_free': self.margin_free, 'ea_version': self.ea_version}
@@ -481,6 +549,14 @@ class StatusRecord:
             data['last_error'] = self.last_error
         if self.open_positions:
             data['open_positions'] = [position.to_dict() for position in self.open_positions]
+        if self.tick_value is not None:
+            data['tick_value'] = self.tick_value
+        if self.tick_size is not None:
+            data['tick_size'] = self.tick_size
+        if self.stop_level is not None:
+            data['stop_level'] = self.stop_level
+        if self.freeze_level is not None:
+            data['freeze_level'] = self.freeze_level
         return data
 
 @dataclass(frozen=True)
@@ -546,6 +622,7 @@ class ControlCommand:
     stop_loss: float | None = None
     take_profit: float | None = None
     ticket: int | None = None
+    order_comment: str | None = None
 
     def __post_init__(self) -> None:
         schema_version = _require_non_empty_string(self.schema_version, 'schema_version')
@@ -576,6 +653,8 @@ class ControlCommand:
             object.__setattr__(self, 'take_profit', _require_number(self.take_profit, 'take_profit'))
         if self.ticket is not None:
             object.__setattr__(self, 'ticket', _require_int(self.ticket, 'ticket', minimum=0))
+        if self.order_comment is not None:
+            object.__setattr__(self, 'order_comment', _require_non_empty_string(self.order_comment, 'order_comment'))
 
     @property
     def instance_key(self) -> InstanceKey:
@@ -593,6 +672,8 @@ class ControlCommand:
             data['take_profit'] = self.take_profit
         if self.ticket is not None:
             data['ticket'] = self.ticket
+        if self.order_comment is not None:
+            data['order_comment'] = self.order_comment
         return data
 
 @dataclass(frozen=True)

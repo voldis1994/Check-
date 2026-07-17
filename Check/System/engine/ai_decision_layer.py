@@ -89,9 +89,14 @@ def _call_openai(*, api_key: str, prompt: str, timeout_s: float, retry_max: int,
     payload = json.dumps(data).encode('utf-8')
     req = urllib.request.Request(url=url, data=payload, method='POST', headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'})
     last_error: Exception | None = None
-    total_budget = float(timeout_s)
-    per_attempt = max(0.5, total_budget / (retry_max + 1))
+    total_budget = max(0.5, float(timeout_s))
+    deadline = time.monotonic() + total_budget
     for attempt in range(retry_max + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('AI total time budget exhausted')
+        # Share one wall-clock budget across attempts; retries do not each get a full timeout.
+        per_attempt = max(0.1, min(remaining, total_budget / (retry_max + 1)))
         try:
             with urllib.request.urlopen(req, timeout=per_attempt) as resp:
                 raw = resp.read().decode('utf-8', errors='replace')
@@ -103,16 +108,22 @@ def _call_openai(*, api_key: str, prompt: str, timeout_s: float, retry_max: int,
         except urllib.error.HTTPError as exc:
             last_error = exc
             if exc.code in {429, 500, 502, 503, 504} and attempt < retry_max:
-                time.sleep(retry_delay_ms / 1000.0)
+                sleep_for = min(retry_delay_ms / 1000.0, max(0.0, deadline - time.monotonic()))
+                if sleep_for <= 0:
+                    raise TimeoutError('AI total time budget exhausted') from exc
+                time.sleep(sleep_for)
                 continue
             raise
         except Exception as exc:
             last_error = exc
         if attempt < retry_max:
-            time.sleep(retry_delay_ms / 1000.0)
+            sleep_for = min(retry_delay_ms / 1000.0, max(0.0, deadline - time.monotonic()))
+            if sleep_for <= 0:
+                break
+            time.sleep(sleep_for)
     if last_error is not None:
         raise last_error
-    raise RuntimeError('OpenAI request failed without error detail')
+    raise TimeoutError('AI total time budget exhausted')
 
 def _timeout_seconds(ai_config: AIConfig | None) -> float:
     if ai_config is None:

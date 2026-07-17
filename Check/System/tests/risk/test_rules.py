@@ -6,7 +6,7 @@ from engine.risk.rules import RiskContext, RiskRuleResult, check_max_daily_loss,
 from engine.state.instance_state import InstanceState
 
 def _risk_config() -> RiskConfig:
-    return RiskConfig(max_open_positions_per_instance=1, max_daily_loss_percent=2.0, max_drawdown_percent=10.0, daily_loss_limit_enabled=True, drawdown_limit_enabled=True, reward_ratio=2.0, max_risk_per_trade_percent=1.0, max_stop_loss_pips=100.0, volume_step=0.01, fixed_lot_volume=0.0)
+    return RiskConfig(max_open_positions_per_instance=1, max_daily_loss_percent=2.0, max_drawdown_percent=10.0, daily_loss_limit_enabled=True, drawdown_limit_enabled=True, reward_ratio=2.0, max_stop_loss_pips=100.0, volume_step=0.01, fixed_lot_volume=0.0)
 
 def _status(*, trade_allowed: bool=True) -> StatusRecord:
     return StatusRecord(schema_version='1.0.0', timestamp_utc='2026-07-07T06:00:00.000Z', account_id='12345', connected=True, trade_allowed=trade_allowed, balance=10000.0, equity=10000.0, margin_free=9000.0, ea_version='1.0.0')
@@ -58,7 +58,7 @@ def test_check_trade_allowed_blocks_when_false() -> None:
     assert REASON_ACCOUNT_NOT_TRADEABLE in blocked.reason
 
 def test_evaluate_risk_rules_ignores_daily_loss_when_disabled() -> None:
-    config = RiskConfig(max_open_positions_per_instance=1, max_daily_loss_percent=2.0, max_drawdown_percent=10.0, daily_loss_limit_enabled=False, drawdown_limit_enabled=True, reward_ratio=2.0, max_risk_per_trade_percent=1.0, max_stop_loss_pips=100.0, volume_step=0.01, fixed_lot_volume=0.0)
+    config = RiskConfig(max_open_positions_per_instance=1, max_daily_loss_percent=2.0, max_drawdown_percent=10.0, daily_loss_limit_enabled=False, drawdown_limit_enabled=True, reward_ratio=2.0, max_stop_loss_pips=100.0, volume_step=0.01, fixed_lot_volume=0.0)
     result = evaluate_risk_rules(status=_status(trade_allowed=True), instance_state=_instance_state(with_position=False), risk_config=config, risk_context=_risk_context(daily_loss_percent=5.0, drawdown_percent=3.0))
     assert result.allowed
 

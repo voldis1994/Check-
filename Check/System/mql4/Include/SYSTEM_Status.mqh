@@ -99,7 +99,11 @@ string SYSTEM_BuildOpenPositionEntryJson(
    const double entry_price,
    const double stop_loss,
    const double take_profit,
-   const datetime open_time
+   const datetime open_time,
+   const string order_comment,
+   const double profit,
+   const double swap,
+   const double commission
 )
 {
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
@@ -117,6 +121,11 @@ string SYSTEM_BuildOpenPositionEntryJson(
    json = json + "      \"take_profit\": " + SYSTEM_FormatJsonNumber(take_profit, digits);
    if(open_time > 0)
       json = json + ",\n      \"open_time_utc\": \"" + SYSTEM_FormatTimeUtc(open_time) + "\"";
+   if(StringLen(order_comment) > 0)
+      json = json + ",\n      \"order_comment\": \"" + SYSTEM_EscapeJsonString(order_comment) + "\"";
+   json = json + ",\n      \"profit\": " + SYSTEM_FormatJsonNumber(profit, 2);
+   json = json + ",\n      \"swap\": " + SYSTEM_FormatJsonNumber(swap, 2);
+   json = json + ",\n      \"commission\": " + SYSTEM_FormatJsonNumber(commission, 2);
    json = json + "\n    }";
    return json;
 }
@@ -148,7 +157,11 @@ string SYSTEM_BuildOpenPositionsJson()
          OrderOpenPrice(),
          OrderStopLoss(),
          OrderTakeProfit(),
-         OrderOpenTime()
+         OrderOpenTime(),
+         OrderComment(),
+         OrderProfit(),
+         OrderSwap(),
+         OrderCommission()
       );
       count++;
    }
@@ -184,6 +197,16 @@ string SYSTEM_BuildStatusJson(
    if(StringLen(last_error) > 0)
       json = json + ",\n  \"last_error\": \"" + SYSTEM_EscapeJsonString(last_error) + "\"";
    json = json + SYSTEM_BuildOpenPositionsJson();
+   double tick_value = MarketInfo(symbol, MODE_TICKVALUE);
+   double tick_size = MarketInfo(symbol, MODE_TICKSIZE);
+   int stop_level = (int)MarketInfo(symbol, MODE_STOPLEVEL);
+   int freeze_level = (int)MarketInfo(symbol, MODE_FREEZELEVEL);
+   if(tick_value > 0.0)
+      json = json + ",\n  \"tick_value\": " + SYSTEM_FormatJsonNumber(tick_value, 5);
+   if(tick_size > 0.0)
+      json = json + ",\n  \"tick_size\": " + SYSTEM_FormatJsonNumber(tick_size, 5);
+   json = json + ",\n  \"stop_level\": " + IntegerToString(stop_level);
+   json = json + ",\n  \"freeze_level\": " + IntegerToString(freeze_level);
    json = json + "\n}\n";
    return json;
 }
@@ -268,7 +291,10 @@ bool SYSTEM_FindLastClosedOrderForInstance(
    double &profit,
    double &commission,
    double &swap,
-   string &close_reason
+   string &close_reason,
+   string &side,
+   double &volume,
+   string &order_comment
 )
 {
    ticket = 0;
@@ -278,6 +304,9 @@ bool SYSTEM_FindLastClosedOrderForInstance(
    commission = 0.0;
    swap = 0.0;
    close_reason = "";
+   side = "";
+   volume = 0.0;
+   order_comment = "";
 
    datetime best_close_time = 0;
    bool found = false;
@@ -306,6 +335,9 @@ bool SYSTEM_FindLastClosedOrderForInstance(
          commission = OrderCommission();
          swap = OrderSwap();
          close_reason = SYSTEM_DetermineCloseReason();
+         side = (OrderType() == OP_BUY) ? "BUY" : "SELL";
+         volume = OrderLots();
+         order_comment = OrderComment();
       }
    }
    return found;
@@ -321,7 +353,10 @@ string SYSTEM_BuildClosedTradeJson(
    const double profit,
    const double commission,
    const double swap,
-   const string close_reason
+   const string close_reason,
+   const string side,
+   const double volume,
+   const string order_comment
 )
 {
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
@@ -340,6 +375,12 @@ string SYSTEM_BuildClosedTradeJson(
    json = json + "  \"swap\": " + SYSTEM_FormatJsonNumber(swap, 2);
    if(StringLen(close_reason) > 0)
       json = json + ",\n  \"close_reason\": \"" + SYSTEM_EscapeJsonString(close_reason) + "\"";
+   if(StringLen(side) > 0)
+      json = json + ",\n  \"side\": \"" + SYSTEM_EscapeJsonString(side) + "\"";
+   if(volume > 0.0)
+      json = json + ",\n  \"volume\": " + SYSTEM_FormatJsonNumber(volume, 2);
+   if(StringLen(order_comment) > 0)
+      json = json + ",\n  \"order_comment\": \"" + SYSTEM_EscapeJsonString(order_comment) + "\"";
    json = json + "\n}\n";
    return json;
 }
@@ -358,6 +399,9 @@ bool SYSTEM_ExportClosedTrade(const string account_id, const string symbol, cons
    double commission = 0.0;
    double swap = 0.0;
    string close_reason = "";
+   string side = "";
+   double volume = 0.0;
+   string order_comment = "";
 
    if(!SYSTEM_FindLastClosedOrderForInstance(
       symbol,
@@ -368,7 +412,10 @@ bool SYSTEM_ExportClosedTrade(const string account_id, const string symbol, cons
       profit,
       commission,
       swap,
-      close_reason
+      close_reason,
+      side,
+      volume,
+      order_comment
    ))
       return true;
 
@@ -383,7 +430,10 @@ bool SYSTEM_ExportClosedTrade(const string account_id, const string symbol, cons
       profit,
       commission,
       swap,
-      close_reason
+      close_reason,
+      side,
+      volume,
+      order_comment
    );
    return SYSTEM_AtomicWriteText(path, payload);
 }

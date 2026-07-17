@@ -60,8 +60,16 @@ def _open_order_command(command_id: str=FIXED_COMMAND_ID) -> OrderCommand:
 def _publish_open_control(paths: SystemPaths, instance: Instance, command_id: str=FIXED_COMMAND_ID) -> None:
     publish_control(paths, instance, _open_order_command(command_id), timestamp_utc='2026-07-07T06:00:00.000Z')
 
-def _ack_payload(*, command_id: str, status: str, ticket: int=555) -> str:
-    return f'{{\n  "schema_version": "{PROTOCOL_SCHEMA_VERSION}",\n  "timestamp_utc": "2026-07-07T06:00:00.000Z",\n  "command_id": "{command_id}",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "status": "{status}",\n  "ticket": {ticket}\n}}'
+def _ack_payload(*, command_id: str, status: str, ticket: int=555, fill_price: float | None=None, side: str | None=None, volume: float | None=None) -> str:
+    base = f'{{\n  "schema_version": "{PROTOCOL_SCHEMA_VERSION}",\n  "timestamp_utc": "2026-07-07T06:00:00.000Z",\n  "command_id": "{command_id}",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "status": "{status}",\n  "ticket": {ticket}'
+    if fill_price is not None:
+        base += f',\n  "fill_price": {fill_price}'
+    if side is not None:
+        base += f',\n  "side": "{side}"'
+    if volume is not None:
+        base += f',\n  "volume": {volume}'
+    base += '\n}'
+    return base
 
 def test_is_terminal_ack_status_recognizes_terminal_values() -> None:
     assert is_terminal_ack_status(AckStatus.SUCCESS.value)
@@ -133,7 +141,7 @@ def test_recover_pending_ack_marks_timeout_when_ack_missing(tmp_path: Path) -> N
 def test_recover_pending_ack_applies_success_ack_and_position(tmp_path: Path) -> None:
     runtime, instance = _startup_runtime(tmp_path)
     _publish_open_control(runtime.paths, instance)
-    atomic_write_text(build_ack_path(runtime.paths, instance), _ack_payload(command_id=FIXED_COMMAND_ID, status=AckStatus.SUCCESS.value, ticket=888))
+    atomic_write_text(build_ack_path(runtime.paths, instance), _ack_payload(command_id=FIXED_COMMAND_ID, status=AckStatus.SUCCESS.value, ticket=888, fill_price=1.1031, side=Side.BUY.value, volume=0.1))
     item = runtime.memory.get(instance)
     assert item is not None
     unconfirmed = detect_unconfirmed_control(runtime.paths, instance, item.instance_state)
@@ -157,7 +165,7 @@ def test_recover_pending_ack_applies_late_success_after_timeout(tmp_path: Path) 
     timeout_result = recover_pending_ack(runtime, instance, unconfirmed=unconfirmed, timestamp_utc='2026-07-07T06:00:00.000Z')
     assert timeout_result.timed_out is True
     assert item.instance_state.last_ack_status == AckStatus.TIMEOUT.value
-    atomic_write_text(build_ack_path(runtime.paths, instance), _ack_payload(command_id=FIXED_COMMAND_ID, status=AckStatus.SUCCESS.value, ticket=999))
+    atomic_write_text(build_ack_path(runtime.paths, instance), _ack_payload(command_id=FIXED_COMMAND_ID, status=AckStatus.SUCCESS.value, ticket=999, fill_price=1.1031, side=Side.BUY.value, volume=0.1))
     late_result = recover_pending_ack(runtime, instance, unconfirmed=unconfirmed)
     assert late_result.recovered is True
     assert late_result.timed_out is False

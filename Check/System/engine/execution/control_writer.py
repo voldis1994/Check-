@@ -19,7 +19,7 @@ def build_control_path(paths: SystemPaths, instance: Instance) -> Path:
     return paths.account_dir(instance.account_id) / instance.control_filename()
 
 def build_control_command(instance: Instance, order_command: OrderCommand, *, timestamp_utc: str) -> ControlCommand:
-    return ControlCommand(schema_version=PROTOCOL_SCHEMA_VERSION, timestamp_utc=timestamp_utc, command_id=order_command.command_id, account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic, action=order_command.action, reason=order_command.reason, decision_id=order_command.decision_id, side=order_command.side, volume=order_command.volume, stop_loss=order_command.stop_loss, take_profit=order_command.take_profit, ticket=order_command.ticket)
+    return ControlCommand(schema_version=PROTOCOL_SCHEMA_VERSION, timestamp_utc=timestamp_utc, command_id=order_command.command_id, account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic, action=order_command.action, reason=order_command.reason, decision_id=order_command.decision_id, side=order_command.side, volume=order_command.volume, stop_loss=order_command.stop_loss, take_profit=order_command.take_profit, ticket=order_command.ticket, order_comment=order_command.order_comment)
 
 def write_control_file(paths: SystemPaths, instance: Instance, control_command: ControlCommand, *, retry_policy: RetryPolicy | None=None, retry_alert_context: RetryAlertContext | None=None) -> None:
     if control_command.instance_key.as_tuple() != instance.instance_key:

@@ -24,6 +24,7 @@ class AckInterpretation:
     is_rejected: bool
     is_timeout: bool
     ack_record: AckRecord | None
+    is_already_processed: bool = False
 
 def build_ack_path(paths: SystemPaths, instance: Instance) -> Path:
     return paths.account_dir(instance.account_id) / instance.ack_filename()
@@ -40,10 +41,11 @@ def validate_ack_record(ack_record: AckRecord, instance: Instance, *, expected_c
         raise _execution_error('ack command_id does not match expected command', expected_command_id=expected_command_id, actual_command_id=ack_record.command_id)
 
 def interpret_ack(ack_record: AckRecord) -> AckInterpretation:
-    return AckInterpretation(status=ack_record.status, command_id=ack_record.command_id, is_success=ack_record.status == AckStatus.SUCCESS.value, is_failed=ack_record.status == AckStatus.FAILED.value, is_rejected=ack_record.status == AckStatus.REJECTED.value, is_timeout=False, ack_record=ack_record)
+    is_already_processed = ack_record.status == AckStatus.ALREADY_PROCESSED.value
+    return AckInterpretation(status=ack_record.status, command_id=ack_record.command_id, is_success=ack_record.status == AckStatus.SUCCESS.value, is_failed=ack_record.status == AckStatus.FAILED.value, is_rejected=ack_record.status == AckStatus.REJECTED.value, is_timeout=False, ack_record=ack_record, is_already_processed=is_already_processed)
 
 def build_ack_timeout_interpretation(*, command_id: str) -> AckInterpretation:
-    return AckInterpretation(status=AckStatus.TIMEOUT.value, command_id=command_id, is_success=False, is_failed=False, is_rejected=False, is_timeout=True, ack_record=None)
+    return AckInterpretation(status=AckStatus.TIMEOUT.value, command_id=command_id, is_success=False, is_failed=False, is_rejected=False, is_timeout=True, ack_record=None, is_already_processed=False)
 
 def build_timeout_ack_record(instance: Instance, *, command_id: str, timestamp_utc: str) -> AckRecord:
     from engine.protocol.constants import PROTOCOL_SCHEMA_VERSION

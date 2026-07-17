@@ -129,6 +129,8 @@ def test_06_ordersend_ok_ack_write_fail_no_duplicate(tmp_path: Path) -> None:
 
 
 def test_07_ack_timeout_broker_position_sync(tmp_path: Path) -> None:
+    from engine.execution.order_comment import build_open_order_comment
+
     root = tmp_path
     (root / 'data' / 'clients' / '12345' / 'journal').mkdir(parents=True)
     (root / 'data' / 'clients' / '12345' / 'state').mkdir(parents=True)
@@ -137,7 +139,17 @@ def test_07_ack_timeout_broker_position_sync(tmp_path: Path) -> None:
     state = InstanceState(instance)
     state.instrument_digits = 5
     state.instrument_point = 0.00001
-    state.pending_execution_command_id = 'pending-open'
+    comment = build_open_order_comment('pending-open')
+    state.set_pending_execution(
+        command_id='pending-open',
+        decision_id='dec-1',
+        since_utc='2026-07-17T12:00:00.000Z',
+        comment=comment,
+        symbol='EURUSD',
+        magic=100001,
+        side='BUY',
+        volume=0.01,
+    )
     status = StatusRecord(
         schema_version=PROTOCOL_SCHEMA_VERSION,
         timestamp_utc='2026-07-17T12:00:05.000Z',
@@ -149,7 +161,18 @@ def test_07_ack_timeout_broker_position_sync(tmp_path: Path) -> None:
         margin_free=900.0,
         ea_version='1.0.0',
         open_positions=(
-            StatusPositionSnapshot(symbol='EURUSD', magic=100001, ticket=555, side='BUY', volume=0.01, entry_price=1.1003, stop_loss=1.09, take_profit=0.0, open_time_utc='2026-07-17T12:00:01.000Z'),
+            StatusPositionSnapshot(
+                symbol='EURUSD',
+                magic=100001,
+                ticket=555,
+                side='BUY',
+                volume=0.01,
+                entry_price=1.1003,
+                stop_loss=1.09,
+                take_profit=0.0,
+                open_time_utc='2026-07-17T12:00:01.000Z',
+                order_comment=comment,
+            ),
         ),
     )
     result = reconcile_position_with_status(paths, instance, state, status, timestamp_utc='2026-07-17T12:00:05.000Z')
@@ -238,13 +261,18 @@ def test_12_external_close_without_invented_price(tmp_path: Path) -> None:
     )
     result = reconcile_position_with_status(paths, instance, state, status, timestamp_utc='2026-07-17T12:00:05.000Z')
     assert result.external_close is True
-    assert state.open_ticket is None
+    assert result.close_pending is True
+    assert state.open_ticket == 9
+    assert state.close_pending_reconciliation is True
+    assert state.close_pending_ticket == 9
+    # No finalized close journal with invented SL/entry price while pending.
     trade_files = list(journal_dir.glob('trade_*.jsonl'))
-    assert trade_files
-    line = trade_files[0].read_text(encoding='utf-8').strip().splitlines()[-1]
-    payload = json.loads(line)
-    assert 'price' not in payload or payload.get('price') is None
-    assert 'CLOSE_PENDING_RECONCILIATION' in payload.get('reason', '')
+    if trade_files:
+        for line in trade_files[0].read_text(encoding='utf-8').strip().splitlines():
+            payload = json.loads(line)
+            assert payload.get('price') in (None,) or 'price' not in payload
+            assert payload.get('price') != 1.09
+            assert payload.get('price') != 1.1
 
 
 def test_13_instance_isolation_threadpool_does_not_serialize_sleep() -> None:
