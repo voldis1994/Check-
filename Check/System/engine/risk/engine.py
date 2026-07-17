@@ -64,6 +64,7 @@ def run_risk_engine(*, decision_result: DecisionResult, risk_config: RiskConfig,
         return _block(sl_tp_result.reason or 'stop loss or take profit validation failed')
     broker_take_profit = sl_tp_result.take_profit if use_fixed_take_profit else 0.0
     if risk_config.fixed_lot_volume > 0:
+        # fixed_lot_volume is the active sizing mode; max_risk_per_trade_percent is unused/deprecated while fixed lot > 0.
         volume = normalize_volume_to_step(volume=risk_config.fixed_lot_volume, volume_step=trade_params.volume_step)
         if volume <= 0:
             return _block(build_reason(REASON_INVALID_VOLUME, 'fixed lot volume is below broker minimum step', fixed_lot_volume=risk_config.fixed_lot_volume, volume_step=trade_params.volume_step))
