@@ -14,7 +14,7 @@ def test_single_sample_spread_uses_neutral_relative_spread() -> None:
     assert snapshot.relative_spread == pytest.approx(1.0)
 
 def test_should_skip_ai_when_risk_rules_block_buy() -> None:
-    from engine.protocol.models import StatusRecord
+    from engine.protocol.models import StatusRecord, StatusPositionSnapshot
     from engine.protocol.constants import PROTOCOL_SCHEMA_VERSION
     from engine.state.instance_state import InstanceState
     from engine.core.paths import SystemPaths
@@ -22,7 +22,18 @@ def test_should_skip_ai_when_risk_rules_block_buy() -> None:
     from tests.core.config_payload import valid_system_config_payload
     from engine.core.config import parse_config_payload
     config = parse_config_payload(valid_system_config_payload())
-    status = StatusRecord(schema_version=PROTOCOL_SCHEMA_VERSION, timestamp_utc='2026-07-07T06:00:00.000Z', account_id='12345', connected=True, trade_allowed=True, balance=10000.0, equity=10000.0, margin_free=9000.0, ea_version='1.0.0')
+    status = StatusRecord(
+        schema_version=PROTOCOL_SCHEMA_VERSION,
+        timestamp_utc='2026-07-07T06:00:00.000Z',
+        account_id='12345',
+        connected=True,
+        trade_allowed=True,
+        balance=10000.0,
+        equity=10000.0,
+        margin_free=9000.0,
+        ea_version='1.0.0',
+        open_positions=(StatusPositionSnapshot(symbol='EURUSD', magic=100001, ticket=1001, side='BUY', volume=0.1, entry_price=1.1, stop_loss=1.09, take_profit=0.0),),
+    )
     paths = SystemPaths('/tmp')
     instance = Instance(account_id='12345', symbol='EURUSD', magic=100001)
     state = InstanceState.load(paths, instance)

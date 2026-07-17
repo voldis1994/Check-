@@ -111,8 +111,21 @@ def test_risk_engine_blocks_when_trade_not_allowed() -> None:
     assert REASON_ACCOUNT_NOT_TRADEABLE in result.reason
 
 def test_risk_engine_blocks_when_open_position_limit_reached() -> None:
+    from engine.protocol.models import StatusPositionSnapshot
     decision_result = _buy_decision_result()
-    result = _run_with_decision(decision_result, instance_state=_instance_state(with_position=True))
+    status = StatusRecord(
+        schema_version='1.0.0',
+        timestamp_utc='2026-07-07T06:00:00.000Z',
+        account_id='12345',
+        connected=True,
+        trade_allowed=True,
+        balance=10000.0,
+        equity=10000.0,
+        margin_free=9000.0,
+        ea_version='1.0.0',
+        open_positions=(StatusPositionSnapshot(symbol='EURUSD', magic=100001, ticket=1001, side='BUY', volume=0.1, entry_price=1.1, stop_loss=1.09, take_profit=0.0),),
+    )
+    result = _run_with_decision(decision_result, instance_state=_instance_state(with_position=True), status=status)
     assert result.result == RiskResult.BLOCK.value
     assert REASON_RISK_MAX_POSITIONS in result.reason
 
