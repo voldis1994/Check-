@@ -402,3 +402,63 @@ def test_open_command_includes_order_comment() -> None:
         )
     command = build_order_command(decision, risk, command_id='cmd-open-xyz')
     assert command.order_comment == build_open_order_comment('cmd-open-xyz')
+
+
+def test_broker_flat_keeps_fresh_pending_open(tmp_path: Path) -> None:
+    """Within grace window, flat broker must keep pending (status may still catch up)."""
+    paths = SystemPaths(tmp_path)
+    state = _pending_state()
+    paths.ensure_account_directories(state.instance.account_id)
+    result = reconcile_position_with_status(
+        paths,
+        state.instance,
+        state,
+        _status(positions=(), timestamp_utc='2026-07-17T12:00:30.000Z'),
+        timestamp_utc='2026-07-17T12:00:30.000Z',
+    )
+    assert result.broker_execution_confirmed is False
+    assert state.pending_execution_command_id == 'cmd-open-1'
+
+
+def test_broker_flat_abandons_stale_pending_open(tmp_path: Path) -> None:
+    """After grace, connected+flat broker clears stuck pending so new OPEN can fire."""
+    paths = SystemPaths(tmp_path)
+    state = _pending_state()
+    paths.ensure_account_directories(state.instance.account_id)
+    result = reconcile_position_with_status(
+        paths,
+        state.instance,
+        state,
+        _status(positions=(), timestamp_utc='2026-07-17T12:01:05.000Z'),
+        timestamp_utc='2026-07-17T12:01:05.000Z',
+    )
+    assert result.changed is True
+    assert result.broker_execution_confirmed is False
+    assert state.pending_execution_command_id is None
+    assert state.ambiguous_pending_execution is False
+
+
+def test_disconnected_flat_does_not_abandon_pending_open(tmp_path: Path) -> None:
+    paths = SystemPaths(tmp_path)
+    state = _pending_state()
+    paths.ensure_account_directories(state.instance.account_id)
+    status = StatusRecord(
+        schema_version=PROTOCOL_SCHEMA_VERSION,
+        timestamp_utc='2026-07-17T12:05:00.000Z',
+        account_id='12345',
+        connected=False,
+        trade_allowed=False,
+        balance=1000.0,
+        equity=1000.0,
+        margin_free=900.0,
+        ea_version='1.0.0',
+        open_positions=(),
+    )
+    reconcile_position_with_status(
+        paths,
+        state.instance,
+        state,
+        status,
+        timestamp_utc='2026-07-17T12:05:00.000Z',
+    )
+    assert state.pending_execution_command_id == 'cmd-open-1'

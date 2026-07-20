@@ -4,8 +4,9 @@ from engine.core.version import FALLBACK_SYSTEM_VERSION, read_system_version
 
 
 def test_read_system_version_from_repo_root() -> None:
+    read_system_version.cache_clear()
     version = read_system_version()
-    assert version == '1.1.0'
+    assert version == '1.1.1'
 
 
 def test_read_system_version_missing_file_falls_back(tmp_path: Path) -> None:
