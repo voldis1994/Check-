@@ -306,10 +306,19 @@ def validate_market_for_cycle(market_raw: RawMarketData) -> tuple[NormalizedMark
     return normalize_market_csv(raw_text)
 
 def validate_sensor_for_cycle(sensor_raw: RawSensorData) -> SensorReading | ValidationResult:
-    validation = validate_sensor_csv(sensor_raw.raw_text)
+    from engine.core.atomic_io import atomic_write_text
+    from engine.validator.sensor_validator import sanitize_sensor_csv
+    sanitized = sanitize_sensor_csv(sensor_raw.raw_text)
+    raw_text = sanitized.raw_text
+    if sanitized.changed:
+        try:
+            atomic_write_text(sensor_raw.file_path, raw_text)
+        except OSError:
+            pass
+    validation = validate_sensor_csv(raw_text)
     if not validation.is_valid:
         return validation
-    readings = parse_sensor_csv(sensor_raw.raw_text)
+    readings = parse_sensor_csv(raw_text)
     if not readings:
         return ValidationResult(status=validation.status, errors=('sensor csv contains no readings',), row_count=0)
     return readings[-1]

@@ -1,9 +1,22 @@
 from __future__ import annotations
 import csv
 import math
+from dataclasses import dataclass
 from io import StringIO
 from engine.protocol.constants import FLOAT_TOLERANCE, SENSOR_CSV_COLUMNS, ValidationStatus
 from engine.validator.market_validator import ValidationResult
+
+# Sensor ticks arrive ~500ms; keep a bounded newest window for live reads.
+DEFAULT_SENSOR_SANITIZE_MAX_ROWS = 2000
+
+@dataclass(frozen=True)
+class SensorCsvSanitizeResult:
+    raw_text: str
+    changed: bool
+    dropped_duplicates: int
+    reordered: bool
+    truncated: bool
+    row_count: int
 
 def _parse_float(raw: str, field: str, row: int, errors: list[str]) -> float | None:
     try:
@@ -11,6 +24,56 @@ def _parse_float(raw: str, field: str, row: int, errors: list[str]) -> float | N
     except (TypeError, ValueError):
         errors.append(f'row {row}: invalid number in {field}')
         return None
+
+def sanitize_sensor_csv(raw_text: str, *, max_rows: int = DEFAULT_SENSOR_SANITIZE_MAX_ROWS) -> SensorCsvSanitizeResult:
+    """Deduplicate by time_utc (keep last), sort ascending, truncate to newest rows."""
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        return SensorCsvSanitizeResult(raw_text=raw_text if isinstance(raw_text, str) else '', changed=False, dropped_duplicates=0, reordered=False, truncated=False, row_count=0)
+    reader = csv.DictReader(StringIO(raw_text.strip()))
+    if reader.fieldnames is None or tuple(reader.fieldnames) != SENSOR_CSV_COLUMNS:
+        return SensorCsvSanitizeResult(raw_text=raw_text, changed=False, dropped_duplicates=0, reordered=False, truncated=False, row_count=0)
+    rows_by_time: dict[str, dict[str, str]] = {}
+    order_before: list[str] = []
+    dropped_duplicates = 0
+    for row in reader:
+        if row is None or not any((value not in (None, '') for value in row.values())):
+            continue
+        time_utc = row.get('time_utc')
+        if not isinstance(time_utc, str) or not time_utc.strip():
+            continue
+        if time_utc in rows_by_time:
+            dropped_duplicates += 1
+        else:
+            order_before.append(time_utc)
+        rows_by_time[time_utc] = {column: (row.get(column) or '') for column in SENSOR_CSV_COLUMNS}
+    if not rows_by_time:
+        return SensorCsvSanitizeResult(raw_text=raw_text, changed=False, dropped_duplicates=0, reordered=False, truncated=False, row_count=0)
+    sorted_times = sorted(rows_by_time.keys())
+    reordered = sorted_times != order_before
+    truncated = False
+    if max_rows > 0 and len(sorted_times) > max_rows:
+        sorted_times = sorted_times[-max_rows:]
+        truncated = True
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=list(SENSOR_CSV_COLUMNS), lineterminator='\n')
+    writer.writeheader()
+    for time_utc in sorted_times:
+        writer.writerow(rows_by_time[time_utc])
+    cleaned = output.getvalue()
+    changed = dropped_duplicates > 0 or reordered or truncated
+    if changed:
+        if not cleaned.endswith('\n'):
+            cleaned += '\n'
+    else:
+        cleaned = raw_text
+    return SensorCsvSanitizeResult(
+        raw_text=cleaned,
+        changed=changed,
+        dropped_duplicates=dropped_duplicates,
+        reordered=reordered,
+        truncated=truncated,
+        row_count=len(sorted_times),
+    )
 
 def validate_sensor_csv(raw_text: str) -> ValidationResult:
     errors: list[str] = []

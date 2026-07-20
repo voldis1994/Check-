@@ -249,7 +249,9 @@ def startup(*, root_path: str | Path | None=None, config_path: str | Path | None
         if definition.enabled:
             paths.ensure_account_directories(definition.account_id)
     system_logger = setup_system_logger(paths, level=config.logging.level, format_name=config.logging.format)
-    log_event(system_logger, level='INFO', module=MODULE_NAME, message='startup begin')
+    from engine.core.version import read_system_version
+    system_version = read_system_version(paths.root)
+    log_event(system_logger, level='INFO', module=MODULE_NAME, message=f'startup begin version={system_version}')
     instances = discover_instances(config, paths)
     if wait_for_mt4_seconds > 0:
         try:
@@ -301,9 +303,11 @@ def shutdown(runtime: LiveRuntime) -> int:
 
 def print_live_startup_banner(runtime: LiveRuntime, instances: tuple[Instance, ...]) -> None:
     import os
+    from engine.core.version import read_system_version
     ai_mode = runtime.config.ai.mode
     ai_key = 'yes' if os.getenv('OPENAI_API_KEY') else 'missing'
-    print(f'SYSTEM live started: root={runtime.paths.root}', flush=True)
+    system_version = read_system_version(runtime.paths.root)
+    print(f'SYSTEM v{system_version} live started: root={runtime.paths.root}', flush=True)
     print(f'instances={len(instances)} cycle_interval_ms={runtime.config.runtime.cycle_interval_ms} stale_threshold_ms={runtime.config.runtime.data_stale_threshold_ms} closed_bar_entries={runtime.config.runtime.execute_entries_on_closed_bar_only} python_close={runtime.config.trade_management.allow_close} ai_mode={ai_mode} openai_key={ai_key} trail_lookback={runtime.config.trade_management.trailing_lookback_bars} trail_pips={runtime.config.trade_management.trailing_step_pips}', flush=True)
     print(f'logs={runtime.paths.logs_dir}', flush=True)
     for instance in instances:
