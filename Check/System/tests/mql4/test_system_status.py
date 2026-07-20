@@ -22,6 +22,7 @@ def test_system_get_protocol_schema_version_matches_protocol(status_source: str)
 def test_system_get_ea_version_returns_non_empty_value(status_source: str) -> None:
     version = mql_source.parse_define(status_source, 'SYSTEM_EA_VERSION')
     assert version
+    assert version == status_reference.ea_version()
     body = mql_source.function_body(status_source, 'SYSTEM_GetEaVersion')
     assert 'SYSTEM_EA_VERSION' in body
 

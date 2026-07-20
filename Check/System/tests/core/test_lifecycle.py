@@ -297,7 +297,8 @@ def test_run_live_main_prints_startup_banner(tmp_path: Path, capsys: pytest.Capt
     exit_code = run_live_main(root_path=root, config_path=config_path, require_mt4_exports=True, wait_for_shutdown=lambda runtime: request_shutdown(runtime))
     captured = capsys.readouterr()
     assert exit_code == STARTUP_EXIT_CODE
-    assert 'SYSTEM live started' in captured.out
+    assert 'live started' in captured.out
+    assert 'SYSTEM v' in captured.out
 
 def test_print_live_cycle_summary_shows_skip_reason(capsys: pytest.CaptureFixture[str]) -> None:
     from engine.core.cycle import InstanceCycleResult

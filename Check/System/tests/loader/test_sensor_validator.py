@@ -33,3 +33,35 @@ def test_sensor_validator_spread_points_mismatch_invalid() -> None:
     result = validate_sensor_csv(raw_text)
     assert not result.is_valid
     assert any(('spread_points must equal spread / point' in error for error in result.errors))
+
+def test_sanitize_sensor_csv_repairs_out_of_order_and_duplicates() -> None:
+    from engine.validator.sensor_validator import sanitize_sensor_csv
+    raw_text = (
+        'time_utc,bid,ask,spread,spread_points,symbol,digits,point\n'
+        '2026-07-07T06:00:01.000Z,1.08510,1.08530,0.00020,20,EURUSD,5,0.00001\n'
+        '2026-07-07T06:00:00.000Z,1.08500,1.08520,0.00020,20,EURUSD,5,0.00001\n'
+        '2026-07-07T06:00:00.000Z,1.08505,1.08525,0.00020,20,EURUSD,5,0.00001\n'
+    )
+    sanitized = sanitize_sensor_csv(raw_text)
+    assert sanitized.changed is True
+    assert sanitized.dropped_duplicates == 1
+    assert sanitized.reordered is True
+    assert sanitized.row_count == 2
+    validated = validate_sensor_csv(sanitized.raw_text)
+    assert validated.is_valid
+    lines = [line for line in sanitized.raw_text.splitlines() if line.strip()]
+    assert lines[1].startswith('2026-07-07T06:00:00.000Z,1.08505')
+    assert lines[2].startswith('2026-07-07T06:00:01.000Z')
+
+def test_sanitize_sensor_csv_truncates_to_max_rows() -> None:
+    from engine.validator.sensor_validator import sanitize_sensor_csv
+    header = 'time_utc,bid,ask,spread,spread_points,symbol,digits,point'
+    rows = [f'2026-07-07T06:00:{i:02d}.000Z,1.08500,1.08520,0.00020,20,EURUSD,5,0.00001' for i in range(5)]
+    raw_text = header + '\n' + '\n'.join(rows) + '\n'
+    sanitized = sanitize_sensor_csv(raw_text, max_rows=2)
+    assert sanitized.changed is True
+    assert sanitized.truncated is True
+    assert sanitized.row_count == 2
+    lines = [line for line in sanitized.raw_text.splitlines() if line.strip()]
+    assert lines[1].startswith('2026-07-07T06:00:03.000Z')
+    assert lines[2].startswith('2026-07-07T06:00:04.000Z')
