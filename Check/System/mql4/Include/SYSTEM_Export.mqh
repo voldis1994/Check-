@@ -178,7 +178,15 @@ bool SYSTEM_ReadTextFile(const string path, string &content)
 
 bool SYSTEM_CsvContainsTimeUtc(const string csv_content, const string time_utc)
 {
-   return StringFind(csv_content, time_utc, 0) >= 0;
+   // Match only as a CSV row key (start of file or after newline), not as a substring
+   // inside another timestamp / field — avoids false dedupe and later out-of-order appends.
+   if(StringLen(time_utc) == 0)
+      return false;
+   string needle = time_utc + ",";
+   if(StringFind(csv_content, needle, 0) == 0)
+      return true;
+   string lined = "\n" + needle;
+   return StringFind(csv_content, lined, 0) >= 0;
 }
 
 string SYSTEM_AppendCsvRow(const string csv_content, const string header, const string row)

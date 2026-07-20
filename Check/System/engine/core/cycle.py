@@ -290,10 +290,20 @@ def load_instance_cycle_data(paths: SystemPaths, instance: Instance, *, use_glob
     return InstanceCycleData(market_raw=load_market_data(paths, instance, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context), sensor_raw=load_sensor_data(paths, instance, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context), status_raw=load_status_data(paths, instance.account_id, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context), universe_raw=load_universe_data(paths, instance.account_id, use_global_universe=resolved_use_global, cache=cache, retry_policy=retry_policy, retry_alert_context=retry_alert_context))
 
 def validate_market_for_cycle(market_raw: RawMarketData) -> tuple[NormalizedMarketBar, ...] | ValidationResult:
-    validation = validate_market_csv(market_raw.raw_text)
+    from engine.core.atomic_io import atomic_write_text
+    from engine.validator.market_validator import sanitize_market_csv
+    sanitized = sanitize_market_csv(market_raw.raw_text)
+    raw_text = sanitized.raw_text
+    if sanitized.changed:
+        try:
+            atomic_write_text(market_raw.file_path, raw_text)
+        except OSError:
+            # Still attempt the cycle on the cleaned in-memory copy.
+            pass
+    validation = validate_market_csv(raw_text)
     if not validation.is_valid:
         return validation
-    return normalize_market_csv(market_raw.raw_text)
+    return normalize_market_csv(raw_text)
 
 def validate_sensor_for_cycle(sensor_raw: RawSensorData) -> SensorReading | ValidationResult:
     validation = validate_sensor_csv(sensor_raw.raw_text)

@@ -34,3 +34,32 @@ def test_market_validator_duplicate_times_are_invalid() -> None:
     result = validate_market_csv(raw_text)
     assert not result.is_valid
     assert any(('duplicate time_utc' in error for error in result.errors))
+
+def test_sanitize_market_csv_repairs_out_of_order_and_duplicates() -> None:
+    from engine.validator.market_validator import sanitize_market_csv
+    raw_text = (
+        'time_utc,open,high,low,close,volume,symbol,timeframe,digits,point\n'
+        '2026-07-07T06:02:00.000Z,1.08700,1.08800,1.08600,1.08750,100,EURUSD,M1,5,0.00001\n'
+        '2026-07-07T06:00:00.000Z,1.08500,1.08600,1.08400,1.08550,120,EURUSD,M1,5,0.00001\n'
+        '2026-07-07T06:00:00.000Z,1.08510,1.08610,1.08410,1.08560,121,EURUSD,M1,5,0.00001\n'
+        '2026-07-07T06:01:00.000Z,1.08600,1.08700,1.08500,1.08650,110,EURUSD,M1,5,0.00001\n'
+    )
+    sanitized = sanitize_market_csv(raw_text)
+    assert sanitized.changed is True
+    assert sanitized.dropped_duplicates == 1
+    assert sanitized.reordered is True
+    assert sanitized.row_count == 3
+    validated = validate_market_csv(sanitized.raw_text)
+    assert validated.is_valid
+    lines = [line for line in sanitized.raw_text.splitlines() if line.strip()]
+    assert lines[1].startswith('2026-07-07T06:00:00.000Z,1.08510')
+    assert lines[2].startswith('2026-07-07T06:01:00.000Z')
+    assert lines[3].startswith('2026-07-07T06:02:00.000Z')
+
+def test_sanitize_market_csv_no_change_when_already_ordered() -> None:
+    from engine.validator.market_validator import sanitize_market_csv
+    raw_text = (FIXTURES_DIR / 'market_valid.csv').read_text(encoding='utf-8')
+    sanitized = sanitize_market_csv(raw_text)
+    assert sanitized.changed is False
+    assert sanitized.dropped_duplicates == 0
+    assert sanitized.reordered is False

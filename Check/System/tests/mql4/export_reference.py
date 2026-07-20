@@ -36,7 +36,12 @@ def build_sensor_csv_row(*, time_utc: str, bid: float, ask: float, symbol: str, 
     return ','.join([time_utc, format_csv_number(bid, digits), format_csv_number(ask, digits), format_csv_number(spread, digits), format_csv_number(spread_points, 0), symbol, str(digits), format_csv_number(point, digits)])
 
 def csv_contains_time_utc(csv_content: str, time_utc: str) -> bool:
-    return time_utc in csv_content
+    if not time_utc:
+        return False
+    needle = f'{time_utc},'
+    if csv_content.startswith(needle):
+        return True
+    return f'\n{needle}' in csv_content
 
 def append_csv_row(csv_content: str, header: str, row: str) -> str:
     time_utc = row.split(',', 1)[0]
