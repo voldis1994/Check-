@@ -1,8 +1,8 @@
 # Check System (M1)
 
-Python + MT4 live trading system. **Versija 1.1.0.**
+Python + MT4 live trading system. **Versija 1.1.1.**
 
-## Kas ir iekšā (v1.1.0)
+## Kas ir iekšā (v1.1.1)
 
 - M1 entry (BUY/SELL scores, closed-bar gate, optional ranging chase)
 - Universal trailing (AI + money-step) ar `use_fixed_take_profit` atbalstu
@@ -34,6 +34,6 @@ python -m pytest -q
 
 ## Dokumentācija
 
-- [RELEASE_NOTES.md](RELEASE_NOTES.md) — v1.1.0 izmaiņas
+- [RELEASE_NOTES.md](RELEASE_NOTES.md) — v1.1.1 izmaiņas
 - [docs/PATH_CONTRACT.md](docs/PATH_CONTRACT.md)
 - [docs/WINDOWS_LIVE.md](docs/WINDOWS_LIVE.md)

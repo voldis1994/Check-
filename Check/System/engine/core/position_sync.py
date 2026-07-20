@@ -15,6 +15,9 @@ from engine.state.instance_state import InstanceState
 MODULE_NAME = 'core.position_sync'
 # Allow broker clock skew / file lag vs pending_execution_since_utc.
 PENDING_OPEN_TIME_TOLERANCE_MS = 5000
+# After ACK timeout, if broker status stays flat this long, abandon pending OPEN
+# so live entries are not blocked forever by a stuck pending_command_id.
+PENDING_OPEN_FLAT_ABANDON_MS = 60000
 VOLUME_MATCH_TOLERANCE = 1e-09
 
 def _parse_utc_timestamp(value: str) -> datetime:
@@ -23,6 +26,16 @@ def _parse_utc_timestamp(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+def _pending_open_age_ms(instance_state: InstanceState, timestamp_utc: str) -> int | None:
+    since = instance_state.pending_execution_since_utc
+    if not isinstance(since, str) or not since.strip():
+        return None
+    try:
+        age_seconds = (_parse_utc_timestamp(timestamp_utc) - _parse_utc_timestamp(since)).total_seconds()
+    except ValueError:
+        return None
+    return int(age_seconds * 1000.0)
 
 @dataclass(frozen=True)
 class PositionSyncResult:
@@ -294,6 +307,36 @@ def _mark_position_close_pending(instance_state: InstanceState, *, timestamp_utc
         return
     instance_state.set_close_pending(ticket=instance_state.open_ticket, side=instance_state.position_side, volume=instance_state.position_volume, since_utc=timestamp_utc)
 
+def _abandon_stale_flat_pending_open(
+    paths: SystemPaths,
+    instance: Instance,
+    instance_state: InstanceState,
+    *,
+    timestamp_utc: str,
+    age_ms: int,
+) -> None:
+    reason = build_reason(
+        REASON_EXECUTION_OUTCOME_UNRESOLVED,
+        'abandoning stale pending OPEN; broker status flat after grace period',
+        pending_command_id=instance_state.pending_execution_command_id,
+        pending_age_ms=age_ms,
+        abandon_after_ms=PENDING_OPEN_FLAT_ABANDON_MS,
+    )
+    log_error(
+        paths,
+        instance,
+        module=MODULE_NAME,
+        error_type=ErrorType.EXECUTION.value,
+        message='stale pending OPEN cleared because broker remained flat',
+        context={
+            'reason': reason,
+            'pending_command_id': instance_state.pending_execution_command_id,
+            'pending_age_ms': age_ms,
+            'abandon_after_ms': PENDING_OPEN_FLAT_ABANDON_MS,
+        },
+    )
+    instance_state.clear_pending_execution()
+
 def _reconcile_pending_open(
     paths: SystemPaths,
     instance: Instance,
@@ -301,6 +344,7 @@ def _reconcile_pending_open(
     matches: tuple[StatusPositionSnapshot, ...],
     *,
     timestamp_utc: str,
+    broker_connected: bool = True,
 ) -> tuple[bool, bool, bool]:
     """Returns (changed, broker_execution_confirmed, ambiguous_pending)."""
     candidates = tuple((position for position in matches if _status_matches_pending_open(instance_state, position)))
@@ -328,7 +372,14 @@ def _reconcile_pending_open(
             context={'reason': reason, 'candidate_tickets': tickets, 'pending_command_id': instance_state.pending_execution_command_id},
         )
         return (True, False, True)
-    # No safe match: keep pending / unresolved. Do not adopt by symbol/magic/side/volume alone.
+    # No safe match. If broker is connected and flat long enough, abandon stuck pending
+    # so ENTRY is not blocked forever after ACK timeout with no fill.
+    if not matches and broker_connected:
+        age_ms = _pending_open_age_ms(instance_state, timestamp_utc)
+        if age_ms is not None and age_ms >= PENDING_OPEN_FLAT_ABANDON_MS:
+            _abandon_stale_flat_pending_open(paths, instance, instance_state, timestamp_utc=timestamp_utc, age_ms=age_ms)
+            return (True, False, False)
+    # Keep pending / unresolved. Do not adopt by symbol/magic/side/volume alone.
     if matches:
         reason = build_reason(
             REASON_EXECUTION_OUTCOME_UNRESOLVED,
@@ -435,7 +486,12 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
             changed = _apply_status_position_to_state(instance_state, status_position, preserve_bars=True) or changed
     elif instance_state.pending_execution_command_id is not None:
         pend_changed, broker_execution_confirmed, ambiguous_pending = _reconcile_pending_open(
-            paths, instance, instance_state, matches, timestamp_utc=timestamp_utc
+            paths,
+            instance,
+            instance_state,
+            matches,
+            timestamp_utc=timestamp_utc,
+            broker_connected=bool(status.connected),
         )
         changed = changed or pend_changed
     elif status_position is not None:
