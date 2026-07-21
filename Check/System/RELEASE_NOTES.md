@@ -1,12 +1,12 @@
-# SYSTEM v1.1.2
+# SYSTEM v1.1.3
 
-Hotfix (2026-07-21): trailing + lockpoint.
+Hotfix (2026-07-21): MetaEditor compile — `function not defined`.
 
 ## Hotfix
-- Tehniskais trailing (`trailing_step_pips`) vairs netiek nogalināts, ja money-step nevar rēķināt (nav `tick_value`)
-- Lockpoint (`money_step_trailing`) live config: activation `0.50`, step/lock `0.25` (0.01 lot)
-- MODIFY trailing vairs netiek bloķēts aiz iesprūduša OPEN control faila
-- MODIFY ACK vairs netīra pending OPEN identity
+- Explicit `#include <SYSTEM_Status.mqh>` EA failā
+- Include ķēde izmanto `"SYSTEM_*.mqh"` (same-folder), lai neņemtu vecus headerus
+- `FIX_MT4` / copy script pārbauda `SYSTEM_LoadProcessedCommandId` + `SYSTEM_ExportClosedTrade`
+- Print warning: `IntegerToString(magic)`
 
 ## Deploy
 
@@ -17,6 +17,8 @@ UZSTADIT.bat
 FIX_MT4.bat
 ```
 
-MetaEditor → `SYSTEM_EA.mq4` → **F7** → attach → `PALAID.bat`
-
-Pārbaudi `config\\system.json` → `trade_management.money_step_trailing` vērtības **> 0**.
+1. Aizver MetaEditor
+2. Palaid `FIX_MT4.bat` (jābūt OK abām funkcijām)
+3. Atver **tikait** `Experts\SYSTEM_EA.mq4` no MT4 Data Folder
+4. F7 → **0 errors**
+5. Attach EURUSD M1 → `PALAID.bat`

@@ -3,7 +3,7 @@
 
 #property strict
 
-#include <SYSTEM_Status.mqh>
+#include "SYSTEM_Status.mqh"
 
 #define SYSTEM_CONTROL_FILENAME_TEMPLATE "control_%s_%d.json"
 #define SYSTEM_ACTION_OPEN "OPEN"

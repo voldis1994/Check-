@@ -1,12 +1,13 @@
 #property copyright "SYSTEM"
 #property link      "https://github.com/voldis1994/Check-"
-#property version   "1.12"
+#property version   "1.13"
 #property strict
 
 input int MagicNumber = 100001;
 input string SystemRootPath = "";
 
 #include <SYSTEM_Execution.mqh>
+#include <SYSTEM_Status.mqh>
 #include <SYSTEM_Universe.mqh>
 
 datetime g_last_exported_bar_time = 0;
@@ -50,13 +51,13 @@ void OnTick()
    if(elapsed_ms >= (uint)g_sensor_status_export_interval_ms)
    {
       if(!SYSTEM_ExportSensorReading(account_id, symbol, magic))
-         Print("SYSTEM sensor export failed for ", symbol, " magic=", magic);
+         Print("SYSTEM sensor export failed for ", symbol, " magic=", IntegerToString(magic));
 
       if(!SYSTEM_ExportStatus(account_id, symbol, magic))
          Print("SYSTEM status export failed for account ", account_id);
 
       if(!SYSTEM_ExportClosedTrade(account_id, symbol, magic))
-         Print("SYSTEM closed trade export failed for ", symbol, " magic=", magic);
+         Print("SYSTEM closed trade export failed for ", symbol, " magic=", IntegerToString(magic));
 
       g_last_sensor_status_export_ms = now_ms;
    }
@@ -65,7 +66,7 @@ void OnTick()
    {
       if(!SYSTEM_ExportMarketBar(account_id, symbol, magic, 1))
       {
-         Print("SYSTEM market export failed for ", symbol, " magic=", magic);
+         Print("SYSTEM market export failed for ", symbol, " magic=", IntegerToString(magic));
          return;
       }
 
