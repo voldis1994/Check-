@@ -3,7 +3,7 @@
 
 #property strict
 
-#include "SYSTEM_Paths.mqh"
+#include <SYSTEM_Paths.mqh>
 
 #define SYSTEM_GENERIC_WRITE 0x40000000
 #define SYSTEM_CREATE_ALWAYS 2
