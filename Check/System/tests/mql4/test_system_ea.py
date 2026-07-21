@@ -23,6 +23,12 @@ def test_system_ea_includes_execution_module(ea_source: str) -> None:
     assert '#include <SYSTEM_Status.mqh>' in ea_source
     assert '#include <SYSTEM_Universe.mqh>' in ea_source
 
+def test_system_headers_use_angle_bracket_includes() -> None:
+    """MQL4 quote-includes resolve vs Experts\\; SYSTEM headers must use Include\\ via <>."""
+    for path in sorted(mql_source.MQL4_INCLUDE_DIR.glob('SYSTEM_*.mqh')):
+        text = path.read_text(encoding='utf-8')
+        assert '#include "SYSTEM_' not in text, f'{path.name} must use #include <SYSTEM_*.mqh>'
+
 def test_system_ea_requires_m1_timeframe_on_init(ea_source: str) -> None:
     assert 'Period()' in ea_source
     assert 'PERIOD_M1' in ea_source

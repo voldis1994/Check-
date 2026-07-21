@@ -3,7 +3,7 @@
 
 #property strict
 
-#include "SYSTEM_Status.mqh"
+#include <SYSTEM_Status.mqh>
 
 #define SYSTEM_UNIVERSE_FILENAME "universe.json"
 #define SYSTEM_SESSION_ASIA "ASIA"

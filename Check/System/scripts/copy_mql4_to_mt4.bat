@@ -105,7 +105,8 @@ if "%MISSING%"=="1" (
 )
 
 echo Gatavs. MetaEditor: aizver visus SYSTEM_*.mqh tabus, atver Experts\SYSTEM_EA.mq4 un F7.
-echo Jābūt 0 errors. Ja vēl "function not defined" — nepareizs Terminal HASH / veci Include.
+echo Jābūt 0 errors. Ja "can't open Include" — palaid FIX_MT4.bat (kopē uz VISĀM Terminal mapēm).
+echo Nested includes lieto #include ^<SYSTEM_*.mqh^> (nevis quotes — quotes meklē Experts\).
 echo.
 echo EA chartā: SystemRootPath = %SYSTEM_ROOT%
 echo            MagicNumber = kā config\system.json instances[].magic

@@ -72,10 +72,10 @@ echo    DASHBOARD.bat
 echo.
 echo  MT4 (vienreiz — Obligati gan Experts, gan Include):
 echo    FIX_MT4.bat
-echo      ^(automatiski mekle %%APPDATA%%\MetaQuotes\Terminal\*\MQL4^)
+echo      ^(kopē uz VISĀM %%APPDATA%%\MetaQuotes\Terminal\*\MQL4^)
 echo    MetaEditor: F7 Compile SYSTEM_EA.mq4  ^(0 errors^)
 echo    EA: Allow DLL imports=YES, SystemRootPath=%ROOT%
-echo    Ja "can't open ...\Include\SYSTEM_..." — palaid FIX_MT4.bat atkartoti.
+echo    Ja "can't open ...\Include\SYSTEM_..." — aizver MetaEditor, FIX_MT4.bat atkartoti.
 echo.
 echo  Vairaki konti viena PC: KONTI.bat
 echo    ^(katram kontam savs MT4 terminalis + cits MagicNumber^)

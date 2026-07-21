@@ -3,10 +3,10 @@
 
 #property strict
 
-#include "SYSTEM_Export.mqh"
+#include <SYSTEM_Export.mqh>
 
 #define SYSTEM_PROTOCOL_SCHEMA_VERSION "1.0.0"
-#define SYSTEM_EA_VERSION "1.1.3"
+#define SYSTEM_EA_VERSION "1.1.4"
 #define SYSTEM_STATUS_FILENAME_TEMPLATE "status_%s.json"
 #define SYSTEM_CLOSED_FILENAME_TEMPLATE "closed_%s_%d.json"
 

@@ -3,7 +3,7 @@
 
 #property strict
 
-#include "SYSTEM_RootConfig.mqh"
+#include <SYSTEM_RootConfig.mqh>
 
 #define SYSTEM_CLIENTS_RELATIVE_PATH "data\\clients"
 #define SYSTEM_LOGS_RELATIVE_PATH "data\\logs"
