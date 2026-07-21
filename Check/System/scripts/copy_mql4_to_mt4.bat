@@ -81,13 +81,31 @@ if exist "%MT4_ROOT%\Experts\SYSTEM_EA.mq4" (
 )
 
 echo.
+echo === FUNKCIJU PARBAUDE ^(veci Include = MetaEditor errors^) ===
+findstr /C:"SYSTEM_LoadProcessedCommandId" "%MT4_ROOT%\Include\SYSTEM_Execution.mqh" >nul
+if errorlevel 1 (
+  echo   NAV SYSTEM_LoadProcessedCommandId iekša Include\SYSTEM_Execution.mqh
+  set "MISSING=1"
+) else (
+  echo   OK  SYSTEM_LoadProcessedCommandId
+)
+findstr /C:"SYSTEM_ExportClosedTrade" "%MT4_ROOT%\Include\SYSTEM_Status.mqh" >nul
+if errorlevel 1 (
+  echo   NAV SYSTEM_ExportClosedTrade iekša Include\SYSTEM_Status.mqh
+  set "MISSING=1"
+) else (
+  echo   OK  SYSTEM_ExportClosedTrade
+)
+
+echo.
 if "%MISSING%"=="1" (
-  echo [KLUDA] Trūkst failu. Pārbaudi, ka MT4 ceļš ir pareizā Terminal MQL4 mape.
+  echo [KLUDA] Trūkst failu/funkciju. Pārbaudi, ka MT4 ceļš ir pareizā Terminal MQL4 mape.
+  echo Tad aizver MetaEditor, palaid FIX_MT4.bat vēlreiz, atver Experts\SYSTEM_EA.mq4 un F7.
   exit /b 1
 )
 
-echo Gatavs. MetaEditor: atver Experts\SYSTEM_EA.mq4 un spied F7 (Compile).
-echo Jābūt 0 errors. Ja vēl "can't open Include" — nepareizs Terminal HASH ceļš.
+echo Gatavs. MetaEditor: aizver visus SYSTEM_*.mqh tabus, atver Experts\SYSTEM_EA.mq4 un F7.
+echo Jābūt 0 errors. Ja vēl "function not defined" — nepareizs Terminal HASH / veci Include.
 echo.
 echo EA chartā: SystemRootPath = %SYSTEM_ROOT%
 echo            MagicNumber = kā config\system.json instances[].magic

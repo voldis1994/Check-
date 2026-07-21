@@ -9,7 +9,7 @@ def io_source() -> str:
     return mql_source.load_mqh('SYSTEM_IO.mqh')
 
 def test_system_io_includes_system_paths(io_source: str) -> None:
-    assert '#include <SYSTEM_Paths.mqh>' in io_source
+    assert '#include "SYSTEM_Paths.mqh"' in io_source
 
 def test_system_io_public_functions_are_defined(io_source: str) -> None:
     expected = {'SYSTEM_TmpPathFor', 'SYSTEM_ParentDirectory', 'SYSTEM_AtomicWriteText'}

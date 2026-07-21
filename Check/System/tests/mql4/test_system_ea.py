@@ -20,6 +20,8 @@ def test_system_ea_configures_root_path_when_input_set(ea_source: str) -> None:
 
 def test_system_ea_includes_execution_module(ea_source: str) -> None:
     assert '#include <SYSTEM_Execution.mqh>' in ea_source
+    assert '#include <SYSTEM_Status.mqh>' in ea_source
+    assert '#include <SYSTEM_Universe.mqh>' in ea_source
 
 def test_system_ea_requires_m1_timeframe_on_init(ea_source: str) -> None:
     assert 'Period()' in ea_source

@@ -3,8 +3,8 @@
 
 #property strict
 
-#include <SYSTEM_Control.mqh>
-#include <SYSTEM_Status.mqh>
+#include "SYSTEM_Control.mqh"
+#include "SYSTEM_Status.mqh"
 
 #define SYSTEM_ACK_FILENAME_TEMPLATE "ack_%s_%d.json"
 #define SYSTEM_PROCESSED_CMD_FILENAME_TEMPLATE "processed_cmd_%s_%d.txt"
