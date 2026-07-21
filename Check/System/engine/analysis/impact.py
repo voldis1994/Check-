@@ -24,7 +24,8 @@ def analyze_impact(*, context: AnalysisContext, structure: StructureAnalysis, mo
     elif structure.structure_bias == 'NEUTRAL' or momentum.trend_direction == 'SIDEWAYS':
         direction_alignment = 0.5
     pressure_balance = 1.0 - min(1.0, abs(pressure.pressure_delta))
-    momentum_component = (momentum.momentum_score + 1.0) / 2.0
+    # Direction-neutral strength: do not bias impact toward BUY in downtrends.
+    momentum_component = abs(momentum.momentum_score)
     behavior_component = behavior.behavior_score
     context_component = context.context_quality
     structure_component = direction_alignment
