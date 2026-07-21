@@ -23,6 +23,15 @@ def calculate_recent_price_delta(*, market_bars: tuple[NormalizedMarketBar, ...]
     return window[-1].close - window[0].close
 
 def evaluate_ranging_entry_filter(*, regime: str, market_bars: tuple[NormalizedMarketBar, ...], side: str, structure_lookback_bars: int, block_ranging_chase_entries: bool, ranging_extreme_threshold: float, ranging_recent_momentum_bars: int) -> str | None:
+    """Block wrong-way ranging entries without freezing the whole session.
+
+    BUY is rejected near the range top, or when price is already selling in the
+    upper half (buy-on-sell). SELL is rejected near the range bottom, or when
+    price is already buying in the lower half (sell-on-buy).
+
+    Adverse micro-moves at the *correct* extreme stay allowed (dip buy near
+    bottom / rip sell near top) so ranging sessions can still trade.
+    """
     if not block_ranging_chase_entries:
         return None
     if regime != MarketRegime.RANGING.value:
@@ -35,11 +44,11 @@ def evaluate_ranging_entry_filter(*, regime: str, market_bars: tuple[NormalizedM
     if side == 'buy':
         if range_position > ranging_extreme_threshold:
             return build_reason(REASON_DATA_INVALID, 'ranging: buy blocked near range top after up-leg', range_position=range_position, threshold=ranging_extreme_threshold)
-        if recent_delta < 0:
-            return build_reason(REASON_DATA_INVALID, 'ranging: buy blocked while recent move is down', recent_delta=recent_delta)
+        if recent_delta < 0 and range_position >= 0.5:
+            return build_reason(REASON_DATA_INVALID, 'ranging: buy blocked while recent move is down', recent_delta=recent_delta, range_position=range_position)
         return None
     if range_position < lower_bound:
         return build_reason(REASON_DATA_INVALID, 'ranging: sell blocked near range bottom after down-leg', range_position=range_position, threshold=lower_bound)
-    if recent_delta > 0:
-        return build_reason(REASON_DATA_INVALID, 'ranging: sell blocked while recent move is up', recent_delta=recent_delta)
+    if recent_delta > 0 and range_position <= 0.5:
+        return build_reason(REASON_DATA_INVALID, 'ranging: sell blocked while recent move is up', recent_delta=recent_delta, range_position=range_position)
     return None

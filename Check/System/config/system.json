@@ -49,7 +49,7 @@
     "volatility_relative_threshold": 2.5,
     "block_high_impact_news": false,
     "stop_loss_buffer": 0.0002,
-    "block_ranging_chase_entries": false,
+    "block_ranging_chase_entries": true,
     "ranging_extreme_threshold": 0.65,
     "ranging_recent_momentum_bars": 3,
     "weights": {

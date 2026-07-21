@@ -32,6 +32,37 @@ def _range_top_after_up_leg() -> tuple[NormalizedMarketBar, ...]:
 def _range_bottom_after_down_leg() -> tuple[NormalizedMarketBar, ...]:
     return (_bar(0, 1.1030, 1.1035, 1.1028, 1.1030), _bar(1, 1.1030, 1.1032, 1.1018, 1.1020), _bar(2, 1.1020, 1.1022, 1.1008, 1.1010), _bar(3, 1.1010, 1.1012, 1.0998, 1.1000), _bar(4, 1.1000, 1.1002, 1.0994, 1.0996))
 
+def _range_top_with_sell_started() -> tuple[NormalizedMarketBar, ...]:
+    return (_bar(0, 1.1000, 1.1005, 1.0995, 1.1000), _bar(1, 1.1000, 1.1015, 1.0998, 1.1010), _bar(2, 1.1010, 1.1025, 1.1008, 1.1020), _bar(3, 1.1020, 1.1032, 1.1018, 1.1030), _bar(4, 1.1030, 1.1032, 1.1024, 1.1026), _bar(5, 1.1026, 1.1028, 1.1020, 1.1022), _bar(6, 1.1022, 1.1024, 1.1016, 1.1018))
+
+def _upper_half_selling() -> tuple[NormalizedMarketBar, ...]:
+    # Wide range, price still in upper half, recent bars turning down (buy-on-sell).
+    return (
+        _bar(0, 1.1000, 1.1005, 1.0995, 1.1000),
+        _bar(1, 1.1000, 1.1010, 1.0998, 1.1008),
+        _bar(2, 1.1008, 1.1020, 1.1005, 1.1018),
+        _bar(3, 1.1018, 1.1035, 1.1015, 1.1032),
+        _bar(4, 1.1032, 1.1036, 1.1026, 1.1028),
+        _bar(5, 1.1028, 1.1030, 1.1022, 1.1024),
+        _bar(6, 1.1024, 1.1026, 1.1018, 1.1020),
+    )
+
+def _lower_half_buying() -> tuple[NormalizedMarketBar, ...]:
+    # Wide range, price in lower half, recent bars turning up (sell-on-buy).
+    return (
+        _bar(0, 1.1030, 1.1035, 1.1028, 1.1030),
+        _bar(1, 1.1030, 1.1032, 1.1018, 1.1020),
+        _bar(2, 1.1020, 1.1022, 1.1008, 1.1010),
+        _bar(3, 1.1010, 1.1012, 1.0995, 1.0998),
+        _bar(4, 1.0998, 1.1005, 1.0996, 1.1002),
+        _bar(5, 1.1002, 1.1008, 1.1000, 1.1006),
+        _bar(6, 1.1006, 1.1012, 1.1004, 1.1010),
+    )
+
+def _bottom_dip_buy() -> tuple[NormalizedMarketBar, ...]:
+    # Near range bottom with recent down move — mean-reversion BUY must stay allowed.
+    return _range_bottom_after_down_leg()
+
 def test_ranging_filter_blocks_buy_near_range_top() -> None:
     bars = _range_top_after_up_leg()
     reason = evaluate_ranging_entry_filter(regime='ranging', market_bars=bars, side='buy', structure_lookback_bars=5, block_ranging_chase_entries=True, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
@@ -44,14 +75,22 @@ def test_ranging_filter_blocks_sell_near_range_bottom() -> None:
     assert reason is not None
     assert 'range bottom' in reason
 
-def test_ranging_filter_blocks_buy_when_recent_move_is_down() -> None:
-    bars = (_bar(0, 1.1010, 1.1015, 1.1005, 1.1010), _bar(1, 1.1010, 1.1012, 1.1000, 1.1005), _bar(2, 1.1005, 1.1008, 1.0995, 1.0998), _bar(3, 1.0998, 1.1000, 1.0990, 1.0992), _bar(4, 1.0992, 1.0994, 1.0988, 1.0990))
-    reason = evaluate_ranging_entry_filter(regime='ranging', market_bars=bars, side='buy', structure_lookback_bars=5, block_ranging_chase_entries=True, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
+def test_ranging_filter_blocks_buy_when_selling_in_upper_half() -> None:
+    bars = _upper_half_selling()
+    reason = evaluate_ranging_entry_filter(regime='ranging', market_bars=bars, side='buy', structure_lookback_bars=7, block_ranging_chase_entries=True, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
     assert reason is not None
     assert 'recent move is down' in reason
 
-def _range_top_with_sell_started() -> tuple[NormalizedMarketBar, ...]:
-    return (_bar(0, 1.1000, 1.1005, 1.0995, 1.1000), _bar(1, 1.1000, 1.1015, 1.0998, 1.1010), _bar(2, 1.1010, 1.1025, 1.1008, 1.1020), _bar(3, 1.1020, 1.1032, 1.1018, 1.1030), _bar(4, 1.1030, 1.1032, 1.1024, 1.1026), _bar(5, 1.1026, 1.1028, 1.1020, 1.1022), _bar(6, 1.1022, 1.1024, 1.1016, 1.1018))
+def test_ranging_filter_blocks_sell_when_buying_in_lower_half() -> None:
+    bars = _lower_half_buying()
+    reason = evaluate_ranging_entry_filter(regime='ranging', market_bars=bars, side='sell', structure_lookback_bars=7, block_ranging_chase_entries=True, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
+    assert reason is not None
+    assert 'recent move is up' in reason
+
+def test_ranging_filter_allows_dip_buy_near_range_bottom() -> None:
+    bars = _bottom_dip_buy()
+    reason = evaluate_ranging_entry_filter(regime='ranging', market_bars=bars, side='buy', structure_lookback_bars=5, block_ranging_chase_entries=True, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
+    assert reason is None
 
 def test_ranging_filter_allows_sell_when_recent_move_is_down_at_range_top() -> None:
     bars = _range_top_with_sell_started()
