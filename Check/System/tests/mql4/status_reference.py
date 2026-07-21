@@ -6,7 +6,7 @@ def protocol_schema_version() -> str:
     return PROTOCOL_SCHEMA_VERSION
 
 def ea_version() -> str:
-    return '1.1.4'
+    return '1.1.5'
 
 def format_json_boolean(value: bool) -> str:
     return 'true' if value else 'false'

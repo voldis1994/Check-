@@ -1,15 +1,16 @@
-# SYSTEM v1.1.4
+# SYSTEM v1.1.5
 
-Hotfix (2026-07-21): MetaEditor `can't open ...\Include\SYSTEM_...` / function not defined.
+Hotfix (2026-07-21): false `stale market bar blocks new OPEN` + `ENTRY_DEFERRED` eating bars.
 
-## Root cause
-MQL4 `#include "file.mqh"` meklē **Experts\** (kompilējamā faila mape), nevis Include\.
-v1.1.3 nested quote-includes lauza ķēdi → Paths/Status/Control netika ielādēti.
+## What you saw
+- `bar_content_freshness_ms=108720` + `market_file_freshness_ms=12849` → file live, closed M1 bar open-time ~1.8 min old (normal)
+- `ENTRY_DEFERRED` after HOLD cycles on the same bar
+- Trailing `MODIFY` working (good)
 
-## Hotfix
-- Visi `SYSTEM_*.mqh` nested includes atpakaļ uz `#include <SYSTEM_*.mqh>` (Include\)
-- `FIX_MT4.bat` bez argumentiem kopē uz **visām** `%APPDATA%\MetaQuotes\Terminal\*\MQL4`
-- EA `#property version` = `1.1.4`
+## Fix
+- Closed-bar mode measures bar staleness from **bar close** (open+60s), not open time — 108s open age is not stale
+- `ENTRY_DEFERRED` only after an actual ALLOW OPEN on that bar; HOLD/BLOCK no longer consumes the bar
+- OPEN blockers (stale/status/pending) run **before** closed-bar stamp
 
 ## Deploy
 
@@ -17,16 +18,7 @@ v1.1.3 nested quote-includes lauza ķēdi → Paths/Status/Control netika ielād
 cd C:\Check\System
 git pull
 UZSTADIT.bat
-FIX_MT4.bat
+PALAID.bat
 ```
 
-1. **Aizver MetaEditor** (lai atbrīvotu .mqh)
-2. Palaid `FIX_MT4.bat` — jābūt OK visām Terminal mapēm
-3. MT4 → File → Open Data Folder → `MQL4\Experts\SYSTEM_EA.mq4`
-4. F7 → **0 errors**
-5. Attach EURUSD M1 → `PALAID.bat`
-
-Ja kļūda rāda HASH `C879C699...`, var arī:
-```bat
-FIX_MT4.bat "%APPDATA%\MetaQuotes\Terminal\C879C699A2AEBE2E45B5D3054ECC35E8\MQL4"
-```
+EA compile only needed if MetaEditor still broken (v1.1.4 Include fix).

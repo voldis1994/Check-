@@ -54,6 +54,24 @@ def is_data_stale(freshness_ms: int, threshold_ms: int) -> bool:
         return False
     return freshness_ms > threshold_ms
 
+# M1 closed-bar exports use bar open time; wall-clock age is already >= 60s at close.
+M1_BAR_PERIOD_MS = 60_000
+
+def closed_bar_age_past_close_ms(bar_open_freshness_ms: int, *, bar_period_ms: int = M1_BAR_PERIOD_MS) -> int:
+    """Age of a closed bar relative to its close (open + period), never negative."""
+    return max(0, int(bar_open_freshness_ms) - int(bar_period_ms))
+
+def bar_content_freshness_for_open_gate(
+    bar_open_freshness_ms: int,
+    *,
+    closed_bar_entries: bool,
+    bar_period_ms: int = M1_BAR_PERIOD_MS,
+) -> int:
+    """Freshness used to decide whether market bar content blocks new OPEN."""
+    if closed_bar_entries:
+        return closed_bar_age_past_close_ms(bar_open_freshness_ms, bar_period_ms=bar_period_ms)
+    return max(0, int(bar_open_freshness_ms))
+
 def resolve_instance_health(cycle_result: InstanceCycleResult) -> str:
     if cycle_result.error_logged or not cycle_result.completed:
         return INSTANCE_HEALTH_ERROR
