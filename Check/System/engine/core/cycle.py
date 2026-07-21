@@ -384,12 +384,13 @@ def apply_closed_bar_entry_gate(*, runtime: LiveRuntime, instance_state: Instanc
         return risk_engine_result
     if not market_bar_time_utc:
         return risk_engine_result
-    previous_bar = instance_state.last_seen_market_bar_utc
-    instance_state.last_seen_market_bar_utc = market_bar_time_utc
+    # Do not consume the bar on HOLD/BLOCK — only the first ALLOW OPEN on a new bar stamps it.
     if not should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=risk_engine_result):
         return risk_engine_result
+    previous_bar = instance_state.last_seen_market_bar_utc
     if previous_bar == market_bar_time_utc:
         return RiskEngineResult(result=RiskResult.BLOCK.value, reason=build_reason(REASON_ENTRY_DEFERRED, 'open entry deferred until next closed M1 bar', market_bar_time_utc=market_bar_time_utc), position_size=None, stop_loss=None, take_profit=None)
+    instance_state.last_seen_market_bar_utc = market_bar_time_utc
     return risk_engine_result
 
 def _log_cycle_error(paths: SystemPaths, instance: Instance, *, message: str, context: dict[str, object] | None=None) -> None:
@@ -464,24 +465,27 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'sensor_invalid:{";".join(sensor_result.errors[:2])}')
     sensor_reading = sensor_result
     stale_threshold_ms = runtime.config.runtime.data_stale_threshold_ms
-    from engine.core.monitoring import compute_data_freshness_ms, is_data_stale
+    closed_bar_entries = runtime.config.runtime.execute_entries_on_closed_bar_only
+    from engine.core.monitoring import bar_content_freshness_for_open_gate, compute_data_freshness_ms, is_data_stale
     market_data_utc = format_utc_timestamp(market_bars[-1].time_utc)
     sensor_data_utc = sensor_reading.time_utc
     market_freshness_ms = compute_data_freshness_ms(loaded.market_raw.modified_utc, resolved_timestamp)
     sensor_freshness_ms = compute_data_freshness_ms(loaded.sensor_raw.modified_utc, resolved_timestamp)
     bar_freshness_ms = compute_data_freshness_ms(market_data_utc, resolved_timestamp)
+    open_bar_freshness_ms = bar_content_freshness_for_open_gate(bar_freshness_ms, closed_bar_entries=closed_bar_entries)
     sensor_content_freshness_ms = compute_data_freshness_ms(sensor_data_utc, resolved_timestamp)
     market_file_stale = is_data_stale(market_freshness_ms, stale_threshold_ms)
     sensor_file_stale = is_data_stale(sensor_freshness_ms, stale_threshold_ms)
-    bar_content_stale = is_data_stale(bar_freshness_ms, stale_threshold_ms)
+    # Closed-bar M1 uses bar OPEN time; compare age-past-close so a live 108s-old open time is not false-stale.
+    bar_content_stale = is_data_stale(open_bar_freshness_ms, stale_threshold_ms)
     sensor_content_stale = is_data_stale(sensor_content_freshness_ms, stale_threshold_ms)
     # Full-cycle skip only when market file mtime is unusable; content staleness gates OPEN/trailing below.
     if market_file_stale and sensor_file_stale:
-        stale_reason = f'stale_data:market_file={market_freshness_ms}ms sensor_file={sensor_freshness_ms}ms bar_content={bar_freshness_ms}ms sensor_content={sensor_content_freshness_ms}ms threshold={stale_threshold_ms}ms'
+        stale_reason = f'stale_data:market_file={market_freshness_ms}ms sensor_file={sensor_freshness_ms}ms bar_content={bar_freshness_ms}ms open_bar_freshness={open_bar_freshness_ms}ms sensor_content={sensor_content_freshness_ms}ms threshold={stale_threshold_ms}ms'
         _log_stale_data_skip(runtime.paths, instance, market_freshness_ms=market_freshness_ms, sensor_freshness_ms=sensor_freshness_ms, bar_freshness_ms=bar_freshness_ms, sensor_content_freshness_ms=sensor_content_freshness_ms, threshold_ms=stale_threshold_ms, reason=stale_reason)
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, market_data_utc=market_data_utc, skip_reason=stale_reason)
     if market_file_stale or bar_content_stale or sensor_file_stale or sensor_content_stale:
-        log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='stale data detected; applying precise open/trailing gates', context={'reason': REASON_DATA_INVALID, 'market_file_stale': market_file_stale, 'bar_content_stale': bar_content_stale, 'sensor_file_stale': sensor_file_stale, 'sensor_content_stale': sensor_content_stale, 'market_file_freshness_ms': market_freshness_ms, 'bar_content_freshness_ms': bar_freshness_ms, 'sensor_file_freshness_ms': sensor_freshness_ms, 'sensor_content_freshness_ms': sensor_content_freshness_ms, 'threshold_ms': stale_threshold_ms})
+        log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='stale data detected; applying precise open/trailing gates', context={'reason': REASON_DATA_INVALID, 'market_file_stale': market_file_stale, 'bar_content_stale': bar_content_stale, 'sensor_file_stale': sensor_file_stale, 'sensor_content_stale': sensor_content_stale, 'market_file_freshness_ms': market_freshness_ms, 'bar_content_freshness_ms': bar_freshness_ms, 'open_bar_freshness_ms': open_bar_freshness_ms, 'closed_bar_entries': closed_bar_entries, 'sensor_file_freshness_ms': sensor_freshness_ms, 'sensor_content_freshness_ms': sensor_content_freshness_ms, 'threshold_ms': stale_threshold_ms})
     stale_bar_blocks_open = market_file_stale or bar_content_stale
     stale_sensor_blocks_trailing = sensor_file_stale or sensor_content_stale
     universe_result = validate_universe_for_cycle(loaded.universe_raw)
@@ -574,7 +578,8 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
     except SystemError as exc:
         analysis_duration_ms = monotonic_elapsed_ms(analysis_started)
         return _cycle_result(instance=instance, timestamp_utc=resolved_timestamp, completed=False, error_logged=True, skip_reason=f'decision_error:{exc}')
-    effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=risk_engine_result, market_bar_time_utc=market_data_utc)
+    # Apply OPEN blockers before closed-bar gate so a blocked cycle does not consume the bar.
+    effective_risk = risk_engine_result
     if should_execute_trade(runtime=runtime, decision_result=decision_result, risk_engine_result=effective_risk):
         if instance_memory.instance_state.pending_execution_command_id is not None:
             effective_risk = _block_open_risk_result(build_reason(REASON_EXECUTION_OUTCOME_UNRESOLVED, 'pending execution outcome blocks new OPEN', pending_command_id=instance_memory.instance_state.pending_execution_command_id))
@@ -595,8 +600,9 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
             effective_risk = _block_open_risk_result(build_reason(REASON_INSTANCE_CONFLICT, 'duplicate magic positions anomaly blocks new OPEN'))
             log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.PROTOCOL.value, message='new OPEN blocked due to duplicate position anomaly', context={'reason': REASON_INSTANCE_CONFLICT})
         elif stale_bar_blocks_open:
-            effective_risk = _block_open_risk_result(build_reason(REASON_DATA_INVALID, 'stale market bar blocks new OPEN', bar_content_freshness_ms=bar_freshness_ms, market_file_freshness_ms=market_freshness_ms, threshold_ms=stale_threshold_ms))
-            log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='new OPEN blocked due to stale market bar', context={'reason': REASON_DATA_INVALID, 'bar_content_freshness_ms': bar_freshness_ms, 'market_file_freshness_ms': market_freshness_ms, 'threshold_ms': stale_threshold_ms})
+            effective_risk = _block_open_risk_result(build_reason(REASON_DATA_INVALID, 'stale market bar blocks new OPEN', bar_content_freshness_ms=bar_freshness_ms, open_bar_freshness_ms=open_bar_freshness_ms, market_file_freshness_ms=market_freshness_ms, threshold_ms=stale_threshold_ms, closed_bar_entries=closed_bar_entries))
+            log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='new OPEN blocked due to stale market bar', context={'reason': REASON_DATA_INVALID, 'bar_content_freshness_ms': bar_freshness_ms, 'open_bar_freshness_ms': open_bar_freshness_ms, 'market_file_freshness_ms': market_freshness_ms, 'threshold_ms': stale_threshold_ms, 'closed_bar_entries': closed_bar_entries})
+    effective_risk = apply_closed_bar_entry_gate(runtime=runtime, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, market_bar_time_utc=market_data_utc)
     log_decision(runtime.paths, instance, decision_result, effective_risk, timestamp_utc=resolved_timestamp, ai_meta=ai_meta)
     if timeout_guard.is_exceeded():
         _finalize_cycle_state(instance_memory=instance_memory, runtime=runtime, decision_result=decision_result, timestamp_utc=resolved_timestamp)

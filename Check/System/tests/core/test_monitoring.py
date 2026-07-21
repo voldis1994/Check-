@@ -6,7 +6,7 @@ import pytest
 from engine.core.cycle import InstanceCycleResult
 from engine.core.instance import Instance
 from engine.core.lifecycle import startup
-from engine.core.monitoring import MonitoringState, build_instance_metrics, compute_elapsed_ms, is_data_stale, log_runtime_monitoring_summary, observe_instance_cycle, resolve_instance_health
+from engine.core.monitoring import MonitoringState, bar_content_freshness_for_open_gate, build_instance_metrics, closed_bar_age_past_close_ms, compute_elapsed_ms, is_data_stale, log_runtime_monitoring_summary, observe_instance_cycle, resolve_instance_health
 from engine.core.orchestrator import run_runtime_cycles
 from engine.core.paths import SystemPaths
 from engine.execution.engine import ExecutionResult
@@ -102,3 +102,14 @@ def test_compute_elapsed_ms_is_non_negative() -> None:
 
 def test_is_data_stale_respects_zero_threshold() -> None:
     assert is_data_stale(100000, 0) is False
+
+def test_closed_bar_age_past_close_subtracts_m1_period() -> None:
+    # Live console case: bar open age 108720ms with fresh market file — only 48720ms past close.
+    assert closed_bar_age_past_close_ms(108720) == 48720
+    assert closed_bar_age_past_close_ms(45000) == 0
+
+def test_bar_content_freshness_for_open_gate_uses_age_past_close_when_closed_bar() -> None:
+    assert bar_content_freshness_for_open_gate(108720, closed_bar_entries=True) == 48720
+    assert is_data_stale(bar_content_freshness_for_open_gate(108720, closed_bar_entries=True), 90000) is False
+    assert bar_content_freshness_for_open_gate(108720, closed_bar_entries=False) == 108720
+    assert is_data_stale(bar_content_freshness_for_open_gate(108720, closed_bar_entries=False), 90000) is True

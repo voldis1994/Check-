@@ -362,3 +362,26 @@ def test_apply_closed_bar_entry_gate_blocks_repeat_open_on_same_bar(tmp_path: Pa
     result = apply_closed_bar_entry_gate(runtime=runtime, instance_state=state, decision_result=decision, risk_engine_result=risk, market_bar_time_utc='2026-07-07T06:02:00.000Z')
     assert result.result == RiskResult.BLOCK.value
     assert 'ENTRY_DEFERRED' in result.reason or REASON_ENTRY_DEFERRED in result.reason
+
+def test_apply_closed_bar_entry_gate_hold_does_not_consume_bar(tmp_path: Path) -> None:
+    runtime, instance = _startup_runtime(tmp_path)
+    state = InstanceState(instance=instance)
+    decision = DecisionResult(decision_id='d1', decision=Decision.WAIT.value, reason='WAIT', preferred_side=None, buy_candidate=None, sell_candidate=None, buy_score=0.4, sell_score=0.4, analysis_context={})
+    risk = RiskEngineResult(result=RiskResult.BLOCK.value, reason='no trade', position_size=None, stop_loss=None, take_profit=None)
+    runtime.allow_control_writes = True
+    result = apply_closed_bar_entry_gate(runtime=runtime, instance_state=state, decision_result=decision, risk_engine_result=risk, market_bar_time_utc='2026-07-07T06:02:00.000Z')
+    assert result.result == RiskResult.BLOCK.value
+    assert not state.last_seen_market_bar_utc
+
+def test_apply_closed_bar_entry_gate_allows_open_after_prior_hold_on_same_bar(tmp_path: Path) -> None:
+    runtime, instance = _startup_runtime(tmp_path)
+    state = InstanceState(instance=instance)
+    hold = DecisionResult(decision_id='d0', decision=Decision.WAIT.value, reason='WAIT', preferred_side=None, buy_candidate=None, sell_candidate=None, buy_score=0.4, sell_score=0.4, analysis_context={})
+    blocked = RiskEngineResult(result=RiskResult.BLOCK.value, reason='no trade', position_size=None, stop_loss=None, take_profit=None)
+    runtime.allow_control_writes = True
+    apply_closed_bar_entry_gate(runtime=runtime, instance_state=state, decision_result=hold, risk_engine_result=blocked, market_bar_time_utc='2026-07-07T06:02:00.000Z')
+    buy = DecisionResult(decision_id='d1', decision=Decision.BUY.value, reason='BUY', preferred_side=Side.BUY.value, buy_candidate=None, sell_candidate=None, buy_score=0.8, sell_score=0.2, analysis_context={})
+    allow = RiskEngineResult(result=RiskResult.ALLOW.value, reason='', position_size=0.1, stop_loss=1.09, take_profit=1.11)
+    result = apply_closed_bar_entry_gate(runtime=runtime, instance_state=state, decision_result=buy, risk_engine_result=allow, market_bar_time_utc='2026-07-07T06:02:00.000Z')
+    assert result.result == RiskResult.ALLOW.value
+    assert state.last_seen_market_bar_utc == '2026-07-07T06:02:00.000Z'
