@@ -266,6 +266,29 @@ def test_is_control_republish_allowed_after_terminal_ack(tmp_path: Path) -> None
     unconfirmed = detect_unconfirmed_control(runtime.paths, instance, item.instance_state)
     assert is_control_republish_allowed(item.instance_state, unconfirmed, proposed_command_id='cmd-new-decision')
 
+
+def test_is_control_republish_allows_modify_over_stuck_open(tmp_path: Path) -> None:
+    runtime, instance = _startup_runtime(tmp_path)
+    _publish_open_control(runtime.paths, instance)
+    item = runtime.memory.get(instance)
+    assert item is not None
+    # Non-terminal last ack would normally block a new OPEN republish, but MODIFY must pass.
+    item.instance_state.update_execution(command_id=FIXED_COMMAND_ID, ack_status='')
+    unconfirmed = detect_unconfirmed_control(runtime.paths, instance, item.instance_state)
+    assert unconfirmed is not None
+    assert is_control_republish_allowed(
+        item.instance_state,
+        unconfirmed,
+        proposed_command_id='cmd-modify-trail',
+        proposed_action='MODIFY',
+    )
+    assert not is_control_republish_allowed(
+        item.instance_state,
+        unconfirmed,
+        proposed_command_id='cmd-open-2',
+        proposed_action='OPEN',
+    )
+
 def test_recover_instance_persists_reloaded_state_to_disk(tmp_path: Path) -> None:
     runtime, instance = _startup_runtime(tmp_path)
     recover_spread_model_from_sensor(runtime, instance, timestamp_utc='2026-07-07T06:00:00.000Z')

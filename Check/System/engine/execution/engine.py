@@ -99,16 +99,19 @@ def apply_ack_to_instance_state(instance_state: InstanceState, order_command: Or
         elif ack_record.status in {AckStatus.FAILED.value, AckStatus.REJECTED.value}:
             instance_state.clear_pending_execution()
         # ALREADY_PROCESSED or SUCCESS with invalid/zero fill: keep pending
-    else:
+    elif order_command.action == OrderAction.CLOSE.value:
         instance_state.clear_pending_execution()
         if ack_record.status == AckStatus.SUCCESS.value:
-            if order_command.action == OrderAction.MODIFY.value and order_command.stop_loss is not None and (order_command.take_profit is not None):
-                instance_state.update_position_levels(stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
-            elif order_command.action == OrderAction.CLOSE.value:
-                if order_command.volume is not None and instance_state.position_volume is not None and (order_command.volume < instance_state.position_volume):
-                    instance_state.reduce_position_volume(volume=order_command.volume)
-                else:
-                    instance_state.clear_position()
+            if order_command.volume is not None and instance_state.position_volume is not None and (order_command.volume < instance_state.position_volume):
+                instance_state.reduce_position_volume(volume=order_command.volume)
+            else:
+                instance_state.clear_position()
+    elif order_command.action == OrderAction.MODIFY.value:
+        # Never clear a pending OPEN identity just because trailing MODIFY acked.
+        if ack_record.status == AckStatus.SUCCESS.value and order_command.stop_loss is not None and order_command.take_profit is not None:
+            instance_state.update_position_levels(stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
+    else:
+        instance_state.clear_pending_execution()
 
 def log_ack_failure(paths: SystemPaths, instance: Instance, ack_record: AckRecord) -> None:
     if ack_record.status not in {AckStatus.FAILED.value, AckStatus.REJECTED.value}:
@@ -131,7 +134,7 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
     retry_policy = build_retry_policy(runtime)
     from engine.core.recovery import detect_unconfirmed_control, is_control_republish_allowed
     unconfirmed = detect_unconfirmed_control(paths, instance, instance_state)
-    if not is_control_republish_allowed(instance_state, unconfirmed, proposed_command_id=order_command.command_id):
+    if not is_control_republish_allowed(instance_state, unconfirmed, proposed_command_id=order_command.command_id, proposed_action=order_command.action):
         return ExecutionResult(order_command=order_command, control_published=False, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)
     if not _requires_trade_execution(order_command):
         return ExecutionResult(order_command=order_command, control_published=False, trade_intent_logged=False, ack_interpretation=None, trade_journal_entry=None, state_updated=False)

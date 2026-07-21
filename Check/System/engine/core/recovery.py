@@ -114,11 +114,14 @@ def detect_unconfirmed_control(paths: SystemPaths, instance: Instance, instance_
         return None
     return UnconfirmedControlInfo(control=control, pending_ack=True)
 
-def is_control_republish_allowed(instance_state: InstanceState, unconfirmed: UnconfirmedControlInfo | None, *, proposed_command_id: str) -> bool:
+def is_control_republish_allowed(instance_state: InstanceState, unconfirmed: UnconfirmedControlInfo | None, *, proposed_command_id: str, proposed_action: str | None=None) -> bool:
     if unconfirmed is None:
         return True
     if unconfirmed.control.command_id == proposed_command_id:
         return False
+    # Protective trailing/close must not wait behind a stuck OPEN control file.
+    if proposed_action in {OrderAction.MODIFY.value, OrderAction.CLOSE.value} and unconfirmed.control.action == OrderAction.OPEN.value:
+        return True
     if instance_state.last_command_id != unconfirmed.control.command_id:
         return True
     return is_terminal_ack_status(instance_state.last_ack_status)

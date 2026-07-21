@@ -1,6 +1,6 @@
 #property copyright "SYSTEM"
 #property link      "https://github.com/voldis1994/Check-"
-#property version   "1.11"
+#property version   "1.12"
 #property strict
 
 input int MagicNumber = 100001;
