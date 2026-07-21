@@ -460,6 +460,35 @@ def test_18_invalid_tick_blocks_modify() -> None:
     assert 'invalid_tick' in merge.skip_reason
 
 
+def test_18b_invalid_tick_keeps_technical_trailing() -> None:
+    technical = TradeManagementResult(action=OrderAction.MODIFY.value, reason='TRADE_MANAGEMENT_TRAILING', stop_loss=1.101, take_profit=0.0)
+    merge = merge_technical_and_money_step_trailing(
+        technical_result=technical,
+        params=_params(),
+        state=MoneyStepTrailingState(),
+        side='BUY',
+        open_price=1.1,
+        current_sl=1.09,
+        current_price=1.12,
+        net_profit_money=9.0,
+        current_swap=0.0,
+        current_commission=0.0,
+        tick_value=0.0,
+        tick_size=0.00001,
+        volume=0.01,
+        digits=5,
+        point=0.00001,
+        stop_level=0,
+        freeze_level=0,
+        price_tolerance=0.00001,
+        modify_take_profit=0.0,
+        sensor_fresh=True,
+    )
+    assert merge.management_result.action == OrderAction.MODIFY.value
+    assert merge.management_result.stop_loss == pytest.approx(1.101)
+    assert 'invalid_tick' in merge.skip_reason
+
+
 def test_19_stop_and_freeze_levels_respected() -> None:
     merge = merge_technical_and_money_step_trailing(
         technical_result=TradeManagementResult(action=OrderAction.NONE.value, reason=''),

@@ -256,7 +256,8 @@ def merge_technical_and_money_step_trailing(
         return MoneyStepMergeResult(management_result=technical_result, state=state, skip_reason='money_step_trailing_inactive_invalid_config')
 
     if not sensor_fresh:
-        # Still ratchet peak from fresh status profit when available, but never MODIFY on stale Bid/Ask.
+        # Still ratchet peak from fresh status profit when available, but never money-MODIFY on stale Bid/Ask.
+        # Keep technical trailing — do not suppress pip/structure SL moves.
         peak_only = MoneyStepTrailingState(
             peak_net_profit_money=max(state.peak_net_profit_money, net_profit_money),
             money_trailing_step_index=state.money_trailing_step_index,
@@ -264,7 +265,7 @@ def merge_technical_and_money_step_trailing(
             last_money_trailing_sl=state.last_money_trailing_sl,
         )
         return MoneyStepMergeResult(
-            management_result=TradeManagementResult(action=OrderAction.NONE.value, reason='money_step_trailing_blocked_stale_sensor'),
+            management_result=technical_result,
             state=peak_only,
             skip_reason='money_step_trailing_blocked_stale_sensor',
         )
@@ -276,8 +277,9 @@ def merge_technical_and_money_step_trailing(
             locked_profit_money=state.locked_profit_money,
             last_money_trailing_sl=state.last_money_trailing_sl,
         )
+        # Missing broker tick metadata must not kill technical trailing / lockpoint fallback.
         return MoneyStepMergeResult(
-            management_result=TradeManagementResult(action=OrderAction.NONE.value, reason='money_step_trailing_blocked_invalid_tick'),
+            management_result=technical_result,
             state=peak_only,
             skip_reason='money_step_trailing_blocked_invalid_tick',
         )
@@ -305,7 +307,7 @@ def merge_technical_and_money_step_trailing(
             last_money_trailing_sl=state.last_money_trailing_sl,
         )
         return MoneyStepMergeResult(
-            management_result=TradeManagementResult(action=OrderAction.NONE.value, reason='money_step_trailing_blocked_invalid_tick'),
+            management_result=technical_result,
             state=peak_only,
             skip_reason='money_step_trailing_blocked_invalid_tick',
         )

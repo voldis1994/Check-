@@ -77,10 +77,10 @@
     "trailing_step_pips": 4.0,
     "money_step_trailing": {
       "enabled": true,
-      "activation_profit_money": 0.0,
-      "profit_step_money": 0.0,
-      "initial_locked_profit_money": 0.0,
-      "lock_increment_money": 0.0
+      "activation_profit_money": 0.50,
+      "profit_step_money": 0.25,
+      "initial_locked_profit_money": 0.20,
+      "lock_increment_money": 0.25
     }
   },
   "dashboard": {
