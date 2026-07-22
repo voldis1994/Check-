@@ -40,7 +40,7 @@ def main() -> int:
     config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {config_path}")
     print(f"  paths.root={root}")
-    print(f"  instrument.symbol=AUTO")
+    print("  instrument.symbol=AUTO")
     return 0
 
 

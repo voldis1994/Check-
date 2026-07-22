@@ -18,7 +18,7 @@ if %ERRORLEVEL%==0 (
 
 if exist "runtime\STOP_TRADING" (
   echo Kill switch AKTIVS: runtime\STOP_TRADING
-  echo Izdzes failu, lai tirgotu, vai palaid STOP.bat tikai kad vajag apturet.
+  echo Izdzes failu, lai tirgotu.
   pause
   exit /b 1
 )
@@ -26,7 +26,7 @@ if exist "runtime\STOP_TRADING" (
 echo Validating config...
 %PY% tools\validate_config.py --config config\local\system.json
 if errorlevel 1 (
-  echo Config kluda - ieraksti allowed_account_numbers.
+  echo Config kluda.
   notepad config\local\system.json
   pause
   exit /b 1
@@ -35,6 +35,7 @@ if errorlevel 1 (
 echo.
 echo Starting checktrader...
 echo BridgeRootPath EA: %CD%
+echo Symbol=AUTO, Account=AUTO ^(no MT4^)
 echo.
 %PY% -m checktrader --config config\local\system.json
 pause

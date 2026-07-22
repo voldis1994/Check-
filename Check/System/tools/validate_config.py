@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from checktrader.application.account_resolve import is_auto_account_list
 from checktrader.config.loader import load_system_config
 from checktrader.domain.errors import ConfigurationError
 
@@ -16,11 +17,11 @@ def main() -> int:
     parser.add_argument(
         "--allow-empty-accounts",
         action="store_true",
-        help="Allow empty allowed_account_numbers (dev/health soft check)",
+        help="Deprecated: empty/AUTO allow-list is always accepted (trusts MT4)",
     )
     args = parser.parse_args()
     try:
-        config = load_system_config(args.config, require_live_accounts=not args.allow_empty_accounts)
+        config = load_system_config(args.config, require_live_accounts=False)
     except ConfigurationError as exc:
         print(f"FAIL: {exc}")
         return 1
@@ -30,13 +31,13 @@ def main() -> int:
     accounts = config.account.allowed_account_numbers
     print(f"OK version={config.version} instance={config.runtime.instance_id}")
     print(f"  symbol={config.instrument.symbol} magic={config.position.magic_number}")
-    print(f"  sizing={config.position_sizing.mode} lot={config.position_sizing.fixed_lot} accounts={accounts or ['(empty)']}")
+    print(
+        f"  sizing={config.position_sizing.mode} lot={config.position_sizing.fixed_lot} "
+        f"accounts={accounts or ['AUTO(from MT4)']}"
+    )
     print(f"  bridge={config.paths.bridge} state={config.paths.state}")
-    if not accounts and not args.allow_empty_accounts:
-        print("FAIL: allowed_account_numbers empty")
-        return 1
-    if not accounts:
-        print("WARN: allowed_account_numbers empty (allowed by flag)")
+    if is_auto_account_list(accounts):
+        print("INFO: account allow-list is AUTO — engine trusts MT4 status account_number")
     return 0
 
 
