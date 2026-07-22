@@ -403,6 +403,45 @@ class AIConfig:
         return {'mode': self.mode, 'fail_closed': self.fail_closed, 'reject_action': self.reject_action, 'timeout_ms': self.timeout_ms, 'retry_max': self.retry_max, 'retry_delay_ms': self.retry_delay_ms}
 
 @dataclass(frozen=True)
+class SignalQualityConfig:
+    """Gates that keep weak M1 noise from becoming BUY/SELL entries."""
+
+    minimum_signal_score: float = 0.65
+    minimum_score_delta: float = 0.15
+    minimum_market_quality: float = 0.60
+    minimum_directional_confirmations: int = 3
+    cooldown_bars_after_trade: int = 3
+    cooldown_bars_after_loss: int = 5
+    duplicate_signal_expiry_bars: int = 10
+
+    def __post_init__(self) -> None:
+        for field_name in ('minimum_signal_score', 'minimum_score_delta', 'minimum_market_quality'):
+            value = _require_number(getattr(self, field_name), f'signal_quality.{field_name}')
+            if value < 0 or value > 1:
+                raise ValidationError(f'signal_quality.{field_name} must be between 0 and 1', module='protocol.models', context={'value': value})
+            object.__setattr__(self, field_name, value)
+        confirmations = _require_int(self.minimum_directional_confirmations, 'signal_quality.minimum_directional_confirmations', minimum=1)
+        if confirmations > 4:
+            raise ValidationError('signal_quality.minimum_directional_confirmations must be <= 4', module='protocol.models', context={'value': confirmations})
+        object.__setattr__(self, 'minimum_directional_confirmations', confirmations)
+        object.__setattr__(self, 'cooldown_bars_after_trade', _require_int(self.cooldown_bars_after_trade, 'signal_quality.cooldown_bars_after_trade', minimum=0))
+        object.__setattr__(self, 'cooldown_bars_after_loss', _require_int(self.cooldown_bars_after_loss, 'signal_quality.cooldown_bars_after_loss', minimum=0))
+        object.__setattr__(self, 'duplicate_signal_expiry_bars', _require_int(self.duplicate_signal_expiry_bars, 'signal_quality.duplicate_signal_expiry_bars', minimum=0))
+        if self.cooldown_bars_after_loss < self.cooldown_bars_after_trade:
+            raise ValidationError('signal_quality.cooldown_bars_after_loss must be >= cooldown_bars_after_trade', module='protocol.models', context={'cooldown_bars_after_loss': self.cooldown_bars_after_loss, 'cooldown_bars_after_trade': self.cooldown_bars_after_trade})
+
+    def to_dict(self) -> dict[str, float | int]:
+        return {
+            'minimum_signal_score': self.minimum_signal_score,
+            'minimum_score_delta': self.minimum_score_delta,
+            'minimum_market_quality': self.minimum_market_quality,
+            'minimum_directional_confirmations': self.minimum_directional_confirmations,
+            'cooldown_bars_after_trade': self.cooldown_bars_after_trade,
+            'cooldown_bars_after_loss': self.cooldown_bars_after_loss,
+            'duplicate_signal_expiry_bars': self.duplicate_signal_expiry_bars,
+        }
+
+@dataclass(frozen=True)
 class SystemConfig:
     schema_version: str
     system: SystemSection
@@ -416,6 +455,7 @@ class SystemConfig:
     dashboard: DashboardConfig
     logging: LoggingConfig
     ai: AIConfig
+    signal_quality: SignalQualityConfig = SignalQualityConfig()
 
     def __post_init__(self) -> None:
         schema_version = _require_non_empty_string(self.schema_version, 'schema_version')
@@ -429,7 +469,7 @@ class SystemConfig:
         object.__setattr__(self, 'schema_version', schema_version)
 
     def to_dict(self) -> dict[str, Any]:
-        return {'schema_version': self.schema_version, 'system': self.system.to_dict(), 'paths': self.paths.to_dict(), 'runtime': self.runtime.to_dict(), 'instances': [instance.to_dict() for instance in self.instances], 'risk': self.risk.to_dict(), 'analysis': self.analysis.to_dict(), 'journal': self.journal.to_dict(), 'trade_management': self.trade_management.to_dict(), 'dashboard': self.dashboard.to_dict(), 'logging': self.logging.to_dict(), 'ai': self.ai.to_dict()}
+        return {'schema_version': self.schema_version, 'system': self.system.to_dict(), 'paths': self.paths.to_dict(), 'runtime': self.runtime.to_dict(), 'instances': [instance.to_dict() for instance in self.instances], 'risk': self.risk.to_dict(), 'analysis': self.analysis.to_dict(), 'journal': self.journal.to_dict(), 'trade_management': self.trade_management.to_dict(), 'dashboard': self.dashboard.to_dict(), 'logging': self.logging.to_dict(), 'ai': self.ai.to_dict(), 'signal_quality': self.signal_quality.to_dict()}
 
 @dataclass(frozen=True)
 class StatusPositionSnapshot:
@@ -880,6 +920,15 @@ class DecisionJournalEntry:
     ai_reason: str | None = None
     system_decision_before_ai: str | None = None
     decision_after_ai: str | None = None
+    score_delta: float | None = None
+    winning_side: str | None = None
+    winning_score: float | None = None
+    market_quality_score: float | None = None
+    reason_code: str | None = None
+    confirmation_count: int | None = None
+    fingerprint: str | None = None
+    cooldown_bars_remaining: int | None = None
+    component_directions: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'decision_id', _require_non_empty_string(self.decision_id, 'decision_id'))
@@ -922,6 +971,27 @@ class DecisionJournalEntry:
             if not is_valid_decision(decision_after_ai):
                 raise ValidationError('decision_after_ai is invalid', module='protocol.models', context={'value': decision_after_ai})
             object.__setattr__(self, 'decision_after_ai', decision_after_ai)
+        if self.score_delta is not None:
+            object.__setattr__(self, 'score_delta', _require_number(self.score_delta, 'score_delta'))
+        if self.winning_side is not None:
+            object.__setattr__(self, 'winning_side', _require_non_empty_string(self.winning_side, 'winning_side'))
+        if self.winning_score is not None:
+            object.__setattr__(self, 'winning_score', _require_number(self.winning_score, 'winning_score'))
+        if self.market_quality_score is not None:
+            object.__setattr__(self, 'market_quality_score', _require_number(self.market_quality_score, 'market_quality_score'))
+        if self.reason_code is not None:
+            object.__setattr__(self, 'reason_code', _require_non_empty_string(self.reason_code, 'reason_code'))
+        if self.confirmation_count is not None:
+            object.__setattr__(self, 'confirmation_count', _require_int(self.confirmation_count, 'confirmation_count', minimum=0))
+        if self.fingerprint is not None:
+            object.__setattr__(self, 'fingerprint', _require_non_empty_string(self.fingerprint, 'fingerprint'))
+        if self.cooldown_bars_remaining is not None:
+            object.__setattr__(self, 'cooldown_bars_remaining', _require_int(self.cooldown_bars_remaining, 'cooldown_bars_remaining', minimum=0))
+        if self.component_directions is not None:
+            if not isinstance(self.component_directions, dict):
+                raise ValidationError('component_directions must be an object', module='protocol.models', context={'value_type': type(self.component_directions).__name__})
+            cleaned = {str(key): str(value) for key, value in self.component_directions.items()}
+            object.__setattr__(self, 'component_directions', cleaned)
 
     @property
     def instance_key(self) -> InstanceKey:
@@ -949,6 +1019,24 @@ class DecisionJournalEntry:
             data['system_decision_before_ai'] = self.system_decision_before_ai
         if self.decision_after_ai is not None:
             data['decision_after_ai'] = self.decision_after_ai
+        if self.score_delta is not None:
+            data['score_delta'] = self.score_delta
+        if self.winning_side is not None:
+            data['winning_side'] = self.winning_side
+        if self.winning_score is not None:
+            data['winning_score'] = self.winning_score
+        if self.market_quality_score is not None:
+            data['market_quality_score'] = self.market_quality_score
+        if self.reason_code is not None:
+            data['reason_code'] = self.reason_code
+        if self.confirmation_count is not None:
+            data['confirmation_count'] = self.confirmation_count
+        if self.fingerprint is not None:
+            data['fingerprint'] = self.fingerprint
+        if self.cooldown_bars_remaining is not None:
+            data['cooldown_bars_remaining'] = self.cooldown_bars_remaining
+        if self.component_directions is not None:
+            data['component_directions'] = dict(self.component_directions)
         return data
 
 @dataclass(frozen=True)

@@ -11,7 +11,7 @@ from engine.execution.control_writer import build_control_path
 from engine.protocol.constants import AckStatus, OrderAction, PROTOCOL_SCHEMA_VERSION
 from engine.protocol.models import AckRecord, ControlCommand
 from engine.protocol.parser import parse_control
-MarketScenario = Literal['bullish', 'bearish']
+MarketScenario = Literal['bullish', 'bearish', 'flat']
 StatusScenario = Literal['tradeable', 'not_tradeable']
 MODULE_NAME = 'e2e.simulator.mt4_simulator'
 
@@ -26,6 +26,8 @@ class ExportTickResult:
 def build_market_csv(*, symbol: str, scenario: MarketScenario='bullish', timestamp_utc: str='2026-07-07T06:02:00.000Z', close_override: float | None=None) -> str:
     if scenario == 'bullish':
         rows = [('2026-07-07T06:00:00.000Z', 1.1, 1.102, 1.099, 1.1015, 120), ('2026-07-07T06:01:00.000Z', 1.1015, 1.103, 1.1005, 1.1022, 110), ('2026-07-07T06:02:00.000Z', 1.1022, 1.104, 1.101, 1.1031, 105)]
+    elif scenario == 'flat':
+        rows = [('2026-07-07T06:00:00.000Z', 1.1, 1.101, 1.099, 1.1, 100), ('2026-07-07T06:01:00.000Z', 1.1, 1.101, 1.099, 1.1, 100), ('2026-07-07T06:02:00.000Z', 1.1, 1.101, 1.099, 1.1, 100)]
     else:
         rows = [('2026-07-07T06:00:00.000Z', 1.104, 1.1045, 1.102, 1.1025, 120), ('2026-07-07T06:01:00.000Z', 1.1025, 1.103, 1.101, 1.1012, 110), ('2026-07-07T06:02:00.000Z', 1.1012, 1.1018, 1.099, 1.0995, 105)]
     lines = ['time_utc,open,high,low,close,volume,symbol,timeframe,digits,point']
@@ -46,6 +48,8 @@ def build_market_csv(*, symbol: str, scenario: MarketScenario='bullish', timesta
 def build_sensor_csv(*, symbol: str, scenario: MarketScenario='bullish', timestamp_utc: str='2026-07-07T06:02:00.000Z', close_override: float | None=None) -> str:
     if scenario == 'bullish':
         readings = [('2026-07-07T06:00:00.000Z', 1.1014, 1.10155, 0.00015, 15), ('2026-07-07T06:01:00.000Z', 1.1021, 1.1023, 0.0002, 20), ('2026-07-07T06:02:00.000Z', 1.1029, 1.10315, 0.00025, 25)]
+    elif scenario == 'flat':
+        readings = [('2026-07-07T06:00:00.000Z', 1.0999, 1.1001, 0.0002, 20), ('2026-07-07T06:01:00.000Z', 1.0999, 1.1001, 0.0002, 20), ('2026-07-07T06:02:00.000Z', 1.0999, 1.1001, 0.0002, 20)]
     else:
         readings = [('2026-07-07T06:00:00.000Z', 1.1024, 1.10255, 0.00015, 15), ('2026-07-07T06:01:00.000Z', 1.1011, 1.1013, 0.0002, 20), ('2026-07-07T06:02:00.000Z', 1.0994, 1.09965, 0.00025, 25)]
     lines = ['time_utc,bid,ask,spread,spread_points,symbol,digits,point']

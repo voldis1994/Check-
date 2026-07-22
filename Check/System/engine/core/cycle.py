@@ -23,7 +23,7 @@ from engine.loader.universe_loader import RawUniverseData, load_universe_data
 from engine.normalizer.instrument_params import derive_instrument_params, detect_params_change
 from engine.normalizer.market_normalizer import NormalizedMarketBar, normalize_market_csv
 from engine.normalizer.spread_model import SpreadModelSnapshot, update_spread_model_from_sensor
-from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_AMBIGUOUS_PENDING_EXECUTION, REASON_CLOSE_PENDING_RECONCILIATION, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_INSTANCE_CONFLICT, REASON_STALE_STATUS_TIMESTAMP, REASON_STALE_UNIVERSE_TIMESTAMP, RiskResult, Side
+from engine.protocol.constants import Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACCOUNT_NOT_TRADEABLE, REASON_AMBIGUOUS_PENDING_EXECUTION, REASON_CLOSE_PENDING_RECONCILIATION, REASON_CYCLE_TIMEOUT, REASON_DATA_INVALID, REASON_ENTRY_DEFERRED, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_INSTANCE_CONFLICT, REASON_LIVE_SAFETY_BLOCK, REASON_STALE_STATUS_TIMESTAMP, REASON_STALE_UNIVERSE_TIMESTAMP, RiskResult, Side
 from engine.protocol.errors import DataIOError, SystemError
 from engine.protocol.models import SensorReading, StatusRecord, TradeManagementSettings, UniverseRecord
 from engine.protocol.parser import parse_sensor_csv, parse_universe
@@ -369,11 +369,16 @@ def run_instance_decision_phase(*, universe: UniverseRecord, market_bars: tuple[
     return run_decision_engine(universe=universe, market_bars=market_bars, instance_state=instance_memory.instance_state, relative_spread=relative_spread, system_config=runtime.config, block_reason=block_reason, paths=runtime.paths)
 
 def run_instance_risk_phase(*, decision_result: DecisionResult, instance_memory: InstanceMemory, status: StatusRecord, market_bars: tuple[NormalizedMarketBar, ...], runtime: LiveRuntime, trade_params: RiskEngineTradeParams | None=None) -> RiskEngineResult:
+    if runtime.live_safety_block_entries:
+        reason = runtime.live_safety_reason or build_reason(REASON_LIVE_SAFETY_BLOCK, 'live safety blocked new entries')
+        return RiskEngineResult(result=RiskResult.BLOCK.value, reason=reason, position_size=None, stop_loss=None, take_profit=None)
     structure = resolve_structure_levels(market_bars, structure_lookback_bars=runtime.config.analysis.structure_lookback_bars)
     return run_risk_engine(decision_result=decision_result, risk_config=runtime.config.risk, instance_state=instance_memory.instance_state, status=status, trade_params=trade_params or build_risk_trade_params(runtime), swing_low=structure.swing_low, swing_high=structure.swing_high, use_fixed_take_profit=runtime.config.trade_management.use_fixed_take_profit)
 
 def should_execute_trade(*, runtime: LiveRuntime, decision_result: DecisionResult, risk_engine_result: RiskEngineResult) -> bool:
     if not runtime.allow_control_writes:
+        return False
+    if runtime.live_safety_block_entries:
         return False
     if decision_result.decision not in {Decision.BUY.value, Decision.SELL.value}:
         return False
@@ -517,7 +522,7 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         log_error(runtime.paths, instance, module=MODULE_NAME, error_type=ErrorType.VALIDATION.value, message='stale status timestamp', context={'reason': REASON_STALE_STATUS_TIMESTAMP, 'status_content_freshness_ms': status_content_freshness_ms, 'threshold_ms': stale_threshold_ms})
     sync_result = None
     if not status_stale:
-        sync_result = reconcile_position_with_status(runtime.paths, instance, instance_memory.instance_state, status, timestamp_utc=resolved_timestamp)
+        sync_result = reconcile_position_with_status(runtime.paths, instance, instance_memory.instance_state, status, timestamp_utc=resolved_timestamp, signal_quality_config=runtime.config.signal_quality, market_bar_utc=market_data_utc)
     if timeout_guard.is_exceeded():
         instance_memory.instance_state.save(runtime.paths)
         return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
@@ -550,7 +555,7 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
             return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
         trade_intended = True
         execution_started = time.monotonic()
-        management_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=_management_only_decision(), risk_engine_result=_blocked_risk(), runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='management execution io'), position_last_bar_utc=market_data_utc)
+        management_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=_management_only_decision(), risk_engine_result=_blocked_risk(), runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='management execution io'), position_last_bar_utc=market_data_utc, signal_quality_config=runtime.config.signal_quality)
         ack_latency_ms = int((time.monotonic() - execution_started) * 1000)
         execution_result = management_execution
         control_published = bool(management_execution.control_published)
@@ -614,7 +619,7 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
         trade_intended = True
         execution_started = time.monotonic()
         entry_preexisting_tickets = tuple(p.ticket for p in find_status_positions(status, instance))
-        entry_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, runtime=runtime.config.runtime, management_result=_noop_management_result(), timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='entry execution io'), position_last_bar_utc=market_data_utc, preexisting_tickets=entry_preexisting_tickets)
+        entry_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=decision_result, risk_engine_result=effective_risk, runtime=runtime.config.runtime, management_result=_noop_management_result(), timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='entry execution io'), position_last_bar_utc=market_data_utc, preexisting_tickets=entry_preexisting_tickets, signal_quality_config=runtime.config.signal_quality)
         entry_latency = int((time.monotonic() - execution_started) * 1000)
         ack_latency_ms = entry_latency if ack_latency_ms is None else ack_latency_ms + entry_latency
         execution_result = entry_execution

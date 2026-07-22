@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from engine.core.atomic_io import atomic_read_text, atomic_write_json
@@ -61,6 +61,14 @@ class InstanceState:
     last_money_trailing_sl: float | None = None
     money_trailing_ticket: int | None = None
     money_trailing_state_missing: bool = False
+    cooldown_remaining_bars: int = 0
+    cooldown_last_counted_bar_utc: str = ''
+    last_trade_result: str | None = None
+    last_trade_close_time_utc: str | None = None
+    last_trade_close_bar_utc: str | None = None
+    signal_fingerprints: dict[str, int] = field(default_factory=dict)
+    fingerprint_last_counted_bar_utc: str = ''
+    last_signal_fingerprint: str | None = None
 
     def path(self, paths: SystemPaths) -> Path:
         return paths.account_state_dir(self.instance.account_id) / self.instance.instance_state_filename()
@@ -233,6 +241,51 @@ class InstanceState:
         self.duplicate_position_anomaly = False
         self.clear_money_trailing_state()
 
+    def register_trade_close(self, *, close_bar_utc: str, close_time_utc: str, was_loss: bool, cooldown_bars_after_trade: int, cooldown_bars_after_loss: int) -> None:
+        """Start bar-based cooldown after a position is flattened."""
+        bars = int(cooldown_bars_after_loss if was_loss else cooldown_bars_after_trade)
+        self.last_trade_result = 'loss' if was_loss else 'win'
+        self.last_trade_close_time_utc = close_time_utc
+        self.last_trade_close_bar_utc = close_bar_utc
+        self.cooldown_remaining_bars = max(0, bars)
+        self.cooldown_last_counted_bar_utc = close_bar_utc
+
+    def cooldown_bars_remaining(self, *, current_bar_utc: str) -> int:
+        """Return remaining cooldown bars, decrementing once per new closed bar."""
+        if self.cooldown_remaining_bars <= 0:
+            return 0
+        if current_bar_utc and self.cooldown_last_counted_bar_utc and current_bar_utc > self.cooldown_last_counted_bar_utc:
+            self.cooldown_remaining_bars = max(0, self.cooldown_remaining_bars - 1)
+            self.cooldown_last_counted_bar_utc = current_bar_utc
+        elif current_bar_utc and not self.cooldown_last_counted_bar_utc:
+            self.cooldown_last_counted_bar_utc = current_bar_utc
+        return max(0, int(self.cooldown_remaining_bars))
+
+    def register_signal_fingerprint(self, fingerprint: str, *, expiry_bars: int) -> None:
+        if not fingerprint or expiry_bars <= 0:
+            return
+        self.signal_fingerprints[fingerprint] = int(expiry_bars)
+        self.last_signal_fingerprint = fingerprint
+
+    def expire_signal_fingerprints(self, *, current_bar_utc: str) -> None:
+        if not self.signal_fingerprints:
+            return
+        if current_bar_utc and self.fingerprint_last_counted_bar_utc and current_bar_utc > self.fingerprint_last_counted_bar_utc:
+            for key in list(self.signal_fingerprints):
+                remaining = int(self.signal_fingerprints[key]) - 1
+                if remaining <= 0:
+                    del self.signal_fingerprints[key]
+                else:
+                    self.signal_fingerprints[key] = remaining
+            self.fingerprint_last_counted_bar_utc = current_bar_utc
+        elif current_bar_utc and not self.fingerprint_last_counted_bar_utc:
+            self.fingerprint_last_counted_bar_utc = current_bar_utc
+
+    @property
+    def active_signal_fingerprints(self) -> dict[str, str]:
+        """Compatibility map fingerprint -> remaining bars as string for quality checks."""
+        return {key: str(value) for key, value in self.signal_fingerprints.items()}
+
     def update_instrument(self, *, digits: int, point: float, pip: float) -> None:
         self.instrument_digits = digits
         self.instrument_point = point
@@ -322,6 +375,22 @@ class InstanceState:
             data['money_trailing_ticket'] = self.money_trailing_ticket
         if self.money_trailing_state_missing:
             data['money_trailing_state_missing'] = True
+        if self.cooldown_remaining_bars > 0:
+            data['cooldown_remaining_bars'] = self.cooldown_remaining_bars
+        if self.cooldown_last_counted_bar_utc:
+            data['cooldown_last_counted_bar_utc'] = self.cooldown_last_counted_bar_utc
+        if self.last_trade_result is not None:
+            data['last_trade_result'] = self.last_trade_result
+        if self.last_trade_close_time_utc is not None:
+            data['last_trade_close_time_utc'] = self.last_trade_close_time_utc
+        if self.last_trade_close_bar_utc is not None:
+            data['last_trade_close_bar_utc'] = self.last_trade_close_bar_utc
+        if self.signal_fingerprints:
+            data['signal_fingerprints'] = dict(self.signal_fingerprints)
+        if self.fingerprint_last_counted_bar_utc:
+            data['fingerprint_last_counted_bar_utc'] = self.fingerprint_last_counted_bar_utc
+        if self.last_signal_fingerprint is not None:
+            data['last_signal_fingerprint'] = self.last_signal_fingerprint
         return data
 
     def save(self, paths: SystemPaths) -> None:
@@ -451,4 +520,30 @@ class InstanceState:
             state.clear_money_trailing_state()
             state.money_trailing_ticket = state.open_ticket
             state.money_trailing_state_missing = True
+        state.cooldown_remaining_bars = int(payload.get('cooldown_remaining_bars', 0) or 0)
+        state.cooldown_last_counted_bar_utc = str(payload.get('cooldown_last_counted_bar_utc', '') or '')
+        last_trade_result = payload.get('last_trade_result')
+        if last_trade_result is not None:
+            state.last_trade_result = str(last_trade_result)
+        last_trade_close_time_utc = payload.get('last_trade_close_time_utc')
+        if last_trade_close_time_utc is not None:
+            state.last_trade_close_time_utc = str(last_trade_close_time_utc)
+        last_trade_close_bar_utc = payload.get('last_trade_close_bar_utc')
+        if last_trade_close_bar_utc is not None:
+            state.last_trade_close_bar_utc = str(last_trade_close_bar_utc)
+        fingerprints = payload.get('signal_fingerprints')
+        if isinstance(fingerprints, dict):
+            cleaned: dict[str, int] = {}
+            for key, value in fingerprints.items():
+                try:
+                    remaining = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if remaining > 0 and isinstance(key, str) and key:
+                    cleaned[key] = remaining
+            state.signal_fingerprints = cleaned
+        state.fingerprint_last_counted_bar_utc = str(payload.get('fingerprint_last_counted_bar_utc', '') or '')
+        last_signal_fingerprint = payload.get('last_signal_fingerprint')
+        if last_signal_fingerprint is not None:
+            state.last_signal_fingerprint = str(last_signal_fingerprint)
         return state

@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 from engine.analysis.engine import AnalysisEngineResult
-from engine.decision.candidate import build_component_scores, calculate_trade_levels, calculate_weighted_score, evaluate_filter_chain
+from engine.decision.candidate import build_component_scores, calculate_directional_weighted_score, calculate_trade_levels, evaluate_filter_chain
 from engine.decision.filters.news_filter import NewsFilterResult
 from engine.decision.filters.spread_filter import SpreadFilterResult
 from engine.decision.filters.volatility_filter import VolatilityFilterResult
@@ -23,7 +23,8 @@ def build_buy_component_scores(analysis: AnalysisEngineResult, *, market_bars: t
     return build_component_scores(analysis, 'buy', market_bars=market_bars, ranging_recent_momentum_bars=ranging_recent_momentum_bars)
 
 def calculate_buy_score(component_scores: Mapping[str, float], weights: Mapping[str, float]) -> float:
-    return calculate_weighted_score(component_scores, weights)
+    """BUY directional score (excludes shared market-quality components)."""
+    return calculate_directional_weighted_score(component_scores, weights)
 
 def _invalid_candidate(*, invalid_reason: str, component_scores: dict[str, float], buy_score: float) -> BuyCandidate:
     return BuyCandidate(valid=False, invalid_reason=invalid_reason, entry_price=0.0, stop_loss=0.0, take_profit=0.0, component_scores=component_scores, buy_score=buy_score)

@@ -62,6 +62,16 @@ def _write_config(root: Path, *, analysis_overrides: dict[str, Any] | None=None)
     if analysis_overrides is not None:
         analysis = {**analysis, **analysis_overrides}
     payload['analysis'] = analysis
+    # Permissive quality gates for short fixture bars used by integration tests.
+    payload['signal_quality'] = {
+        'minimum_signal_score': 0.0,
+        'minimum_score_delta': 0.0,
+        'minimum_market_quality': 0.0,
+        'minimum_directional_confirmations': 1,
+        'cooldown_bars_after_trade': 0,
+        'cooldown_bars_after_loss': 0,
+        'duplicate_signal_expiry_bars': 0,
+    }
     config_dir = root / 'config'
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / 'system.json'

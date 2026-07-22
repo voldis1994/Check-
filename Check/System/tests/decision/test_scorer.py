@@ -36,20 +36,21 @@ def test_resolve_preferred_side_uses_only_valid_direction() -> None:
     assert sell_only == Side.SELL.value
     assert neither == Side.NONE.value
 
-def test_compare_candidates_returns_score_delta_and_context_adjusted_scores() -> None:
+def test_compare_candidates_returns_directional_scores_without_context_multiply() -> None:
     result = compare_candidates(buy_candidate=_buy_candidate(buy_score=0.8), sell_candidate=_sell_candidate(sell_score=0.5), context=_context())
     assert isinstance(result, ScoringResult)
-    assert result.buy_score == pytest.approx(0.72)
-    assert result.sell_score == pytest.approx(0.45)
-    assert result.score_delta == pytest.approx(0.27)
+    assert result.buy_score == pytest.approx(0.8)
+    assert result.sell_score == pytest.approx(0.5)
+    assert result.score_delta == pytest.approx(0.3)
     assert result.preferred_side == Side.BUY.value
+    assert 0.0 <= result.market_quality_score <= 1.0
 
 def test_scoring_compares_without_filtering_candidates() -> None:
     buy_candidate = _buy_candidate(valid=False, buy_score=0.2)
     sell_candidate = _sell_candidate(valid=False, sell_score=0.9)
     result = compare_candidates(buy_candidate=buy_candidate, sell_candidate=sell_candidate, context=_context())
-    assert result.buy_score == pytest.approx(buy_candidate.buy_score * _context().context_quality)
-    assert result.sell_score == pytest.approx(sell_candidate.sell_score * _context().context_quality)
+    assert result.buy_score == pytest.approx(buy_candidate.buy_score)
+    assert result.sell_score == pytest.approx(sell_candidate.sell_score)
     assert result.preferred_side == Side.NONE.value
 
 def test_resolve_preferred_side_matches_compare_candidates_with_context() -> None:
