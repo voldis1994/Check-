@@ -7,7 +7,7 @@
 **Checks:**
 
 1. EA attached to correct symbol on **M1**, AutoTrading on
-2. `BridgeRootPath` absolute path equals SYSTEM root (contains `runtime/`)
+2. `BridgeRootPath` empty (AUTO → `MQL4\Files\CHECK_SYSTEM`) or absolute path to SYSTEM root (contains `runtime/`)
 3. Files updating under `runtime/bridge/market/` and `runtime/bridge/status/`
 4. Clock skew — timestamps must be UTC `...Z`
 5. Config ages: `execution.maximum_market_age_ms` / `maximum_status_age_ms`

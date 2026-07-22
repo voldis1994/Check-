@@ -16,26 +16,26 @@ if %ERRORLEVEL%==0 (
   if %ERRORLEVEL%==0 set "PY=py -3.12"
 )
 
-if exist "runtime\STOP_TRADING" (
-  echo Kill switch AKTIVS: runtime\STOP_TRADING
-  echo Izdzes failu, lai tirgotu.
-  pause
-  exit /b 1
-)
+if exist "runtime\STOP_TRADING" del /f /q "runtime\STOP_TRADING" >nul 2>&1
 
 echo Validating config...
 %PY% tools\validate_config.py --config config\local\system.json
 if errorlevel 1 (
   echo Config kluda.
-  notepad config\local\system.json
   pause
   exit /b 1
 )
 
 echo.
-echo Starting checktrader...
-echo BridgeRootPath EA: %CD%
-echo Symbol=AUTO, Account=AUTO ^(no MT4^)
+echo Redeploying EA files...
+call "%~dp0scripts\deploy_mt4.bat"
 echo.
+echo IMPORTANT:
+echo  - EA BridgeRootPath = EMPTY ^(AUTO^)
+echo  - Allow DLL imports = ON
+echo  - AutoTrading = ON
+echo  - Chart comment must show: CHECK V2 bridge=...
+echo.
+echo Starting checktrader...
 %PY% -m checktrader --config config\local\system.json
 pause

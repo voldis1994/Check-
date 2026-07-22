@@ -21,9 +21,10 @@ Double-click from `Check\System`:
 | `SETUP_ALL.bat` | Python install, config seed (`AUTO` symbol), runtime dirs, **copies MQ4 into every MetaTrader Data Folder** |
 | `DEPLOY_MT4.bat` | Only deploy EA + includes to `%APPDATA%\MetaQuotes\Terminal\*\MQL4\` |
 | `START_LIVE.bat` | Validate config and start `python -m checktrader` |
+| `FIX_BRIDGE.bat` | Redeploy EA + checklist when Python waits for market/status files |
 | `STOP.bat` | Create `runtime\STOP_TRADING` kill switch |
 
-After `SETUP_ALL.bat`: compile EA in MetaEditor (F7), attach to M1, set `BridgeRootPath` to this System folder. Symbol and account come from MT4 automatically when left on AUTO / empty.
+After `SETUP_ALL.bat`: compile EA in MetaEditor (F7), attach to M1 with **BridgeRootPath empty** (AUTO → `MQL4\Files\CHECK_SYSTEM`). Enable **Allow DLL imports**. Symbol, account, and bridge path come from MT4 automatically.
 
 ## Config
 
@@ -48,9 +49,9 @@ Source path: `mt4/Experts/CHECK_SYSTEM_V2.mq4` (includes under `mt4/Include/`).
 2. Compile in MetaEditor (F7) — 0 errors
 3. Attach to the configured symbol on **M1**
 4. Enable **Allow live trading** and **Allow DLL imports**
-5. Set `BridgeRootPath` to this SYSTEM root (folder that contains `runtime/`)
+5. Leave `BridgeRootPath` **empty** (AUTO), or set it to this SYSTEM root if you prefer a shared folder
 
-See `mt4/README.md` and `docs/MT4_PROTOCOL.md`.
+See `mt4/README.md` and `docs/MT4_PROTOCOL.md`. If Python loops on `waiting for market/status bridge files`, run `FIX_BRIDGE.bat`.
 
 ## Run live
 

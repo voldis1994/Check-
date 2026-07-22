@@ -7,7 +7,7 @@ Windows live ops. Steps match `scripts/start_live.ps1`.
 - Python 3.12+ on PATH
 - Package installed: `pip install -e ".[dev]"` (or `scripts/install.ps1`)
 - MT4 EA `CHECK_SYSTEM_V2` compiled and attached to the configured symbol on **M1**
-- EA inputs: `BridgeRootPath` = SYSTEM root; `MagicNumber` matches config
+- EA inputs: `BridgeRootPath` empty (AUTO) or SYSTEM root; `MagicNumber` matches config
 - Experts + AutoTrading on; **Allow DLL imports** enabled
 
 ## Start checklist (`start_live.ps1`)
