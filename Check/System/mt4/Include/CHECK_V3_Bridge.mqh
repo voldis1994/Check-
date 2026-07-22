@@ -2,7 +2,7 @@
 #ifndef CHECK_V3_BRIDGE_MQH
 #define CHECK_V3_BRIDGE_MQH
 
-#include <CHECK_V3_Protocol.mqh>
+#include "CHECK_V3_Protocol.mqh"
 
 string CHECK_V3_ROOT_DIR = "";
 string CHECK_V3_RUNTIME_DIR = "";
@@ -21,9 +21,17 @@ string CheckV3DefaultRoot()
 bool CheckV3ResolveBridge(string requestedRoot)
 {
    if(StringLen(requestedRoot) == 0)
-      CHECK_V3_ROOT_DIR = CheckV3DefaultRoot();
+   {
+      string dataPath = TerminalInfoString(TERMINAL_DATA_PATH);
+      if(StringLen(dataPath) == 0)
+         return false;
+      CHECK_V3_ROOT_DIR = CheckV3PathJoin(dataPath, "MQL4\\Files\\CHECK_SYSTEM");
+   }
    else
       CHECK_V3_ROOT_DIR = CheckV3NormalizePath(requestedRoot);
+
+   if(StringLen(CHECK_V3_ROOT_DIR) == 0)
+      return false;
 
    CHECK_V3_RUNTIME_DIR = CheckV3PathJoin(CHECK_V3_ROOT_DIR, "runtime");
    CHECK_V3_BRIDGE_DIR = CheckV3PathJoin(CHECK_V3_RUNTIME_DIR, "bridge");

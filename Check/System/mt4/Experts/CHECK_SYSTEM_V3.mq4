@@ -2,11 +2,10 @@
 // Exports market/status JSON and executes Python-generated command JSON only.
 #property copyright "Check System"
 #property link      "https://github.com/voldis1994/Check-"
-#property version   "3.0.0"
+#property version   "3.00"
 #property strict
 
 // Quoted includes resolve next to this EA (MQL4\Experts\) after DEPLOY_MT4.
-// Angle-bracket includes also work if the same files are in MQL4\Include\.
 #include "CHECK_V3_Protocol.mqh"
 #include "CHECK_V3_Bridge.mqh"
 #include "CHECK_V3_Market.mqh"
@@ -41,14 +40,13 @@ int OnInit()
       return(INIT_FAILED);
    }
 
-   string root = CheckV3ResolveBridge(BridgeRootPath);
-   if(StringLen(root) == 0)
+   if(!CheckV3ResolveBridge(BridgeRootPath))
    {
       Alert("CHECK SYSTEM v3: cannot resolve BridgeRootPath / TERMINAL_DATA_PATH");
       return(INIT_FAILED);
    }
 
-   if(!CheckV3EnsureBridgeDirs(root))
+   if(!CheckV3EnsureBridgeDirs())
    {
       Alert("CHECK SYSTEM v3: failed to create bridge directories. Enable Allow DLL imports.");
       return(INIT_FAILED);
@@ -56,7 +54,11 @@ int OnInit()
 
    EventSetMillisecondTimer(500);
    CheckV3ExportAndExecute();
-   Print("CHECK_SYSTEM_V3 initialized bridge=", root, " magic=", MagicNumber, " account=", AccountNumber());
+   Print(
+      "CHECK_SYSTEM_V3 initialized bridge=", CheckV3BridgePathForComment(),
+      " magic=", MagicNumber,
+      " account=", AccountNumber()
+   );
    return(INIT_SUCCEEDED);
 }
 
