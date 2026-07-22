@@ -42,7 +42,7 @@ def validate_order(
         validate_spread(bid, ask, atr_value, specs, config.spread),
         validate_stop_distance(signal, specs, config.risk, atr_value),
         validate_reward_risk(signal, config.risk),
-        validate_limits(limit_state, config.limits, now),
+        validate_limits(limit_state, config.limits, now, config.risk),
     ):
         if reason != ReasonCode.RISK_ACCEPTED:
             failures.append(reason)

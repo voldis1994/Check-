@@ -13,7 +13,8 @@ def validate_stop_distance(
     signal: StrategySignal, specs: SymbolSpecs, config: RiskConfig, atr_value: float | None = None
 ) -> ReasonCode:
     distance = stop_distance_points(signal, specs)
-    minimum = max(config.min_stop_points, specs.stop_level_points)
+    # Stop must be at least max(min_stop_points, stop_level_points, freeze_level_points) away from entry
+    minimum = max(config.min_stop_points, specs.stop_level_points, specs.freeze_level_points)
     if distance < minimum:
         return ReasonCode.RISK_STOP_TOO_CLOSE
     if distance > config.max_stop_points:

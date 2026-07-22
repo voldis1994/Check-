@@ -114,17 +114,29 @@ class Position(Serializable):
 
 @dataclass(slots=True)
 class Setup(Serializable):
+    # Required positional fields
     setup_id: str
     symbol: str
     strategy: StrategyType
     side: Side
     state: SetupState
     created_at_bar: datetime
-    expires_at_bar: datetime | None
-    trigger_price: float
+    created_at_utc: datetime
+    trigger_level: float
     stop_loss: float
-    take_profit: float | None
-    reason: ReasonCode
+    # Optional / defaulted fields
+    account_number: str = ""
+    regime: MarketRegime | None = None
+    expires_at_bar: datetime | None = None
+    take_profit: float | None = None
+    invalidation_level: float | None = None
+    stop_loss_candidate: float | None = None
+    indicator_snapshot: dict[str, Any] | None = None
+    status_history: list[dict[str, Any]] = field(default_factory=list)
+    cancellation_reason: str | None = None
+    command_id: str | None = None
+    ticket: str | None = None
+    reason: ReasonCode = ReasonCode.SETUP_CREATED
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -135,27 +147,55 @@ class Setup(Serializable):
         side: Side,
         state: SetupState,
         created_at_bar: datetime,
-        expires_at_bar: datetime | None,
-        trigger_price: float,
+        trigger_level: float,
         stop_loss: float,
-        take_profit: float | None,
-        reason: ReasonCode,
+        *,
+        # legacy alias kept for callers that still pass trigger_price
+        trigger_price: float | None = None,
+        account_number: str = "",
+        regime: MarketRegime | None = None,
+        expires_at_bar: datetime | None = None,
+        take_profit: float | None = None,
+        invalidation_level: float | None = None,
+        stop_loss_candidate: float | None = None,
+        indicator_snapshot: dict[str, Any] | None = None,
+        cancellation_reason: str | None = None,
+        command_id: str | None = None,
+        ticket: str | None = None,
+        reason: ReasonCode = ReasonCode.SETUP_CREATED,
         metadata: dict[str, Any] | None = None,
+        created_at_utc: datetime | None = None,
     ) -> Setup:
-        return cls(
+        if trigger_price is not None and trigger_level == 0.0:
+            trigger_level = trigger_price
+        now = utc_now()
+        setup = cls(
             f"{strategy.value}-{side.value}-{uuid4().hex[:12]}",
             symbol,
             strategy,
             side,
             state,
             created_at_bar,
-            expires_at_bar,
-            trigger_price,
+            created_at_utc or now,
+            trigger_level,
             stop_loss,
+            account_number,
+            regime,
+            expires_at_bar,
             take_profit,
+            invalidation_level,
+            stop_loss_candidate,
+            indicator_snapshot,
+            [],  # status_history starts empty
+            cancellation_reason,
+            command_id,
+            ticket,
             reason,
             metadata or {},
         )
+        # Record initial state in history
+        setup.status_history.append({"state": state.value, "reason": reason.value, "at": now.isoformat()})
+        return setup
 
 
 @dataclass(slots=True)
@@ -283,19 +323,41 @@ class LimitState(Serializable):
     consecutive_losses: int = 0
     cooldown_until: datetime | None = None
     last_trade_at: datetime | None = None
+    daily_loss_r: float = 0.0
 
 
 @dataclass(slots=True)
 class CycleAudit(Serializable):
+    # Required fields
     cycle_id: str
     started_at: datetime
+    # Section 4 core fields
     completed_at: datetime | None = None
     symbol: str = ""
-    reasons: list[ReasonCode] = field(default_factory=list)
-    regime: MarketRegime | None = None
-    strategy: StrategyType | None = None
+    account_number: str = ""
+    market_regime: MarketRegime | None = None
+    selected_strategy: StrategyType | None = None
+    setup_state: SetupState | None = None
+    decision: Decision | None = None
+    reason_code: ReasonCode | None = None
+    human_readable_reason: str = ""
+    failed_conditions: list[str] = field(default_factory=list)
+    passed_conditions: list[str] = field(default_factory=list)
+    indicator_snapshot: dict[str, Any] | None = None
+    risk_result: RiskResult | None = None
+    execution_result: dict[str, Any] = field(default_factory=dict)
+    # Extended / useful extras
     signal: StrategySignal | None = None
-    risk: RiskResult | None = None
     command: Command | None = None
     management: ManagementAction | None = None
+    reasons: list[ReasonCode] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
+
+    def set_reason(self, code: ReasonCode, failed: list[str] | None = None) -> None:
+        """Set reason_code and derive human_readable_reason."""
+        self.reason_code = code
+        parts = [code.value]
+        if failed:
+            self.failed_conditions = list(failed)
+            parts.append("failed: " + ", ".join(failed))
+        self.human_readable_reason = "; ".join(parts)

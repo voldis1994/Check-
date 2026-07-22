@@ -73,7 +73,11 @@ def bootstrap(
         StateStore(config.paths.state_file),
         RegimeDetector(config),
         StrategyRouter(),
-        ExecutionCoordinator(config, bridge_dir or config.paths.bridge_dir),
+        ExecutionCoordinator(
+            config,
+            bridge_dir or config.paths.bridge_dir,
+            config.paths.runtime_dir / "state" / "dedupe.json",
+        ),
         AuditWriter(config.paths.audit_file),
         Metrics(),
     )

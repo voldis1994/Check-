@@ -16,9 +16,9 @@ def test_armed_to_triggered_to_open() -> None:
         side=Side.BUY,
         state=SetupState.ARMED,
         created_at_bar=datetime(2026, 1, 1, tzinfo=UTC),
-        expires_at_bar=None,
-        trigger_price=1.1,
+        trigger_level=1.1,
         stop_loss=1.0,
+        expires_at_bar=None,
         take_profit=1.3,
         reason=ReasonCode.SETUP_CREATED,
     )

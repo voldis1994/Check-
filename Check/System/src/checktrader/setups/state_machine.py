@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from checktrader.domain.enums import ReasonCode, SetupState
-from checktrader.domain.models import Setup
+from checktrader.domain.models import Setup, utc_now
 
 # Valid transitions: from_state -> {allowed to_states}
 _ALLOWED: dict[SetupState, set[SetupState]] = {
@@ -60,7 +60,9 @@ def transition(setup: Setup, target: SetupState) -> Setup:
     """Advance `setup` to `target` if the transition is valid; silently ignore otherwise."""
     if target in _ALLOWED.get(setup.state, set()):
         setup.state = target
-        setup.reason = _REASON[target]
+        reason = _REASON[target]
+        setup.reason = reason
+        setup.status_history.append({"state": target.value, "reason": reason.value, "at": utc_now().isoformat()})
     return setup
 
 
