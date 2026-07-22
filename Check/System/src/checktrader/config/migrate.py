@@ -1,7 +1,7 @@
 """Keep local system.json trading profile in sync with shipped defaults.
 
 Users should never hand-edit trading gates after a pull. Live/runtime/account_id
-and paths are preserved; regimes/strategies/risk/limits/spread/position refresh.
+and paths are preserved; regimes/strategies/risk/limits/spread/position/management refresh.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ SHIPPED_TRADING_KEYS: tuple[str, ...] = (
     "spread",
     "position",
     "position_sizing",
+    "management",
 )
 
 

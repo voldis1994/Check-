@@ -10,6 +10,7 @@ from checktrader.market_data.bars import closed_bars, lower_wick, upper_wick
 from checktrader.market_data.indicators import atr
 from checktrader.setups.state_machine import transition
 from checktrader.strategies.base import StrategyContext
+from checktrader.strategies.exits import hard_take_profit_price
 
 
 class RangeReversionStrategy:
@@ -118,24 +119,34 @@ class RangeReversionStrategy:
                         diagnostics={"m1_close": last_m1.close, "trigger": setup.trigger_level},
                     )
 
-            # Verify RR still holds at current entry price
+            # Verify RR still holds at current entry price (only when hard TP is used)
             entry = context.market.ask if setup.side == Side.BUY else context.market.bid
             risk = abs(entry - setup.stop_loss)
-            reward = abs(setup.take_profit - entry) if setup.take_profit else 0.0
-            if risk <= 0 or reward / risk < cfg.take_profit_rr:
+            if risk <= 0:
                 return StrategyResult(
                     Decision.HOLD,
                     ReasonCode.REWARD_RISK_TOO_LOW,
                     setup=setup,
-                    diagnostics={"rr": reward / risk if risk > 0 else 0.0},
+                    diagnostics={"rr": 0.0},
                 )
+            if context.config.management.hard_take_profit:
+                reward = abs(setup.take_profit - entry) if setup.take_profit else 0.0
+                if reward / risk < cfg.take_profit_rr:
+                    return StrategyResult(
+                        Decision.HOLD,
+                        ReasonCode.REWARD_RISK_TOO_LOW,
+                        setup=setup,
+                        diagnostics={"rr": reward / risk},
+                    )
 
             transition(setup, SetupState.TRIGGERED)
             context.setups.upsert(setup)
-            tp = (
-                entry + (entry - setup.stop_loss) * cfg.take_profit_rr
-                if setup.side == Side.BUY
-                else entry - (setup.stop_loss - entry) * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=entry,
+                stop=setup.stop_loss,
+                side=setup.side,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
             )
             reason = ReasonCode.RANGE_BUY_SIGNAL if setup.side == Side.BUY else ReasonCode.RANGE_SELL_SIGNAL
             return StrategyResult(
@@ -185,7 +196,13 @@ class RangeReversionStrategy:
                 )
             # Arm setup
             stop = lo - cfg.stop_buffer_atr * a
-            tp_level = context.market.ask + (context.market.ask - stop) * cfg.take_profit_rr
+            tp_level = hard_take_profit_price(
+                entry=context.market.ask,
+                stop=stop,
+                side=Side.BUY,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
             # trigger_price: M15 close (any M1 close above confirms continuation)
             trigger = last_m15.close
             setup = Setup.create(
@@ -225,7 +242,13 @@ class RangeReversionStrategy:
                 diagnostics={"reason": "close_above_mid", "side": "SELL"},
             )
         stop = hi + cfg.stop_buffer_atr * a
-        tp_level = context.market.bid - (stop - context.market.bid) * cfg.take_profit_rr
+        tp_level = hard_take_profit_price(
+            entry=context.market.bid,
+            stop=stop,
+            side=Side.SELL,
+            rr=cfg.take_profit_rr,
+            enabled=context.config.management.hard_take_profit,
+        )
         trigger = last_m15.close
         setup = Setup.create(
             context.specs.symbol,

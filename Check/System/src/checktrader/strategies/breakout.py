@@ -11,6 +11,7 @@ from checktrader.market_data.bars import closed_bars
 from checktrader.market_data.indicators import atr
 from checktrader.setups.state_machine import transition
 from checktrader.strategies.base import StrategyContext
+from checktrader.strategies.exits import hard_take_profit_price
 
 
 def _count_touches(bars: list[Candle], level: float, tol: float) -> int:
@@ -87,6 +88,14 @@ class BreakoutStrategy:
                     if retesting and still_beyond:
                         transition(setup, SetupState.TRIGGERED)
                         context.setups.upsert(setup)
+                        entry = context.market.ask
+                        tp = hard_take_profit_price(
+                            entry=entry,
+                            stop=setup.stop_loss,
+                            side=Side.BUY,
+                            rr=cfg.take_profit_rr,
+                            enabled=context.config.management.hard_take_profit,
+                        )
                         return StrategyResult(
                             Decision.OPEN,
                             ReasonCode.BREAKOUT_BUY_SIGNAL,
@@ -94,9 +103,9 @@ class BreakoutStrategy:
                                 StrategyType.BREAKOUT,
                                 Side.BUY,
                                 context.specs.symbol,
-                                context.market.ask,
+                                entry,
                                 setup.stop_loss,
-                                setup.take_profit,
+                                tp,
                                 ReasonCode.BREAKOUT_BUY_SIGNAL,
                                 setup.setup_id,
                             ),
@@ -109,6 +118,14 @@ class BreakoutStrategy:
                     if retesting and still_beyond:
                         transition(setup, SetupState.TRIGGERED)
                         context.setups.upsert(setup)
+                        entry = context.market.bid
+                        tp = hard_take_profit_price(
+                            entry=entry,
+                            stop=setup.stop_loss,
+                            side=Side.SELL,
+                            rr=cfg.take_profit_rr,
+                            enabled=context.config.management.hard_take_profit,
+                        )
                         return StrategyResult(
                             Decision.OPEN,
                             ReasonCode.BREAKOUT_SELL_SIGNAL,
@@ -116,9 +133,9 @@ class BreakoutStrategy:
                                 StrategyType.BREAKOUT,
                                 Side.SELL,
                                 context.specs.symbol,
-                                context.market.bid,
+                                entry,
                                 setup.stop_loss,
-                                setup.take_profit,
+                                tp,
                                 ReasonCode.BREAKOUT_SELL_SIGNAL,
                                 setup.setup_id,
                             ),
@@ -182,7 +199,13 @@ class BreakoutStrategy:
             entry = context.market.ask
             max_dist_atr = context.config.strategies.force_stop_atr
             stop = _clamp_buy_stop(entry, lo - cfg.stop_buffer_atr * a, a, max_dist_atr)
-            tp = entry + (entry - stop) * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=entry,
+                stop=stop,
+                side=Side.BUY,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
             # Prefer immediate OPEN — retest wait was the main pointless HOLD source.
             if cfg.confirmation_mode == "breakout_and_retest" and (last_m5.close - hi) < 0.35 * a:
                 setup = Setup.create(
@@ -224,7 +247,13 @@ class BreakoutStrategy:
             entry = context.market.bid
             max_dist_atr = context.config.strategies.force_stop_atr
             stop = _clamp_sell_stop(entry, hi + cfg.stop_buffer_atr * a, a, max_dist_atr)
-            tp = entry - (stop - entry) * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=entry,
+                stop=stop,
+                side=Side.SELL,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
             if cfg.confirmation_mode == "breakout_and_retest" and (lo - last_m5.close) < 0.35 * a:
                 setup = Setup.create(
                     context.specs.symbol,
@@ -307,7 +336,13 @@ class BreakoutStrategy:
             risk = entry - stop
             if risk <= 0:
                 return None
-            tp = entry + risk * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=entry,
+                stop=stop,
+                side=Side.BUY,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
             return StrategyResult(
                 Decision.OPEN,
                 ReasonCode.BREAKOUT_BUY_SIGNAL,
@@ -336,7 +371,13 @@ class BreakoutStrategy:
             risk = stop - entry
             if risk <= 0:
                 return None
-            tp = entry - risk * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=entry,
+                stop=stop,
+                side=Side.SELL,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
             return StrategyResult(
                 Decision.OPEN,
                 ReasonCode.BREAKOUT_SELL_SIGNAL,

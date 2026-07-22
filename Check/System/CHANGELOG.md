@@ -17,6 +17,7 @@
 - Auto-sync: every start/load refreshes trading gates in `config/system.json` from shipped example (keeps live/runtime/account_id/paths).
 - Disable RISK_ACCOUNT_NOT_OK by default; daily trade/loss/cooldown limits off (0); no min RR; force M1 entry when strategies would idle-HOLD.
 - Default lot **0.02**; tighter stops (`force_stop_atr` 0.18, buffers 0.08); M1 impulse / breakout SL clamped under trigger candle (not lookback range).
+- No hard TP by default (`hard_take_profit=false`): exits via trailing from ~0.35R + breakeven; management auto-synced.
 
 ## v3.0.0
 

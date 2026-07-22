@@ -174,13 +174,16 @@ class RiskConfig(StrictModel):
 
 
 class ManagementConfig(StrictModel):
-    breakeven_trigger_rr: float = Field(1.0, gt=0.0)
+    breakeven_trigger_rr: float = Field(0.40, gt=0.0)
     breakeven_offset_points: float = Field(2.0, ge=0.0)
-    trailing_start_rr: float = Field(1.5, gt=0.0)
-    trend_trailing_atr_multiplier: float = Field(1.0, gt=0.0)
-    breakout_trailing_atr_multiplier: float = Field(1.2, gt=0.0)
-    range_trailing_atr_multiplier: float = Field(0.8, gt=0.0)
+    # Start trailing early — hard TP is off by default so trail is the real exit
+    trailing_start_rr: float = Field(0.35, gt=0.0)
+    trend_trailing_atr_multiplier: float = Field(0.70, gt=0.0)
+    breakout_trailing_atr_multiplier: float = Field(0.80, gt=0.0)
+    range_trailing_atr_multiplier: float = Field(0.55, gt=0.0)
     take_profit_rr: float = Field(2.0, gt=0.0)
+    # False = open with no broker TP; exit via trailing / breakeven / regime flip
+    hard_take_profit: bool = False
     partial_close_enabled: bool = False
     exit_on_regime_flip: bool = True
 

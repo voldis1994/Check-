@@ -10,6 +10,7 @@ from checktrader.market_data.bars import closed_bars
 from checktrader.market_data.indicators import atr
 from checktrader.strategies.base import StrategyContext
 from checktrader.strategies.breakout import BreakoutStrategy
+from checktrader.strategies.exits import hard_take_profit_price
 from checktrader.strategies.range_reversion import RangeReversionStrategy
 from checktrader.strategies.trend_continuation import TrendContinuationStrategy
 
@@ -105,7 +106,13 @@ def _force_m1_entry(context: StrategyContext) -> StrategyResult | None:
     if bullish:
         entry = context.market.ask
         stop = entry - stop_dist
-        tp = entry + stop_dist * scfg.force_tp_rr
+        tp = hard_take_profit_price(
+            entry=entry,
+            stop=stop,
+            side=Side.BUY,
+            rr=scfg.force_tp_rr,
+            enabled=context.config.management.hard_take_profit,
+        )
         return StrategyResult(
             Decision.OPEN,
             ReasonCode.FORCE_MOMENTUM_BUY,
@@ -123,7 +130,13 @@ def _force_m1_entry(context: StrategyContext) -> StrategyResult | None:
 
     entry = context.market.bid
     stop = entry + stop_dist
-    tp = entry - stop_dist * scfg.force_tp_rr
+    tp = hard_take_profit_price(
+        entry=entry,
+        stop=stop,
+        side=Side.SELL,
+        rr=scfg.force_tp_rr,
+        enabled=context.config.management.hard_take_profit,
+    )
     return StrategyResult(
         Decision.OPEN,
         ReasonCode.FORCE_MOMENTUM_SELL,

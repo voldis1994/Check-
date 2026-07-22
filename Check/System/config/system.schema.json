@@ -321,7 +321,7 @@
       "additionalProperties": false,
       "properties": {
         "breakeven_trigger_rr": {
-          "default": 1.0,
+          "default": 0.4,
           "exclusiveMinimum": 0.0,
           "title": "Breakeven Trigger Rr",
           "type": "number"
@@ -333,25 +333,25 @@
           "type": "number"
         },
         "trailing_start_rr": {
-          "default": 1.5,
+          "default": 0.35,
           "exclusiveMinimum": 0.0,
           "title": "Trailing Start Rr",
           "type": "number"
         },
         "trend_trailing_atr_multiplier": {
-          "default": 1.0,
+          "default": 0.7,
           "exclusiveMinimum": 0.0,
           "title": "Trend Trailing Atr Multiplier",
           "type": "number"
         },
         "breakout_trailing_atr_multiplier": {
-          "default": 1.2,
+          "default": 0.8,
           "exclusiveMinimum": 0.0,
           "title": "Breakout Trailing Atr Multiplier",
           "type": "number"
         },
         "range_trailing_atr_multiplier": {
-          "default": 0.8,
+          "default": 0.55,
           "exclusiveMinimum": 0.0,
           "title": "Range Trailing Atr Multiplier",
           "type": "number"
@@ -361,6 +361,11 @@
           "exclusiveMinimum": 0.0,
           "title": "Take Profit Rr",
           "type": "number"
+        },
+        "hard_take_profit": {
+          "default": false,
+          "title": "Hard Take Profit",
+          "type": "boolean"
         },
         "partial_close_enabled": {
           "default": false,

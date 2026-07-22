@@ -33,6 +33,11 @@ def test_apply_shipped_trading_profile_keeps_runtime() -> None:
             "max_lot": 100.0,
             "lot_step": 0.01,
         },
+        "management": {
+            "hard_take_profit": False,
+            "trailing_start_rr": 0.35,
+            "breakeven_trigger_rr": 0.40,
+        },
         "account": {
             "account_id": "PAPER",
             "currency": "USD",
@@ -67,6 +72,10 @@ def test_apply_shipped_trading_profile_keeps_runtime() -> None:
             "max_lot": 100.0,
             "lot_step": 0.01,
         },
+        "management": {
+            "hard_take_profit": True,
+            "trailing_start_rr": 1.5,
+        },
     }
     merged = apply_shipped_trading_profile(local, example=example)
     assert merged["runtime"]["mode"] == "live"
@@ -80,6 +89,8 @@ def test_apply_shipped_trading_profile_keeps_runtime() -> None:
     assert merged["strategies"]["force_stop_atr"] == 0.18
     assert merged["position"]["default_lot"] == 0.02
     assert merged["position_sizing"]["fixed_lot"] == 0.02
+    assert merged["management"]["hard_take_profit"] is False
+    assert merged["management"]["trailing_start_rr"] == 0.35
 
 
 def test_sync_system_json_rewrites_stale_profile(tmp_path: Path) -> None:

@@ -323,3 +323,4 @@ def test_m1_impulse_opens_on_range_break() -> None:
     assert result.signal.entry_price - result.signal.stop_loss <= cfg.strategies.force_stop_atr * float(
         (result.diagnostics or {}).get("atr") or 1.0
     ) + 1e-9
+    assert result.signal.take_profit is None
