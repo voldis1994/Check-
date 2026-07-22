@@ -1,6 +1,6 @@
 #property copyright "SYSTEM"
 #property link      "https://github.com/voldis1994/Check-"
-#property version   "1.1.6"
+#property version   "1.1.7"
 #property strict
 
 input int MagicNumber = 100001;
@@ -14,6 +14,16 @@ datetime g_last_exported_bar_time = 0;
 string g_last_processed_command_id = "";
 uint g_last_sensor_status_export_ms = 0;
 int g_sensor_status_export_interval_ms = 500;
+datetime g_last_export_fail_print = 0;
+
+void SYSTEM_PrintExportFailureThrottled(const string message)
+{
+   datetime now = TimeCurrent();
+   if(g_last_export_fail_print != 0 && (now - g_last_export_fail_print) < 30)
+      return;
+   g_last_export_fail_print = now;
+   Print(message);
+}
 
 int OnInit()
 {
@@ -51,13 +61,19 @@ void OnTick()
    if(elapsed_ms >= (uint)g_sensor_status_export_interval_ms)
    {
       if(!SYSTEM_ExportSensorReading(account_id, symbol, magic))
-         Print("SYSTEM sensor export failed for ", symbol, " magic=", IntegerToString(magic));
+         SYSTEM_PrintExportFailureThrottled(
+            "SYSTEM sensor export failed for " + symbol + " magic=" + IntegerToString(magic)
+         );
 
       if(!SYSTEM_ExportStatus(account_id, symbol, magic))
-         Print("SYSTEM status export failed for account ", account_id);
+         SYSTEM_PrintExportFailureThrottled(
+            "SYSTEM status export failed for account " + account_id
+         );
 
       if(!SYSTEM_ExportClosedTrade(account_id, symbol, magic))
-         Print("SYSTEM closed trade export failed for ", symbol, " magic=", IntegerToString(magic));
+         SYSTEM_PrintExportFailureThrottled(
+            "SYSTEM closed trade export failed for " + symbol + " magic=" + IntegerToString(magic)
+         );
 
       g_last_sensor_status_export_ms = now_ms;
    }

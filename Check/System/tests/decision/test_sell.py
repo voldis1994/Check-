@@ -83,4 +83,8 @@ def test_sell_is_calculated_even_when_buy_is_valid() -> None:
     buy_candidate = calculate_buy_candidate(**kwargs)
     sell_candidate = calculate_sell_candidate(**kwargs)
     assert buy_candidate.valid
-    assert sell_candidate.valid
+    # SELL is still evaluated on bullish bars, but counter-momentum rejects selling into the up-move.
+    assert not sell_candidate.valid
+    assert sell_candidate.invalid_reason is not None
+    assert 'counter-momentum' in sell_candidate.invalid_reason
+    assert 0.0 <= sell_candidate.sell_score <= 1.0

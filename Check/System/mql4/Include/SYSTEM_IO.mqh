@@ -105,10 +105,14 @@ bool SYSTEM_AtomicWriteText(const string path, const string content)
    if(!write_ok || !flush_ok || !close_ok)
       return false;
 
-   if(!MoveFileExW(tmp_path, path, SYSTEM_MOVE_REPLACE_EXISTING))
-      return false;
-
-   return true;
+   // Python may briefly hold the destination open; retry replace.
+   for(int attempt = 0; attempt < 8; attempt++)
+   {
+      if(MoveFileExW(tmp_path, path, SYSTEM_MOVE_REPLACE_EXISTING) != 0)
+         return true;
+      Sleep(25);
+   }
+   return false;
 }
 
 #endif

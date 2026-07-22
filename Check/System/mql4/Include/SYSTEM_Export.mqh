@@ -12,6 +12,7 @@
 #define SYSTEM_GENERIC_READ 0x80000000
 #define SYSTEM_OPEN_EXISTING 3
 #define SYSTEM_FILE_SHARE_READ 1
+#define SYSTEM_SENSOR_MAX_ROWS 500
 
 string SYSTEM_GetTimeframeM1()
 {
@@ -203,6 +204,37 @@ string SYSTEM_AppendCsvRow(const string csv_content, const string header, const 
    return normalized + row + "\n";
 }
 
+string SYSTEM_TrimCsvToMaxDataRows(const string csv_content, const string header, const int max_rows)
+{
+   if(max_rows <= 0 || StringLen(csv_content) == 0)
+      return csv_content;
+
+   string lines[];
+   int total = StringSplit(csv_content, '\n', lines);
+   if(total <= 1)
+      return csv_content;
+
+   // Drop trailing empty split from final newline.
+   while(total > 0 && StringLen(lines[total - 1]) == 0)
+      total--;
+   if(total <= 1)
+      return header + "\n";
+
+   int data_rows = total - 1;
+   int start = 1;
+   if(data_rows > max_rows)
+      start = total - max_rows;
+
+   string output = header + "\n";
+   for(int index = start; index < total; index++)
+   {
+      if(StringLen(lines[index]) == 0)
+         continue;
+      output = output + lines[index] + "\n";
+   }
+   return output;
+}
+
 bool SYSTEM_IsNewM1Bar(const string symbol, const datetime last_bar_time)
 {
    datetime current_bar_time = iTime(symbol, PERIOD_M1, 0);
@@ -273,6 +305,7 @@ bool SYSTEM_ExportSensorReading(const string account_id, const string symbol, co
       return false;
 
    string output = SYSTEM_AppendCsvRow(existing, SYSTEM_SensorCsvHeader(), row);
+   output = SYSTEM_TrimCsvToMaxDataRows(output, SYSTEM_SensorCsvHeader(), SYSTEM_SENSOR_MAX_ROWS);
    return SYSTEM_AtomicWriteText(path, output);
 }
 
