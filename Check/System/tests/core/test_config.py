@@ -95,7 +95,7 @@ def test_load_system_config_repository_file() -> None:
     assert config.analysis.weights.context == 1.0
     assert config.risk.reward_ratio == 2.0
     assert config.trade_management.trailing_lookback_bars == 8
-    assert config.trade_management.trailing_step_pips == 4.0
+    assert config.trade_management.trailing_step_pips == 3.0
 
 def test_parse_config_payload_loads_pip_trailing_settings() -> None:
     config = parse_config_payload(valid_system_config_payload())

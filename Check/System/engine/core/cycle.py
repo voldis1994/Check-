@@ -182,6 +182,16 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
         money_trailing_step_index=state.money_trailing_step_index,
         locked_profit_money=state.locked_profit_money,
         last_money_trailing_sl=state.last_money_trailing_sl,
+        be_plus_confirmed=state.be_plus_confirmed,
+        confirmed_protective_sl=state.confirmed_protective_sl,
+        pending_protective_sl=state.pending_protective_sl,
+        pending_trailing_reason=state.pending_trailing_reason,
+        pip_trail_confirmed_steps=state.pip_trail_confirmed_steps,
+        computed_be_plus_sl=state.computed_be_plus_sl,
+        next_pip_trail_sl=state.next_pip_trail_sl,
+        last_trailing_modify_status=state.last_trailing_modify_status,
+        last_trailing_broker_error=state.last_trailing_broker_error,
+        trailing_reason_code=state.trailing_reason_code,
     )
     state_missing = bool(state.money_trailing_state_missing)
     if state_missing:
@@ -193,9 +203,26 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
             message=MONEY_TRAILING_STATE_MISSING,
             context={'ticket': state.open_ticket, 'reason': MONEY_TRAILING_STATE_MISSING},
         )
-    pending_modify_sl = None
-    if state.pending_execution_command_id is not None and state.last_money_trailing_sl is not None:
+    pending_modify_sl = state.pending_protective_sl
+    if pending_modify_sl is None and state.pending_execution_command_id is not None and state.last_money_trailing_sl is not None:
         pending_modify_sl = state.last_money_trailing_sl
+    # Broker status reconciliation: confirm pending if broker SL already matches.
+    from engine.risk.money_step_trailing import confirm_protective_sl
+    if (
+        status_position is not None
+        and status_position.stop_loss is not None
+        and money_state.pending_protective_sl is not None
+        and abs(float(status_position.stop_loss) - float(money_state.pending_protective_sl)) <= price_tolerance
+    ):
+        money_state = confirm_protective_sl(
+            money_state,
+            broker_sl=float(status_position.stop_loss),
+            price_tolerance=price_tolerance,
+            trailing_step_pips=runtime.config.trade_management.trailing_step_pips,
+            pip=pip,
+            digits=digits,
+            side=position.side,
+        )
     merge = merge_technical_and_money_step_trailing(
         technical_result=technical,
         params=money_params,
@@ -219,6 +246,8 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
         sensor_fresh=sensor_fresh,
         pending_modify_sl=pending_modify_sl,
         state_missing=state_missing,
+        trailing_step_pips=runtime.config.trade_management.trailing_step_pips,
+        pip=pip,
     )
     state.apply_money_trailing_state(
         peak_net_profit_money=merge.state.peak_net_profit_money,
@@ -226,6 +255,18 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
         locked_profit_money=merge.state.locked_profit_money,
         last_money_trailing_sl=merge.state.last_money_trailing_sl,
         ticket=state.open_ticket,
+        be_plus_confirmed=merge.state.be_plus_confirmed,
+        confirmed_protective_sl=merge.state.confirmed_protective_sl,
+        pending_protective_sl=merge.state.pending_protective_sl,
+        pending_trailing_reason=merge.state.pending_trailing_reason,
+        pip_trail_confirmed_steps=merge.state.pip_trail_confirmed_steps,
+        computed_be_plus_sl=merge.state.computed_be_plus_sl,
+        next_pip_trail_sl=merge.state.next_pip_trail_sl,
+        last_trailing_modify_status=merge.state.last_trailing_modify_status,
+        last_trailing_broker_error=merge.state.last_trailing_broker_error,
+        trailing_reason_code=merge.state.trailing_reason_code,
+        current_net_profit_money=net_profit,
+        sync_pending=True,
     )
     if merge.skip_reason == 'money_step_trailing_blocked_invalid_tick':
         log_error(
@@ -233,8 +274,8 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
             instance_memory.instance,
             module=MODULE_NAME,
             error_type=ErrorType.VALIDATION.value,
-            message='money step trailing blocked: invalid tick value/size or volume',
-            context={'tick_value': tick_value, 'tick_size': tick_size, 'volume': volume, 'ticket': state.open_ticket},
+            message='money step trailing blocked: invalid tick value/size or volume; BE+0.20 not marked complete',
+            context={'tick_value': tick_value, 'tick_size': tick_size, 'volume': volume, 'ticket': state.open_ticket, 'reason_code': 'BE_PLUS_MISSING_TICK_DATA'},
         )
     return merge.management_result
 

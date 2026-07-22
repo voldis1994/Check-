@@ -88,6 +88,15 @@ class InstanceDashboardView:
     system_decision_before_ai: str | None = None
     decision_after_ai: str | None = None
     exec_stale: bool = False
+    computed_be_plus_sl: float | None = None
+    confirmed_protective_sl: float | None = None
+    next_pip_trail_sl: float | None = None
+    current_net_profit_money: float | None = None
+    locked_profit_money: float | None = None
+    last_trailing_modify_status: str | None = None
+    last_trailing_broker_error: str | None = None
+    trailing_reason_code: str | None = None
+    be_plus_confirmed: bool | None = None
 
 @dataclass(frozen=True)
 class DashboardSnapshot:
@@ -371,6 +380,15 @@ def read_instance_dashboard_view(paths: SystemPaths, instance: Instance) -> Inst
         system_decision_before_ai=None if decision_entry is None else decision_entry.system_decision_before_ai,
         decision_after_ai=None if decision_entry is None else decision_entry.decision_after_ai,
         exec_stale=stale,
+        computed_be_plus_sl=instance_state.computed_be_plus_sl,
+        confirmed_protective_sl=instance_state.confirmed_protective_sl,
+        next_pip_trail_sl=instance_state.next_pip_trail_sl,
+        current_net_profit_money=instance_state.current_net_profit_money,
+        locked_profit_money=instance_state.locked_profit_money if instance_state.open_ticket is not None else None,
+        last_trailing_modify_status=instance_state.last_trailing_modify_status,
+        last_trailing_broker_error=instance_state.last_trailing_broker_error,
+        trailing_reason_code=instance_state.trailing_reason_code,
+        be_plus_confirmed=instance_state.be_plus_confirmed if instance_state.open_ticket is not None else None,
     )
 
 

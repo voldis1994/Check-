@@ -61,6 +61,17 @@ class InstanceState:
     last_money_trailing_sl: float | None = None
     money_trailing_ticket: int | None = None
     money_trailing_state_missing: bool = False
+    be_plus_confirmed: bool = False
+    confirmed_protective_sl: float | None = None
+    pending_protective_sl: float | None = None
+    pending_trailing_reason: str | None = None
+    pip_trail_confirmed_steps: int = 0
+    computed_be_plus_sl: float | None = None
+    next_pip_trail_sl: float | None = None
+    last_trailing_modify_status: str | None = None
+    last_trailing_broker_error: str | None = None
+    trailing_reason_code: str | None = None
+    current_net_profit_money: float | None = None
     cooldown_remaining_bars: int = 0
     cooldown_last_counted_bar_utc: str = ''
     last_trade_result: str | None = None
@@ -197,6 +208,18 @@ class InstanceState:
             'money_trailing_step_index': self.money_trailing_step_index,
             'locked_profit_money': self.locked_profit_money,
             'last_money_trailing_sl': self.last_money_trailing_sl,
+            'be_plus_confirmed': self.be_plus_confirmed,
+            'confirmed_protective_sl': self.confirmed_protective_sl,
+            'pending_protective_sl': self.pending_protective_sl,
+            'pending_trailing_reason': self.pending_trailing_reason,
+            'pip_trail_confirmed_steps': self.pip_trail_confirmed_steps,
+            'computed_be_plus_sl': self.computed_be_plus_sl,
+            'next_pip_trail_sl': self.next_pip_trail_sl,
+            'last_trailing_modify_status': self.last_trailing_modify_status,
+            'last_trailing_broker_error': self.last_trailing_broker_error,
+            'trailing_reason_code': self.trailing_reason_code,
+            'current_net_profit_money': self.current_net_profit_money,
+            'broker_stop_loss': self.position_stop_loss,
         }
 
     def clear_money_trailing_state(self) -> None:
@@ -206,6 +229,17 @@ class InstanceState:
         self.last_money_trailing_sl = None
         self.money_trailing_ticket = None
         self.money_trailing_state_missing = False
+        self.be_plus_confirmed = False
+        self.confirmed_protective_sl = None
+        self.pending_protective_sl = None
+        self.pending_trailing_reason = None
+        self.pip_trail_confirmed_steps = 0
+        self.computed_be_plus_sl = None
+        self.next_pip_trail_sl = None
+        self.last_trailing_modify_status = None
+        self.last_trailing_broker_error = None
+        self.trailing_reason_code = None
+        self.current_net_profit_money = None
 
     def apply_money_trailing_state(
         self,
@@ -215,6 +249,18 @@ class InstanceState:
         locked_profit_money: float,
         last_money_trailing_sl: float | None,
         ticket: int | None = None,
+        be_plus_confirmed: bool | None = None,
+        confirmed_protective_sl: float | None = None,
+        pending_protective_sl: float | None = None,
+        pending_trailing_reason: str | None = None,
+        pip_trail_confirmed_steps: int | None = None,
+        computed_be_plus_sl: float | None = None,
+        next_pip_trail_sl: float | None = None,
+        last_trailing_modify_status: str | None = None,
+        last_trailing_broker_error: str | None = None,
+        trailing_reason_code: str | None = None,
+        current_net_profit_money: float | None = None,
+        sync_pending: bool = False,
     ) -> None:
         self.peak_net_profit_money = peak_net_profit_money
         self.money_trailing_step_index = money_trailing_step_index
@@ -225,6 +271,28 @@ class InstanceState:
         elif self.open_ticket is not None:
             self.money_trailing_ticket = self.open_ticket
         self.money_trailing_state_missing = False
+        if be_plus_confirmed is not None:
+            self.be_plus_confirmed = be_plus_confirmed
+        if confirmed_protective_sl is not None:
+            self.confirmed_protective_sl = confirmed_protective_sl
+        if sync_pending or pending_protective_sl is not None:
+            self.pending_protective_sl = pending_protective_sl
+        if sync_pending or pending_trailing_reason is not None:
+            self.pending_trailing_reason = pending_trailing_reason
+        if pip_trail_confirmed_steps is not None:
+            self.pip_trail_confirmed_steps = pip_trail_confirmed_steps
+        if computed_be_plus_sl is not None:
+            self.computed_be_plus_sl = computed_be_plus_sl
+        if next_pip_trail_sl is not None:
+            self.next_pip_trail_sl = next_pip_trail_sl
+        if last_trailing_modify_status is not None:
+            self.last_trailing_modify_status = last_trailing_modify_status
+        if last_trailing_broker_error is not None:
+            self.last_trailing_broker_error = last_trailing_broker_error
+        if trailing_reason_code is not None:
+            self.trailing_reason_code = trailing_reason_code
+        if current_net_profit_money is not None:
+            self.current_net_profit_money = current_net_profit_money
 
     def clear_position(self) -> None:
         self.open_ticket = None
@@ -375,6 +443,28 @@ class InstanceState:
             data['money_trailing_ticket'] = self.money_trailing_ticket
         if self.money_trailing_state_missing:
             data['money_trailing_state_missing'] = True
+        if self.be_plus_confirmed:
+            data['be_plus_confirmed'] = True
+        if self.confirmed_protective_sl is not None:
+            data['confirmed_protective_sl'] = self.confirmed_protective_sl
+        if self.pending_protective_sl is not None:
+            data['pending_protective_sl'] = self.pending_protective_sl
+        if self.pending_trailing_reason is not None:
+            data['pending_trailing_reason'] = self.pending_trailing_reason
+        if self.pip_trail_confirmed_steps:
+            data['pip_trail_confirmed_steps'] = self.pip_trail_confirmed_steps
+        if self.computed_be_plus_sl is not None:
+            data['computed_be_plus_sl'] = self.computed_be_plus_sl
+        if self.next_pip_trail_sl is not None:
+            data['next_pip_trail_sl'] = self.next_pip_trail_sl
+        if self.last_trailing_modify_status is not None:
+            data['last_trailing_modify_status'] = self.last_trailing_modify_status
+        if self.last_trailing_broker_error is not None:
+            data['last_trailing_broker_error'] = self.last_trailing_broker_error
+        if self.trailing_reason_code is not None:
+            data['trailing_reason_code'] = self.trailing_reason_code
+        if self.current_net_profit_money is not None:
+            data['current_net_profit_money'] = self.current_net_profit_money
         if self.cooldown_remaining_bars > 0:
             data['cooldown_remaining_bars'] = self.cooldown_remaining_bars
         if self.cooldown_last_counted_bar_utc:
@@ -516,6 +606,37 @@ class InstanceState:
         ):
             state.money_trailing_ticket = state.open_ticket
         state.money_trailing_state_missing = bool(payload.get('money_trailing_state_missing', False))
+        state.be_plus_confirmed = bool(payload.get('be_plus_confirmed', False))
+        confirmed_protective_sl = payload.get('confirmed_protective_sl')
+        if confirmed_protective_sl is not None:
+            state.confirmed_protective_sl = float(confirmed_protective_sl)
+        pending_protective_sl = payload.get('pending_protective_sl')
+        if pending_protective_sl is not None:
+            state.pending_protective_sl = float(pending_protective_sl)
+        pending_trailing_reason = payload.get('pending_trailing_reason')
+        if pending_trailing_reason is not None:
+            state.pending_trailing_reason = str(pending_trailing_reason)
+        pip_trail_confirmed_steps = payload.get('pip_trail_confirmed_steps')
+        if pip_trail_confirmed_steps is not None:
+            state.pip_trail_confirmed_steps = int(pip_trail_confirmed_steps)
+        computed_be_plus_sl = payload.get('computed_be_plus_sl')
+        if computed_be_plus_sl is not None:
+            state.computed_be_plus_sl = float(computed_be_plus_sl)
+        next_pip_trail_sl = payload.get('next_pip_trail_sl')
+        if next_pip_trail_sl is not None:
+            state.next_pip_trail_sl = float(next_pip_trail_sl)
+        last_trailing_modify_status = payload.get('last_trailing_modify_status')
+        if last_trailing_modify_status is not None:
+            state.last_trailing_modify_status = str(last_trailing_modify_status)
+        last_trailing_broker_error = payload.get('last_trailing_broker_error')
+        if last_trailing_broker_error is not None:
+            state.last_trailing_broker_error = str(last_trailing_broker_error)
+        trailing_reason_code = payload.get('trailing_reason_code')
+        if trailing_reason_code is not None:
+            state.trailing_reason_code = str(trailing_reason_code)
+        current_net_profit_money = payload.get('current_net_profit_money')
+        if current_net_profit_money is not None:
+            state.current_net_profit_money = float(current_net_profit_money)
         if state.open_ticket is not None and state.money_trailing_ticket is not None and state.money_trailing_ticket != state.open_ticket:
             state.clear_money_trailing_state()
             state.money_trailing_ticket = state.open_ticket

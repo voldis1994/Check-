@@ -110,6 +110,96 @@ def apply_ack_to_instance_state(instance_state: InstanceState, order_command: Or
         # Never clear a pending OPEN identity just because trailing MODIFY acked.
         if ack_record.status == AckStatus.SUCCESS.value and order_command.stop_loss is not None and order_command.take_profit is not None:
             instance_state.update_position_levels(stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
+            from engine.risk.money_step_trailing import MoneyStepTrailingState, confirm_protective_sl
+            digits = instance_state.instrument_digits or 5
+            point = instance_state.instrument_point or (10 ** (-digits))
+            pip = instance_state.instrument_pip or (point * 10.0)
+            price_tolerance = max(point, 10 ** (-digits), 1e-05)
+            money_state = MoneyStepTrailingState(
+                peak_net_profit_money=instance_state.peak_net_profit_money,
+                money_trailing_step_index=instance_state.money_trailing_step_index,
+                locked_profit_money=instance_state.locked_profit_money,
+                last_money_trailing_sl=instance_state.last_money_trailing_sl,
+                be_plus_confirmed=instance_state.be_plus_confirmed,
+                confirmed_protective_sl=instance_state.confirmed_protective_sl,
+                pending_protective_sl=instance_state.pending_protective_sl if instance_state.pending_protective_sl is not None else order_command.stop_loss,
+                pending_trailing_reason=instance_state.pending_trailing_reason,
+                pip_trail_confirmed_steps=instance_state.pip_trail_confirmed_steps,
+                computed_be_plus_sl=instance_state.computed_be_plus_sl,
+                next_pip_trail_sl=instance_state.next_pip_trail_sl,
+                last_trailing_modify_status=instance_state.last_trailing_modify_status,
+                last_trailing_broker_error=instance_state.last_trailing_broker_error,
+                trailing_reason_code=instance_state.trailing_reason_code,
+            )
+            confirmed = confirm_protective_sl(
+                money_state,
+                broker_sl=float(order_command.stop_loss),
+                price_tolerance=price_tolerance,
+                trailing_step_pips=3.0,
+                pip=pip,
+                digits=digits,
+                side=instance_state.position_side or Side.BUY.value,
+            )
+            # Recompute next pip target if BE just confirmed — caller cycle will refine with config.
+            instance_state.apply_money_trailing_state(
+                peak_net_profit_money=confirmed.peak_net_profit_money,
+                money_trailing_step_index=confirmed.money_trailing_step_index,
+                locked_profit_money=confirmed.locked_profit_money,
+                last_money_trailing_sl=confirmed.last_money_trailing_sl,
+                ticket=instance_state.open_ticket,
+                be_plus_confirmed=confirmed.be_plus_confirmed,
+                confirmed_protective_sl=confirmed.confirmed_protective_sl,
+                pending_protective_sl=None,
+                pending_trailing_reason=None,
+                pip_trail_confirmed_steps=confirmed.pip_trail_confirmed_steps,
+                computed_be_plus_sl=confirmed.computed_be_plus_sl,
+                next_pip_trail_sl=confirmed.next_pip_trail_sl,
+                last_trailing_modify_status='SUCCESS',
+                last_trailing_broker_error=None,
+                trailing_reason_code=confirmed.trailing_reason_code,
+                sync_pending=True,
+            )
+        elif ack_record.status in {AckStatus.FAILED.value, AckStatus.REJECTED.value}:
+            from engine.risk.money_step_trailing import MoneyStepTrailingState, mark_protective_modify_rejected
+            money_state = MoneyStepTrailingState(
+                peak_net_profit_money=instance_state.peak_net_profit_money,
+                money_trailing_step_index=instance_state.money_trailing_step_index,
+                locked_profit_money=instance_state.locked_profit_money,
+                last_money_trailing_sl=instance_state.last_money_trailing_sl,
+                be_plus_confirmed=instance_state.be_plus_confirmed,
+                confirmed_protective_sl=instance_state.confirmed_protective_sl,
+                pending_protective_sl=instance_state.pending_protective_sl if instance_state.pending_protective_sl is not None else order_command.stop_loss,
+                pending_trailing_reason=instance_state.pending_trailing_reason,
+                pip_trail_confirmed_steps=instance_state.pip_trail_confirmed_steps,
+                computed_be_plus_sl=instance_state.computed_be_plus_sl,
+                next_pip_trail_sl=instance_state.next_pip_trail_sl,
+                last_trailing_modify_status=instance_state.last_trailing_modify_status,
+                last_trailing_broker_error=instance_state.last_trailing_broker_error,
+                trailing_reason_code=instance_state.trailing_reason_code,
+            )
+            rejected = mark_protective_modify_rejected(
+                money_state,
+                status=str(ack_record.status),
+                error_code=str(ack_record.error_code) if ack_record.error_code is not None else None,
+            )
+            instance_state.apply_money_trailing_state(
+                peak_net_profit_money=rejected.peak_net_profit_money,
+                money_trailing_step_index=rejected.money_trailing_step_index,
+                locked_profit_money=rejected.locked_profit_money,
+                last_money_trailing_sl=rejected.last_money_trailing_sl,
+                ticket=instance_state.open_ticket,
+                be_plus_confirmed=rejected.be_plus_confirmed,
+                confirmed_protective_sl=rejected.confirmed_protective_sl,
+                pending_protective_sl=rejected.pending_protective_sl,
+                pending_trailing_reason=rejected.pending_trailing_reason,
+                pip_trail_confirmed_steps=rejected.pip_trail_confirmed_steps,
+                computed_be_plus_sl=rejected.computed_be_plus_sl,
+                next_pip_trail_sl=rejected.next_pip_trail_sl,
+                last_trailing_modify_status=rejected.last_trailing_modify_status,
+                last_trailing_broker_error=rejected.last_trailing_broker_error,
+                trailing_reason_code=rejected.trailing_reason_code,
+                sync_pending=True,
+            )
     else:
         instance_state.clear_pending_execution()
 

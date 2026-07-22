@@ -264,6 +264,8 @@ function renderInstances(data) {
            <div class="pos-title">Open position</div>
            <div class="pos-main">${esc(v.position_side)} · #${esc(v.open_ticket)} · ${esc(v.position_volume)}</div>
            <div class="pos-sub">entry ${fmt(v.entry_price)} · SL ${fmt(v.stop_loss)} · TP ${fmt(v.take_profit || 0)} · bars ${esc(v.position_bars_open)}</div>
+           <div class="pos-sub">BE+ ${fmt(v.computed_be_plus_sl)} · confirmed ${fmt(v.confirmed_protective_sl)} · next+3pip ${fmt(v.next_pip_trail_sl)}</div>
+           <div class="pos-sub">net ${fmt(v.current_net_profit_money, 2)} · locked ${fmt(v.locked_profit_money, 2)} · ${esc(v.trailing_reason_code || '—')} · MODIFY ${esc(v.last_trailing_modify_status || '—')}${v.last_trailing_broker_error ? ' · err '+esc(v.last_trailing_broker_error) : ''}</div>
          </div>`
       : `<div class="pos flat"><div class="pos-title">Position</div><div class="pos-main">Flat</div><div class="pos-sub">Gaida nākamo signālu / trail</div></div>`;
     return `<article class="hero">
