@@ -32,7 +32,9 @@ def validate_reward_risk(signal: StrategySignal, config: RiskConfig) -> ReasonCo
         return ReasonCode.RISK_ACCEPTED
     risk = abs(signal.entry_price - signal.stop_loss)
     reward = abs(signal.take_profit - signal.entry_price)
-    if risk <= 0.0 or reward / risk < config.min_reward_risk:
+    if risk <= 0.0:
+        return ReasonCode.RISK_REWARD_TOO_LOW
+    if config.min_reward_risk > 0.0 and reward / risk < config.min_reward_risk:
         return ReasonCode.RISK_REWARD_TOO_LOW
     # Directional sanity
     if signal.side == Side.BUY and not (signal.stop_loss < signal.entry_price < signal.take_profit):

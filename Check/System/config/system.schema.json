@@ -14,13 +14,13 @@
           "type": "string"
         },
         "min_equity": {
-          "default": 100.0,
-          "exclusiveMinimum": 0,
+          "default": 0.0,
+          "minimum": 0.0,
           "title": "Min Equity",
           "type": "number"
         },
         "max_drawdown_percent": {
-          "default": 25.0,
+          "default": 100.0,
           "maximum": 100.0,
           "minimum": 0.0,
           "title": "Max Drawdown Percent",
@@ -260,25 +260,25 @@
       "additionalProperties": false,
       "properties": {
         "max_daily_trades": {
-          "default": 6,
+          "default": 0,
           "minimum": 0,
           "title": "Max Daily Trades",
           "type": "integer"
         },
         "max_consecutive_losses": {
-          "default": 3,
+          "default": 0,
           "minimum": 0,
           "title": "Max Consecutive Losses",
           "type": "integer"
         },
         "cooldown_m1_bars": {
-          "default": 5,
+          "default": 0,
           "minimum": 0,
           "title": "Cooldown M1 Bars",
           "type": "integer"
         },
         "cooldown_error_seconds": {
-          "default": 30.0,
+          "default": 5.0,
           "minimum": 0.0,
           "title": "Cooldown Error Seconds",
           "type": "number"
@@ -760,25 +760,25 @@
       "additionalProperties": false,
       "properties": {
         "daily_loss_limit_r": {
-          "default": 3.0,
+          "default": 0.0,
           "minimum": 0.0,
           "title": "Daily Loss Limit R",
           "type": "number"
         },
         "min_reward_risk": {
-          "default": 1.5,
-          "exclusiveMinimum": 0.0,
+          "default": 0.0,
+          "minimum": 0.0,
           "title": "Min Reward Risk",
           "type": "number"
         },
         "max_stop_atr": {
-          "default": 2.0,
+          "default": 3.0,
           "exclusiveMinimum": 0.0,
           "title": "Max Stop Atr",
           "type": "number"
         },
         "min_stop_points": {
-          "default": 10.0,
+          "default": 1.0,
           "exclusiveMinimum": 0.0,
           "title": "Min Stop Points",
           "type": "number"
@@ -788,6 +788,11 @@
           "exclusiveMinimum": 0.0,
           "title": "Max Stop Points",
           "type": "number"
+        },
+        "enforce_account_status": {
+          "default": false,
+          "title": "Enforce Account Status",
+          "type": "boolean"
         }
       },
       "title": "RiskConfig",
@@ -839,13 +844,13 @@
       "additionalProperties": false,
       "properties": {
         "max_points": {
-          "default": 30.0,
+          "default": 500.0,
           "minimum": 0.0,
           "title": "Max Points",
           "type": "number"
         },
         "max_atr_fraction": {
-          "default": 0.15,
+          "default": 1.0,
           "minimum": 0.0,
           "title": "Max Atr Fraction",
           "type": "number"
@@ -865,6 +870,23 @@
         },
         "breakout": {
           "$ref": "#/$defs/BreakoutConfig"
+        },
+        "force_entry_when_idle": {
+          "default": true,
+          "title": "Force Entry When Idle",
+          "type": "boolean"
+        },
+        "force_stop_atr": {
+          "default": 0.5,
+          "exclusiveMinimum": 0.0,
+          "title": "Force Stop Atr",
+          "type": "number"
+        },
+        "force_tp_rr": {
+          "default": 1.2,
+          "exclusiveMinimum": 0.0,
+          "title": "Force Tp Rr",
+          "type": "number"
         }
       },
       "title": "StrategiesConfig",

@@ -29,10 +29,14 @@ def validate_order(
 
     if config.runtime.mode == "live" and not config.runtime.trading_enabled:
         failures.append(ReasonCode.RISK_LIVE_NOT_ENABLED)
-    if account is not None and (
-        not account.connected or not account.trading_allowed or account.equity < config.account.min_equity
-    ):
-        failures.append(ReasonCode.RISK_ACCOUNT_NOT_OK)
+
+    # Account connected / trade_allowed / min_equity are OFF by default.
+    # Broker status flags were blocking live NATURALGAS entries (RISK_ACCOUNT_NOT_OK).
+    if config.risk.enforce_account_status and account is not None:
+        min_eq = config.account.min_equity
+        if (not account.connected) or (not account.trading_allowed) or (min_eq > 0 and account.equity < min_eq):
+            failures.append(ReasonCode.RISK_ACCOUNT_NOT_OK)
+
     if len(positions) >= config.position.max_open_positions:
         failures.append(ReasonCode.RISK_POSITION_EXISTS)
     if lot_reason != ReasonCode.RISK_ACCEPTED:

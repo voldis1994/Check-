@@ -27,12 +27,13 @@ def test_spread_filter(specs: SymbolSpecs) -> None:
 
 def test_daily_trade_limit() -> None:
     cfg = load_config()
+    limits = cfg.limits.model_copy(update={"max_daily_trades": 6})
     state = LimitState(trade_date="")
     now = datetime(2026, 3, 1, tzinfo=UTC)
-    for _ in range(cfg.limits.max_daily_trades):
-        assert validate_limits(state, cfg.limits, now) is ReasonCode.RISK_ACCEPTED
+    for _ in range(limits.max_daily_trades):
+        assert validate_limits(state, limits, now) is ReasonCode.RISK_ACCEPTED
         record_trade_open(state, now)
-    assert validate_limits(state, cfg.limits, now) is ReasonCode.RISK_DAILY_TRADES_LIMIT
+    assert validate_limits(state, limits, now) is ReasonCode.RISK_DAILY_TRADES_LIMIT
 
 
 def test_command_dedupe() -> None:
