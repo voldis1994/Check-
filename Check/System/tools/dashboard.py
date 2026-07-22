@@ -66,6 +66,7 @@ class DashboardApp:
         self._reader_thread: threading.Thread | None = None
         self._audit_offset = 0
         self._stopping = False
+        self._stale_warned = False
 
         self._build_style()
         self._build_ui()
@@ -279,7 +280,17 @@ class DashboardApp:
         running = self.engine.running
         pid = self.engine.pid
         engine_mode = self.engine.mode or health.mode
-        if running:
+        market_age = health.bridges[0].market_age_s if health.bridges else None
+        stale = market_age is not None and market_age > 30
+
+        if running and stale:
+            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — BRIDGE STALE")
+            self.state_banner.configure(
+                text="RUNNING — BRIDGE STALE (EA nav raksta svaigus failus)",
+                bg=COLORS["warn_bg"],
+                fg=COLORS["warn"],
+            )
+        elif running:
             self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode})")
             self.state_banner.configure(
                 text=f"RUNNING — {engine_mode.upper()}",
@@ -315,6 +326,13 @@ class DashboardApp:
             self.status_vars["bridge"].set(f"{len(health.bridges)} found · {short}")
             self.status_vars["market"].set(f"{format_age(bridge.market_age_s)} ({bridge.market_file or '-'})")
             self.status_vars["status"].set(f"{format_age(bridge.status_age_s)} ({bridge.status_file or '-'})")
+            if stale and not self._stale_warned:
+                self._stale_warned = True
+                self._append_activity(
+                    "WARN   Bridge STALE — redeploy MT4 EA, Allow DLL imports, check chart comment EXPORT OK"
+                )
+            if not stale:
+                self._stale_warned = False
         else:
             self.status_vars["bridge"].set("none discovered")
             self.status_vars["market"].set("missing")

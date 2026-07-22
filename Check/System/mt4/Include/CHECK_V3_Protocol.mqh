@@ -189,14 +189,44 @@ string CheckV3JsonNumber(double value, int digits = 8)
    return DoubleToString(value, digits);
 }
 
+string CheckV3Mql4FilesRoot()
+{
+   return CheckV3NormalizePath(CheckV3PathJoin(TerminalInfoString(TERMINAL_DATA_PATH), "MQL4\\Files"));
+}
+
+string CheckV3ToAbsoluteUnderFiles(string path)
+{
+   string p = CheckV3NormalizePath(path);
+   if(StringFind(p, ":") >= 0)
+      return p;
+   return CheckV3PathJoin(CheckV3Mql4FilesRoot(), p);
+}
+
+string CheckV3ToRelativeFilesPath(string path)
+{
+   string abs = CheckV3ToAbsoluteUnderFiles(path);
+   string root = CheckV3Mql4FilesRoot() + "\\";
+   string absU = CheckV3UpperAscii(abs);
+   string rootU = CheckV3UpperAscii(root);
+   if(StringFind(absU, rootU) == 0)
+      return StringSubstr(abs, StringLen(root));
+   return abs;
+}
+
 bool CheckV3WriteTextAtomic(string targetPath, string content)
 {
-   string target = CheckV3NormalizePath(targetPath);
-   string temp = target + ".tmp." + IntegerToString(GetTickCount()) + "." + IntegerToString(MathRand());
-   int handle = FileOpen(temp, FILE_WRITE | FILE_BIN);
+   // MQL4 FileOpen only accepts paths relative to TerminalDataPath\MQL4\Files.
+   // Absolute paths silently fail — which left stale bridge JSON on disk.
+   string targetAbs = CheckV3ToAbsoluteUnderFiles(targetPath);
+   string relTarget = CheckV3ToRelativeFilesPath(targetAbs);
+   string relTemp = relTarget + ".tmp." + IntegerToString(GetTickCount()) + "." + IntegerToString(MathRand());
+   string tempAbs = CheckV3PathJoin(CheckV3Mql4FilesRoot(), relTemp);
+
+   ResetLastError();
+   int handle = FileOpen(relTemp, FILE_WRITE | FILE_BIN | FILE_ANSI);
    if(handle == INVALID_HANDLE)
    {
-      Print("CHECK v3: failed to open temp file: ", temp, " error=", GetLastError());
+      Print("CHECK v3: failed to open temp file: ", relTemp, " error=", GetLastError());
       return false;
    }
 
@@ -207,10 +237,10 @@ bool CheckV3WriteTextAtomic(string targetPath, string content)
    int flags = CHECK_V3_MOVEFILE_REPLACE_EXISTING |
                CHECK_V3_MOVEFILE_COPY_ALLOWED |
                CHECK_V3_MOVEFILE_WRITE_THROUGH;
-   if(!MoveFileExW(temp, target, flags))
+   if(!MoveFileExW(tempAbs, targetAbs, flags))
    {
-      Print("CHECK v3: atomic move failed from ", temp, " to ", target, " error=", GetLastError());
-      FileDelete(temp);
+      Print("CHECK v3: atomic move failed from ", tempAbs, " to ", targetAbs, " error=", GetLastError());
+      FileDelete(relTemp);
       return false;
    }
 
@@ -219,8 +249,9 @@ bool CheckV3WriteTextAtomic(string targetPath, string content)
 
 string CheckV3ReadText(string path)
 {
-   string p = CheckV3NormalizePath(path);
-   int handle = FileOpen(p, FILE_READ | FILE_BIN);
+   string rel = CheckV3ToRelativeFilesPath(path);
+   ResetLastError();
+   int handle = FileOpen(rel, FILE_READ | FILE_BIN | FILE_ANSI);
    if(handle == INVALID_HANDLE)
       return "";
 

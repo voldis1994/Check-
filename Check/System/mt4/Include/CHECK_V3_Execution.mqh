@@ -287,7 +287,7 @@ void CheckV3ExecuteCommandFile(string commandPath, string sourceFile, int defaul
 
 void CheckV3ExecuteCommands(int defaultMagic)
 {
-   string pattern = CheckV3PathJoin(CHECK_V3_COMMANDS_DIR, "*.json");
+   string pattern = CheckV3ToRelativeFilesPath(CheckV3PathJoin(CHECK_V3_COMMANDS_DIR, "*.json"));
    string fileName = "";
    long handle = FileFindFirst(pattern, fileName);
    if(handle == INVALID_HANDLE)

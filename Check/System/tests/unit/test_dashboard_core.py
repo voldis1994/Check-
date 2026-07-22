@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[2] / "tools"
@@ -43,6 +44,28 @@ def test_format_audit_line_and_age() -> None:
     assert "decision=WAIT" in line
     assert format_age(None) == "missing"
     assert format_age(0.5) == "fresh"
+    assert format_age(45).startswith("STALE")
+
+
+def test_preferred_json_ignores_legacy_when_v3_present(tmp_path: Path) -> None:
+    import dashboard_core as core
+
+    folder = tmp_path / "market"
+    folder.mkdir()
+    legacy = folder / "market_NATURALGAS_19942026.json"
+    legacy.write_text("{}", encoding="utf-8")
+    time.sleep(0.05)
+    v3 = folder / "231054_NATURALGAS_market.json"
+    v3.write_text("{}", encoding="utf-8")
+    # Make legacy appear newer on mtime
+    legacy.write_text('{"old":true}', encoding="utf-8")
+    chosen = core._preferred_json(folder, role="market")
+    assert chosen is not None
+    assert chosen.name.endswith("_market.json")
+
+    latest = folder / "latest.json"
+    latest.write_text("{}", encoding="utf-8")
+    assert core._preferred_json(folder, role="market") == latest
 
 
 def test_collect_health_and_stop(tmp_path: Path, monkeypatch) -> None:
