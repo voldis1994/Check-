@@ -22,6 +22,9 @@ def build_open_command(
     setup_id: str,
     setup_fingerprint: str,
     created_at_utc: str,
+    account_number: str,
+    server: str,
+    instance_id: str,
 ) -> OrderCommand:
     return OrderCommand(
         command_id=new_command_id(),
@@ -29,11 +32,14 @@ def build_open_command(
         symbol=symbol,
         magic=magic,
         created_at_utc=created_at_utc,
+        account_number=account_number,
+        server=server,
+        instance_id=instance_id,
         side=side,
         volume=volume,
         requested_price=requested_price,
         stop_loss=stop_loss,
-        take_profit=take_profit,
+        take_profit=0.0 if take_profit is None else take_profit,
         setup_id=setup_id,
         setup_fingerprint=setup_fingerprint,
     )
@@ -50,6 +56,9 @@ def build_modify_command(
     trailing_reason: str,
     trailing_step: float,
     created_at_utc: str,
+    account_number: str,
+    server: str,
+    instance_id: str,
 ) -> OrderCommand:
     return OrderCommand(
         command_id=new_command_id(),
@@ -57,6 +66,9 @@ def build_modify_command(
         symbol=symbol,
         magic=magic,
         created_at_utc=created_at_utc,
+        account_number=account_number,
+        server=server,
+        instance_id=instance_id,
         ticket=ticket,
         requested_stop_loss=requested_stop_loss,
         requested_take_profit=requested_take_profit,
@@ -75,6 +87,9 @@ def build_close_command(
     requested_price: float,
     close_reason: str,
     created_at_utc: str,
+    account_number: str,
+    server: str,
+    instance_id: str,
 ) -> OrderCommand:
     return OrderCommand(
         command_id=new_command_id(),
@@ -82,6 +97,9 @@ def build_close_command(
         symbol=symbol,
         magic=magic,
         created_at_utc=created_at_utc,
+        account_number=account_number,
+        server=server,
+        instance_id=instance_id,
         ticket=ticket,
         volume=volume,
         requested_price=requested_price,
@@ -101,6 +119,9 @@ def command_to_payload(command: OrderCommand, *, sequence: int) -> dict[str, obj
         "action": command.action.value,
         "symbol": command.symbol,
         "magic": command.magic,
+        "account_number": command.account_number,
+        "server": command.server,
+        "instance_id": command.instance_id,
         "created_at_utc": command.created_at_utc,
     }
     if command.side is not None:

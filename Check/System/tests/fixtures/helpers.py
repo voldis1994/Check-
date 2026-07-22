@@ -9,7 +9,8 @@ from typing import Any
 
 from checktrader.config.loader import load_system_config
 from checktrader.config.models import SystemConfig
-from checktrader.domain.enums import Side
+from checktrader.domain.enums import OrderAction, Side
+from checktrader.domain.execution import PendingCommandState
 from checktrader.domain.money import SymbolSpecs
 from checktrader.domain.orders import BrokerPosition
 from checktrader.market_data.loader import MarketSnapshot, parse_market_snapshot
@@ -117,6 +118,7 @@ def make_status_snapshot(
         "sequence": sequence,
         "generated_at_utc": generated_at_utc,
         "account_number": account_number,
+        "server": "Demo-Server",
         "balance": balance,
         "equity": equity,
         "margin": margin,
@@ -205,3 +207,44 @@ def config_for_tmp(root: Path, **overrides: Any) -> SystemConfig:
     merged = deepcopy(merged)
     _deep_update(merged, overrides)
     return load_test_config(**merged)
+
+
+def make_pending(
+    *,
+    command_id: str,
+    action: str = "OPEN",
+    account_number: str = "999",
+    server: str = "Demo-Server",
+    instance_id: str = "EURUSD_M1_PRIMARY",
+    symbol: str = "EURUSD",
+    magic: int = 19942026,
+    ticket: int | None = None,
+    requested_stop_loss: float | None = None,
+    requested_volume: float | None = 0.01,
+    requested_price: float | None = None,
+    setup_fingerprint: str | None = None,
+    created_at: str = "2026-03-01T12:00:00Z",
+    last_attempt_at: str | None = None,
+    acknowledgement_deadline: str = "2026-03-01T12:00:05Z",
+    retry_count: int = 0,
+    maximum_retries: int = 3,
+) -> PendingCommandState:
+    return PendingCommandState(
+        command_id=command_id,
+        action=OrderAction(action),
+        account_number=account_number,
+        server=server,
+        instance_id=instance_id,
+        symbol=symbol,
+        magic=magic,
+        ticket=ticket,
+        setup_fingerprint=setup_fingerprint,
+        requested_price=requested_price,
+        requested_volume=requested_volume,
+        requested_stop_loss=requested_stop_loss,
+        created_at=created_at,
+        last_attempt_at=last_attempt_at or created_at,
+        retry_count=retry_count,
+        maximum_retries=maximum_retries,
+        acknowledgement_deadline=acknowledgement_deadline,
+    )

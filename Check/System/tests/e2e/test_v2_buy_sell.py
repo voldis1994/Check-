@@ -7,6 +7,7 @@ from pathlib import Path
 
 from checktrader.application.cycle import run_cycle
 from checktrader.domain.enums import OrderAction, PositionState, Side
+from checktrader.execution.command_factory import build_close_command, write_command
 from checktrader.execution.protocol import atomic_write_json, read_json
 from checktrader.observability.reason_codes import ReasonCode
 from checktrader.state.store import InstanceRuntimeState, load_instance_state
@@ -14,6 +15,7 @@ from tests.fixtures.candles import candle_dicts, sequential_m1, synthesize_buy_s
 from tests.fixtures.helpers import (
     config_for_tmp,
     make_market_snapshot,
+    make_pending,
     make_status_snapshot,
     prepare_bridge,
 )
@@ -59,6 +61,9 @@ class MockBroker:
                         "ticket": self.ticket_seq,
                         "symbol": cmd["symbol"],
                         "magic": cmd["magic"],
+                        "account_number": cmd.get("account_number", "999"),
+                        "server": cmd.get("server", "Demo-Server"),
+                        "instance_id": cmd.get("instance_id", "EURUSD_M1_PRIMARY"),
                         "applied_price": cmd["requested_price"],
                         "applied_volume": cmd["volume"],
                         "applied_stop_loss": cmd["stop_loss"],
@@ -67,6 +72,7 @@ class MockBroker:
                 )
             elif action == "MODIFY" and self.position is not None:
                 applied = float(cmd["requested_stop_loss"])
+                previous = float(self.position["stop_loss"])
                 self.position["stop_loss"] = applied
                 atomic_write_json(
                     ack_dir / f"{cmd['sequence']}_{cid}.ack.json",
@@ -77,8 +83,12 @@ class MockBroker:
                         "ticket": self.position["ticket"],
                         "symbol": cmd["symbol"],
                         "magic": cmd["magic"],
+                        "account_number": cmd.get("account_number", "999"),
+                        "server": cmd.get("server", "Demo-Server"),
+                        "instance_id": cmd.get("instance_id", "EURUSD_M1_PRIMARY"),
                         "applied_stop_loss": applied,
                         "requested_stop_loss": applied,
+                        "previous_stop_loss": previous,
                     },
                 )
             elif action == "CLOSE":
@@ -93,6 +103,9 @@ class MockBroker:
                         "ticket": ticket,
                         "symbol": cmd["symbol"],
                         "magic": cmd["magic"],
+                        "account_number": cmd.get("account_number", "999"),
+                        "server": cmd.get("server", "Demo-Server"),
+                        "instance_id": cmd.get("instance_id", "EURUSD_M1_PRIMARY"),
                     },
                 )
             path.unlink()
@@ -207,8 +220,6 @@ def test_e2e_sell_open_and_close(tmp_path: Path) -> None:
     assert state.position.state is PositionState.OPEN
 
     # Force close via synthetic CLOSE command path: mark CLOSE_PENDING manually after writing close
-    from checktrader.execution.command_factory import build_close_command, write_command
-
     close_cmd = build_close_command(
         ticket=broker.position["ticket"],
         symbol="EURUSD",
@@ -217,9 +228,17 @@ def test_e2e_sell_open_and_close(tmp_path: Path) -> None:
         requested_price=last.close,
         close_reason="TEST",
         created_at_utc=NOW,
+        account_number="999",
+        server="Demo-Server",
+        instance_id=config.runtime.instance_id,
     )
     write_command(bridge / "commands", close_cmd, sequence=state.next_sequence())
-    state.pending_command_id = close_cmd.command_id
+    state.pending = make_pending(
+        command_id=close_cmd.command_id,
+        action="CLOSE",
+        ticket=close_cmd.ticket,
+        instance_id=config.runtime.instance_id,
+    )
     state.position.state = PositionState.CLOSE_PENDING
     broker.process_commands(bridge)
     status_flat = make_status_snapshot(generated_at_utc=NOW, positions=[])

@@ -7,16 +7,11 @@ from pathlib import Path
 
 from checktrader.application.bootstrap import bootstrap
 from checktrader.application.cycle import run_cycle
-from checktrader.execution.protocol import read_json
+from checktrader.execution.snapshot_select import select_latest_snapshot
 from checktrader.market_data.loader import parse_market_snapshot
 from checktrader.market_data.status import parse_status_snapshot
 from checktrader.observability.logging import get_logger
 from checktrader.state.store import save_instance_state
-
-
-def _latest_json(directory: Path) -> Path | None:
-    files = sorted(directory.glob("*.json"))
-    return files[-1] if files else None
 
 
 def run_trading_loop(*, config_path: Path, once: bool = False, require_live_accounts: bool = True) -> None:
@@ -26,16 +21,19 @@ def run_trading_loop(*, config_path: Path, once: bool = False, require_live_acco
     stop_file = root / "runtime" / "STOP_TRADING"
     while True:
         now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-        market_path = _latest_json(bridge / "market")
-        status_path = _latest_json(bridge / "status")
-        if market_path is None or status_path is None:
+        market_choice = select_latest_snapshot(bridge / "market")
+        status_choice = select_latest_snapshot(bridge / "status")
+        if market_choice is None or status_choice is None:
             logger.warning("waiting for market/status bridge files")
             if once:
                 return
             time.sleep(config.runtime.cycle_interval_ms / 1000.0)
             continue
-        market = parse_market_snapshot(read_json(market_path))
-        status = parse_status_snapshot(read_json(status_path))
+        # Ignore stale/repeated sequences as "new" work, but still process pending with latest data.
+        market = parse_market_snapshot(market_choice.payload)
+        status = parse_status_snapshot(status_choice.payload)
+        state.last_market_sequence = max(state.last_market_sequence, market_choice.sequence)
+        state.last_status_sequence = max(state.last_status_sequence, status_choice.sequence)
         result = run_cycle(
             config=config,
             state=state,

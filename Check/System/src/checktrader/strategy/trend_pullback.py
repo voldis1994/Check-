@@ -65,6 +65,79 @@ def _bias_m15(candles: list[Candle], *, hma_period: int) -> Side | None:
     return None
 
 
+def _stable_m15_structure_id(candles: list[Candle], bias: Side) -> str | None:
+    highs, lows = swing_points(candles, lookback=2)
+    if len(highs) < 2 or len(lows) < 2:
+        return None
+    h1_i, h1 = highs[-2]
+    h2_i, h2 = highs[-1]
+    l1_i, l1 = lows[-2]
+    l2_i, l2 = lows[-1]
+    return (
+        f"M15:{bias.value}:"
+        f"{candles[h1_i].open_time_utc}:{h1:.5f}:"
+        f"{candles[h2_i].open_time_utc}:{h2:.5f}:"
+        f"{candles[l1_i].open_time_utc}:{l1:.5f}:"
+        f"{candles[l2_i].open_time_utc}:{l2:.5f}"
+    )
+
+
+def _in_pullback_zone(
+    candle: Candle,
+    *,
+    bias: Side,
+    hma_value: float,
+    atr_value: float,
+    pullback_atr_distance: float,
+) -> bool:
+    distance = abs(candle.close - hma_value)
+    if distance > pullback_atr_distance * atr_value:
+        return False
+    if bias is Side.BUY:
+        return candle.low <= hma_value
+    return candle.high >= hma_value
+
+
+def _find_pullback_origin_index(
+    m5: list[Candle],
+    *,
+    bias: Side,
+    hma_period: int,
+    atr_period: int,
+    pullback_atr_distance: float,
+) -> int | None:
+    """First bar of the contiguous pullback zone ending at the latest M5 bar."""
+    if len(m5) < max(hma_period, atr_period) + 2:
+        return None
+    atr_m5 = atr(m5, atr_period)
+    hma_m5 = hma(_closes(m5), hma_period)
+    if atr_m5 is None or hma_m5 is None:
+        return None
+    if not _in_pullback_zone(
+        m5[-1],
+        bias=bias,
+        hma_value=hma_m5,
+        atr_value=atr_m5,
+        pullback_atr_distance=pullback_atr_distance,
+    ):
+        return None
+    origin = len(m5) - 1
+    # Walk backward while prior bars were also in zone using indicators as of last bar
+    # (stable HTF context) — origin is the start of the contiguous pullback run.
+    while origin > 0:
+        prev = m5[origin - 1]
+        if not _in_pullback_zone(
+            prev,
+            bias=bias,
+            hma_value=hma_m5,
+            atr_value=atr_m5,
+            pullback_atr_distance=pullback_atr_distance,
+        ):
+            break
+        origin -= 1
+    return origin
+
+
 def evaluate_trend_pullback(
     *,
     symbol: str,
@@ -91,33 +164,33 @@ def evaluate_trend_pullback(
     if atr_m5 is None or hma_m5 is None:
         return StrategyDecision(StrategyResult.NO_SIGNAL, ReasonCode.NO_SIGNAL, evidence={"why": "indicators"})
 
-    m5_last = m5[-1]
-    pullback_ok = False
-    invalidation = 0.0
-    trigger = 0.0
-    # Trigger levels exclude the current M5 bar so an M1 breakout can clear them.
-    prior_m5 = m5[-4:-1] if len(m5) >= 4 else m5[:-1]
-    if not prior_m5:
-        return StrategyDecision(StrategyResult.NO_SIGNAL, ReasonCode.NO_SIGNAL, evidence={"why": "insufficient_m5"})
-    if bias is Side.BUY:
-        distance = abs(m5_last.close - hma_m5)
-        pullback_ok = distance <= config.pullback_atr_distance * atr_m5 and m5_last.low <= hma_m5
-        invalidation = min(c.low for c in m5[-5:])
-        trigger = max(c.high for c in prior_m5)
-    else:
-        distance = abs(m5_last.close - hma_m5)
-        pullback_ok = distance <= config.pullback_atr_distance * atr_m5 and m5_last.high >= hma_m5
-        invalidation = max(c.high for c in m5[-5:])
-        trigger = min(c.low for c in prior_m5)
-
-    if not pullback_ok:
+    origin_idx = _find_pullback_origin_index(
+        m5,
+        bias=bias,
+        hma_period=config.hma_period,
+        atr_period=config.atr_period,
+        pullback_atr_distance=config.pullback_atr_distance,
+    )
+    if origin_idx is None:
         return StrategyDecision(
             StrategyResult.NO_SIGNAL, ReasonCode.NO_SIGNAL, evidence={"why": "no_pullback", "bias": bias.value}
         )
 
+    # Levels frozen relative to origin — not the drifting latest M5 candle alone.
+    structure_window = m5[max(0, origin_idx - 4) : origin_idx + 1]
+    prior_for_trigger = m5[max(0, origin_idx - 3) : origin_idx]
+    if not prior_for_trigger:
+        return StrategyDecision(StrategyResult.NO_SIGNAL, ReasonCode.NO_SIGNAL, evidence={"why": "insufficient_m5"})
+
+    if bias is Side.BUY:
+        invalidation = min(c.low for c in structure_window)
+        trigger = max(c.high for c in prior_for_trigger)
+    else:
+        invalidation = max(c.high for c in structure_window)
+        trigger = min(c.low for c in prior_for_trigger)
+
     buffer = config.trigger_break_buffer_pips * specs.pip_size
     m1_last = m1[-1]
-    triggered = False
     if bias is Side.BUY:
         triggered = m1_last.close >= trigger + buffer and m1_last.close > m1_last.open
         proposed_entry = m1_last.close
@@ -127,9 +200,12 @@ def evaluate_trend_pullback(
         proposed_entry = m1_last.close
         proposed_sl = round_price(invalidation + specs.pip_size, specs.digits)
 
-    context_id = f"M15:{m15[-3].open_time_utc}:{bias.value}"
-    pullback_id = f"M5:{m5[-1].open_time_utc}:{round_price(hma_m5, specs.digits)}"
-    origin = m5[-1].open_time_utc
+    context_id = _stable_m15_structure_id(m15, bias)
+    if context_id is None:
+        return StrategyDecision(StrategyResult.NO_SIGNAL, ReasonCode.NO_SIGNAL, evidence={"why": "unclear_m15"})
+
+    origin = m5[origin_idx].open_time_utc
+    pullback_id = f"M5:{bias.value}:{origin}"
     fingerprint = build_setup_fingerprint(
         setup_version="2.0.0",
         symbol=symbol,
@@ -161,7 +237,7 @@ def evaluate_trend_pullback(
         expires_at=now_utc,
         state=SetupState.ARMED if not triggered else SetupState.TRIGGERED,
         fingerprint=fingerprint,
-        evidence={"bias": bias.value, "hma_m5": hma_m5, "atr_m5": atr_m5},
+        evidence={"bias": bias.value, "hma_m5": hma_m5, "atr_m5": atr_m5, "origin_idx": origin_idx},
     )
     if not triggered:
         if is_setup_expired(

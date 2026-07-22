@@ -32,6 +32,7 @@ def approve_order(
     risk: RiskConfig,
     equity: float,
     free_margin: float,
+    fixed_take_profit_enabled: bool = False,
 ) -> RiskApproval:
     if specs.tick_size <= 0 or specs.tick_value <= 0:
         return RiskApproval(RiskDecision.SYMBOL_SPEC_MISSING, 0.0, stop_loss, None, "missing tick specs")
@@ -57,14 +58,15 @@ def approve_order(
         volume = _normalize_lot(volume, specs)
     if volume < specs.minimum_lot or volume > specs.maximum_lot:
         return RiskApproval(RiskDecision.INVALID_VOLUME, 0.0, stop_loss, None, "lot outside broker bounds")
-    # exact step check without silent normalize when disabled
     steps = volume / specs.lot_step
     if abs(steps - round(steps)) > 1e-8 and not risk.allow_lot_normalization:
         return RiskApproval(RiskDecision.INVALID_VOLUME, 0.0, stop_loss, None, "lot not aligned to lot_step")
-    # crude margin gate
     if free_margin <= 0:
         return RiskApproval(RiskDecision.MARGIN_INSUFFICIENT, 0.0, stop_loss, None, "no free margin")
-    rr = risk.minimum_reward_risk
-    tp_distance = distance * rr
-    take_profit = entry + tp_distance if side is Side.BUY else entry - tp_distance
-    return RiskApproval(RiskDecision.APPROVED, volume, stop_loss, round(take_profit, specs.digits), "ok")
+
+    take_profit: float | None = None
+    if fixed_take_profit_enabled:
+        rr = risk.minimum_reward_risk
+        tp_distance = distance * rr
+        take_profit = round(entry + tp_distance if side is Side.BUY else entry - tp_distance, specs.digits)
+    return RiskApproval(RiskDecision.APPROVED, volume, stop_loss, take_profit, "ok")

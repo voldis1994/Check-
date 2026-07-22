@@ -8,7 +8,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from checktrader.domain.enums import ConfirmationSource, PositionState, Side
+from checktrader.domain.enums import ConfirmationSource, OrderAction, PositionState, Side
+from checktrader.domain.execution import PendingCommandState
 from checktrader.domain.positions import ManagedPosition
 from checktrader.domain.trailing import TrailingState
 from checktrader.execution.protocol import atomic_write_json, read_json
@@ -24,7 +25,13 @@ class InstanceRuntimeState:
     known_setup_fingerprints: list[str] = field(default_factory=list)
     sequence: int = 0
     last_reason: str | None = None
-    pending_command_id: str | None = None
+    pending: PendingCommandState | None = None
+    last_market_sequence: int = 0
+    last_status_sequence: int = 0
+
+    @property
+    def pending_command_id(self) -> str | None:
+        return None if self.pending is None else self.pending.command_id
 
     def next_sequence(self) -> int:
         self.sequence += 1
@@ -34,6 +41,40 @@ class InstanceRuntimeState:
 def _checksum(payload: dict[str, Any]) -> str:
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _pending_to_dict(pending: PendingCommandState | None) -> dict[str, Any] | None:
+    if pending is None:
+        return None
+    payload = asdict(pending)
+    payload["action"] = pending.action.value
+    return payload
+
+
+def _pending_from_dict(raw: dict[str, Any] | None) -> PendingCommandState | None:
+    if not raw:
+        return None
+    return PendingCommandState(
+        command_id=str(raw["command_id"]),
+        action=OrderAction(str(raw["action"])),
+        account_number=str(raw.get("account_number", "")),
+        server=str(raw.get("server", "")),
+        instance_id=str(raw.get("instance_id", "")),
+        symbol=str(raw["symbol"]),
+        magic=int(raw["magic"]),
+        ticket=raw.get("ticket"),
+        setup_fingerprint=raw.get("setup_fingerprint"),
+        requested_price=raw.get("requested_price"),
+        requested_volume=raw.get("requested_volume"),
+        requested_stop_loss=raw.get("requested_stop_loss"),
+        requested_take_profit=raw.get("requested_take_profit"),
+        created_at=str(raw.get("created_at", "")),
+        last_attempt_at=str(raw.get("last_attempt_at", "")),
+        retry_count=int(raw.get("retry_count", 0)),
+        maximum_retries=int(raw.get("maximum_retries", 3)),
+        acknowledgement_deadline=str(raw.get("acknowledgement_deadline", "")),
+        last_error=raw.get("last_error"),
+    )
 
 
 def save_instance_state(path: Path, state: InstanceRuntimeState, *, now_utc: str) -> None:
@@ -52,7 +93,10 @@ def save_instance_state(path: Path, state: InstanceRuntimeState, *, now_utc: str
         "sequence": state.sequence,
         "last_reason": state.last_reason,
         "pending_command_id": state.pending_command_id,
+        "pending": _pending_to_dict(state.pending),
         "known_setup_fingerprints": list(state.known_setup_fingerprints),
+        "last_market_sequence": state.last_market_sequence,
+        "last_status_sequence": state.last_status_sequence,
         "position": position_payload,
         "trailing": trailing_payload,
     }
@@ -67,19 +111,32 @@ def load_instance_state(path: Path) -> InstanceRuntimeState:
     expected = payload.get("checksum")
     body = {k: v for k, v in payload.items() if k != "checksum"}
     if expected and expected != _checksum(body):
-        # corrupt → fresh FLAT with reconciliation needed
         state = InstanceRuntimeState()
         state.position.state = PositionState.RECONCILING
         state.last_reason = "checksum_mismatch"
         return state
+    pending = _pending_from_dict(payload.get("pending"))
+    if pending is None and payload.get("pending_command_id"):
+        # Legacy recovery: command id without full pending → reconcile
+        pending = PendingCommandState(
+            command_id=str(payload["pending_command_id"]),
+            action=OrderAction.OPEN,
+            account_number="",
+            server="",
+            instance_id="",
+            symbol="",
+            magic=0,
+        )
     state = InstanceRuntimeState(
         schema_version=str(payload.get("schema_version", "2.0.0")),
         revision=int(payload.get("revision", 0)),
         saved_at_utc=str(payload.get("saved_at_utc", "")),
         sequence=int(payload.get("sequence", 0)),
         last_reason=payload.get("last_reason"),
-        pending_command_id=payload.get("pending_command_id"),
+        pending=pending,
         known_setup_fingerprints=list(payload.get("known_setup_fingerprints", [])),
+        last_market_sequence=int(payload.get("last_market_sequence", 0)),
+        last_status_sequence=int(payload.get("last_status_sequence", 0)),
     )
     pos = payload.get("position", {})
     state.position = ManagedPosition(
@@ -96,7 +153,6 @@ def load_instance_state(path: Path) -> InstanceRuntimeState:
         pending_command_id=pos.get("pending_command_id"),
     )
     tr = payload.get("trailing", {})
-
     state.trailing = TrailingState(
         broker_stop_loss=tr.get("broker_stop_loss"),
         broker_take_profit=tr.get("broker_take_profit"),

@@ -9,14 +9,14 @@ from checktrader.domain.positions import ManagedPosition
 from checktrader.execution.reconciliation import is_ack_timeout, reconcile_position_from_broker
 from checktrader.observability.reason_codes import ReasonCode
 from checktrader.state.store import InstanceRuntimeState, load_instance_state, save_instance_state
-from tests.fixtures.helpers import broker_position
+from tests.fixtures.helpers import broker_position, make_pending
 
 
 def test_save_load_roundtrip(tmp_path: Path) -> None:
     path = tmp_path / "instance.json"
     state = InstanceRuntimeState()
     state.position = ManagedPosition(state=PositionState.OPEN_PENDING, side=Side.BUY, volume=0.01)
-    state.pending_command_id = "cmd-open-1"
+    state.pending = make_pending(command_id="cmd-open-1", action="OPEN")
     state.known_setup_fingerprints.append("fp1")
     save_instance_state(path, state, now_utc="2026-03-01T12:00:00Z")
     loaded = load_instance_state(path)
@@ -39,7 +39,7 @@ def test_pending_open_survives_restart(tmp_path: Path) -> None:
     path = tmp_path / "instance.json"
     state = InstanceRuntimeState()
     state.position.state = PositionState.OPEN_PENDING
-    state.pending_command_id = "pending-open"
+    state.pending = make_pending(command_id="pending-open", action="OPEN")
     save_instance_state(path, state, now_utc="2026-03-01T12:00:00Z")
     again = load_instance_state(path)
     assert again.position.state is PositionState.OPEN_PENDING

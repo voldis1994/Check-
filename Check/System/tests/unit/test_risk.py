@@ -22,8 +22,19 @@ def test_fixed_lot_approved() -> None:
     )
     assert result.decision is RiskDecision.APPROVED
     assert result.volume == 0.01
-    assert result.take_profit is not None
-    assert result.take_profit > 1.10000
+    assert result.take_profit is None
+    with_tp = approve_order(
+        side=Side.BUY,
+        entry=1.10000,
+        stop_loss=1.09800,
+        specs=EURUSD_SPECS,
+        risk=risk,
+        equity=10_000,
+        free_margin=5_000,
+        fixed_take_profit_enabled=True,
+    )
+    assert with_tp.take_profit is not None
+    assert with_tp.take_profit > 1.10000
 
 
 def test_risk_percent_sizing() -> None:

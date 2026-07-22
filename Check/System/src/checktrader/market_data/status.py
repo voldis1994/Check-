@@ -26,6 +26,7 @@ class StatusSnapshot:
     trade_allowed: bool
     expert_enabled: bool
     positions: tuple[BrokerPosition, ...]
+    server: str = ""
 
 
 def parse_status_snapshot(payload: dict[str, Any]) -> StatusSnapshot:
@@ -72,4 +73,5 @@ def parse_status_snapshot(payload: dict[str, Any]) -> StatusSnapshot:
         trade_allowed=bool(payload.get("trade_allowed", True)),
         expert_enabled=bool(payload.get("expert_enabled", True)),
         positions=tuple(positions),
+        server=str(payload.get("server", "")),
     )

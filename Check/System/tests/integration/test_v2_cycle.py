@@ -16,6 +16,7 @@ from tests.fixtures.helpers import (
     broker_position_payload,
     config_for_tmp,
     make_market_snapshot,
+    make_pending,
     make_status_snapshot,
     prepare_bridge,
 )
@@ -65,7 +66,7 @@ def test_ack_confirms_open(tmp_path: Path) -> None:
     state = InstanceRuntimeState()
     state.position.state = PositionState.OPEN_PENDING
     state.position.side = Side.BUY
-    state.pending_command_id = "open-1"
+    state.pending = make_pending(command_id="open-1", action="OPEN", requested_stop_loss=1.09800)
     _write_ack(
         bridge,
         "open-1",
@@ -76,6 +77,9 @@ def test_ack_confirms_open(tmp_path: Path) -> None:
             "ticket": 777,
             "symbol": "EURUSD",
             "magic": 19942026,
+            "account_number": "999",
+            "server": "Demo-Server",
+            "instance_id": "EURUSD_M1_PRIMARY",
             "applied_price": 1.10020,
             "applied_volume": 0.01,
             "applied_stop_loss": 1.09800,
@@ -88,11 +92,7 @@ def test_ack_confirms_open(tmp_path: Path) -> None:
     assert state.position.state is PositionState.OPEN
     assert state.position.ticket == 777
     assert state.pending_command_id is None
-    assert state.last_reason in {
-        ReasonCode.OPEN_CONFIRMED.value,
-        ReasonCode.TRAILING_WAITING_ACTIVATION.value,
-        ReasonCode.MODIFY_SENT.value,
-    }
+    assert state.last_reason == ReasonCode.OPEN_CONFIRMED.value
 
 
 def test_activation_be_modify(tmp_path: Path) -> None:
@@ -132,7 +132,12 @@ def test_be_ack_confirmed(tmp_path: Path) -> None:
     state.position.state = PositionState.MODIFY_PENDING
     state.position.ticket = 1001
     state.position.side = Side.BUY
-    state.pending_command_id = "mod-be"
+    state.pending = make_pending(
+        command_id="mod-be",
+        action="MODIFY",
+        ticket=1001,
+        requested_stop_loss=1.10020,
+    )
     state.trailing.pending_stop_loss = 1.10020
     state.trailing.be_confirmed = False
     _write_ack(
@@ -145,7 +150,11 @@ def test_be_ack_confirmed(tmp_path: Path) -> None:
             "ticket": 1001,
             "symbol": "EURUSD",
             "magic": 19942026,
+            "account_number": "999",
+            "server": "Demo-Server",
+            "instance_id": "EURUSD_M1_PRIMARY",
             "applied_stop_loss": 1.10020,
+            "previous_stop_loss": 1.09800,
         },
     )
     # Status already reflects applied BE SL (broker truth after modify).
@@ -193,12 +202,19 @@ def test_grid_steps_after_be(tmp_path: Path) -> None:
 
 def test_rejected_modify_keeps_pending_and_retries(tmp_path: Path) -> None:
     bridge = prepare_bridge(tmp_path)
-    config = config_for_tmp(tmp_path)
+    config = config_for_tmp(tmp_path, execution={"retry_delay_ms": 0, "maximum_retries": 3, "ack_timeout_ms": 5000})
     state = InstanceRuntimeState()
     state.position.state = PositionState.MODIFY_PENDING
     state.position.ticket = 1001
     state.position.side = Side.BUY
-    state.pending_command_id = "mod-bad"
+    state.pending = make_pending(
+        command_id="mod-bad",
+        action="MODIFY",
+        ticket=1001,
+        requested_stop_loss=1.10020,
+        last_attempt_at="2026-03-01T11:59:00Z",
+        acknowledgement_deadline="2026-03-01T11:59:05Z",
+    )
     state.trailing.pending_stop_loss = 1.10020
     state.trailing.be_confirmed = False
     _write_ack(
@@ -211,6 +227,9 @@ def test_rejected_modify_keeps_pending_and_retries(tmp_path: Path) -> None:
             "ticket": 1001,
             "symbol": "EURUSD",
             "magic": 19942026,
+            "account_number": "999",
+            "server": "Demo-Server",
+            "instance_id": "EURUSD_M1_PRIMARY",
             # missing applied_stop_loss
         },
     )
@@ -223,12 +242,13 @@ def test_rejected_modify_keeps_pending_and_retries(tmp_path: Path) -> None:
     )
     status = make_status_snapshot(generated_at_utc=NOW, positions=[broker_position_payload(pos)])
     result = run_cycle(config=config, state=state, market=market, status=status, bridge_root=bridge, now_utc=NOW)
-    # Same cycle: mismatch clears command id, protective engine retries pending SL.
     assert state.trailing.pending_stop_loss == 1.10020
-    assert state.trailing.retry_count >= 1
+    assert state.pending is not None
+    assert state.pending.retry_count >= 1
     assert result.reason is ReasonCode.MODIFY_SENT
     assert state.position.state is PositionState.MODIFY_PENDING
     assert state.pending_command_id is not None
+    assert state.pending_command_id != "mod-bad"
 
 
 def test_high_lock_and_exit_pressure_close(tmp_path: Path) -> None:
@@ -305,7 +325,7 @@ def test_close_ack_to_flat(tmp_path: Path) -> None:
     state.position.state = PositionState.CLOSE_PENDING
     state.position.ticket = 1001
     state.position.side = Side.BUY
-    state.pending_command_id = "close-1"
+    state.pending = make_pending(command_id="close-1", action="CLOSE", ticket=1001)
     state.trailing.peak_net_profit = 1.0
     _write_ack(
         bridge,
@@ -317,6 +337,9 @@ def test_close_ack_to_flat(tmp_path: Path) -> None:
             "ticket": 1001,
             "symbol": "EURUSD",
             "magic": 19942026,
+            "account_number": "999",
+            "server": "Demo-Server",
+            "instance_id": "EURUSD_M1_PRIMARY",
         },
     )
     market = make_market_snapshot(bars_m1=candle_dicts(sequential_m1(n=30)), generated_at_utc=NOW)

@@ -9,11 +9,16 @@ from checktrader.domain.enums import OrderAction, Side
 
 @dataclass(frozen=True, slots=True)
 class OrderCommand:
+    """Broker command payload written to the file bridge."""
+
     command_id: str
     action: OrderAction
     symbol: str
     magic: int
     created_at_utc: str
+    account_number: str
+    server: str
+    instance_id: str
     side: Side | None = None
     volume: float | None = None
     ticket: int | None = None
@@ -33,6 +38,8 @@ class OrderCommand:
 
 @dataclass(frozen=True, slots=True)
 class BrokerPosition:
+    """Open position as reported by the broker/MT4 status snapshot."""
+
     ticket: int
     symbol: str
     magic: int

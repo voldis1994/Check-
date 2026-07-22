@@ -19,6 +19,10 @@ struct CHECK_Command
    int    magic;
    int    account_number;
    bool   has_account_number;
+   string server;
+   bool   has_server;
+   string instance_id;
+   bool   has_instance_id;
    string side;
    bool   has_side;
    double volume;
@@ -88,6 +92,10 @@ void CHECK_ResetCommand(CHECK_Command &command)
    command.magic = 0;
    command.account_number = 0;
    command.has_account_number = false;
+   command.server = "";
+   command.has_server = false;
+   command.instance_id = "";
+   command.has_instance_id = false;
    command.side = "";
    command.has_side = false;
    command.volume = 0.0;
@@ -459,6 +467,19 @@ bool CHECK_ParseCommandJson(const string json, CHECK_Command &command, string &e
       }
    }
 
+   string server = "";
+   if(CHECK_ExtractJsonStringField(json, "server", server))
+   {
+      command.server = server;
+      command.has_server = true;
+   }
+   string instance_id = "";
+   if(CHECK_ExtractJsonStringField(json, "instance_id", instance_id))
+   {
+      command.instance_id = instance_id;
+      command.has_instance_id = true;
+   }
+
    string side = "";
    if(CHECK_ExtractJsonStringField(json, "side", side))
    {
@@ -537,12 +558,32 @@ bool CHECK_ParseCommandJson(const string json, CHECK_Command &command, string &e
 bool CHECK_ValidateCommandInstance(const CHECK_Command &command, string &error_message)
 {
    error_message = "";
-   if(command.has_account_number && command.account_number != AccountNumber())
+   if(!command.has_account_number)
+   {
+      error_message = "account_number is required";
+      return false;
+   }
+   if(command.account_number != AccountNumber())
    {
       error_message = "account_number does not match terminal account";
       return false;
    }
-   if(command.symbol != g_check_symbol)
+   if(!command.has_server || StringLen(command.server) == 0)
+   {
+      error_message = "server is required";
+      return false;
+   }
+   if(command.server != AccountServer())
+   {
+      error_message = "server does not match terminal server";
+      return false;
+   }
+   if(!command.has_instance_id || StringLen(command.instance_id) == 0)
+   {
+      error_message = "instance_id is required";
+      return false;
+   }
+   if(StringLen(command.symbol) == 0 || command.symbol != g_check_symbol)
    {
       error_message = "symbol does not match EA chart symbol";
       return false;
@@ -578,6 +619,11 @@ string CHECK_BuildAckJson(const CHECK_Command &command, const CHECK_AckResult &r
    json += CHECK_JsonKvString("symbol", command.symbol, true);
    json += CHECK_JsonKvInt("magic", command.magic, true);
    json += CHECK_JsonKvString("account_number", IntegerToString(AccountNumber()), true);
+   json += CHECK_JsonKvString("server", AccountServer(), true);
+   if(command.has_instance_id)
+      json += CHECK_JsonKvString("instance_id", command.instance_id, true);
+   else
+      json += CHECK_JsonKvString("instance_id", "", true);
 
    if(result.has_ticket)
       json += CHECK_JsonKvInt("ticket", result.ticket, true);
@@ -595,6 +641,8 @@ string CHECK_BuildAckJson(const CHECK_Command &command, const CHECK_AckResult &r
       json += CHECK_JsonKvNumber("requested_stop_loss", result.requested_stop_loss, digits, true);
    if(result.has_applied_stop_loss)
       json += CHECK_JsonKvNumber("applied_stop_loss", result.applied_stop_loss, digits, true);
+   if(command.has_previous_broker_stop_loss)
+      json += CHECK_JsonKvNumber("previous_stop_loss", command.previous_broker_stop_loss, digits, true);
    if(result.has_requested_take_profit)
       json += CHECK_JsonKvNumber("requested_take_profit", result.requested_take_profit, digits, true);
    if(result.has_applied_take_profit)
@@ -671,7 +719,8 @@ bool CHECK_ExecuteOpen(const CHECK_Command &command, CHECK_AckResult &result, st
 
    double stop_loss = command.has_stop_loss ? CHECK_NormalizePrice(command.symbol, command.stop_loss) : 0.0;
    double take_profit = command.has_take_profit ? CHECK_NormalizePrice(command.symbol, command.take_profit) : 0.0;
-   double volume = CHECK_NormalizeLot(command.symbol, command.volume);
+   // Do not silently normalize requested lot — reject if not broker-aligned.
+   double volume = command.volume;
 
    result.requested_price = command.has_requested_price ? command.requested_price : price;
    result.has_requested_price = true;
@@ -687,6 +736,24 @@ bool CHECK_ExecuteOpen(const CHECK_Command &command, CHECK_AckResult &result, st
    if(!CHECK_ValidateLot(command.symbol, volume, lot_error))
    {
       CHECK_SetRejectedAck(result, lot_error);
+      error_message = result.broker_error_text;
+      return false;
+   }
+   double min_lot = MarketInfo(command.symbol, MODE_MINLOT);
+   double lot_step = MarketInfo(command.symbol, MODE_LOTSTEP);
+   if(lot_step > 0.0)
+   {
+      double steps = volume / lot_step;
+      if(MathAbs(steps - MathRound(steps)) > 1e-8)
+      {
+         CHECK_SetRejectedAck(result, "volume not aligned to lot_step");
+         error_message = result.broker_error_text;
+         return false;
+      }
+   }
+   if(min_lot > 0.0 && MathAbs(volume - CHECK_NormalizeLot(command.symbol, volume)) > 1e-8)
+   {
+      CHECK_SetRejectedAck(result, "volume rejected without silent normalization");
       error_message = result.broker_error_text;
       return false;
    }
@@ -759,14 +826,14 @@ bool CHECK_ExecuteOpen(const CHECK_Command &command, CHECK_AckResult &result, st
    }
    else
    {
-      result.status = CHECK_ACK_SUCCESS;
+      // OrderSend returned a ticket but re-select failed — not SUCCESS.
+      result.status = CHECK_ACK_UNKNOWN;
       result.ticket = ticket;
       result.has_ticket = true;
-      result.applied_price = price;
-      result.has_applied_price = true;
-      result.applied_volume = volume;
-      result.has_applied_volume = true;
-      result.broker_error_text = "OrderSend ok but reselect failed";
+      result.broker_error_code = GetLastError();
+      result.broker_error_text = "OrderSend ok but reselect failed; reconciliation required";
+      error_message = result.broker_error_text;
+      return false;
    }
    return true;
 }

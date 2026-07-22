@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 
 from checktrader.domain.errors import DataError
 from checktrader.domain.market import Candle
@@ -10,11 +11,28 @@ from checktrader.observability.reason_codes import ReasonCode
 
 
 def _parse_minute(ts: str) -> tuple[str, int]:
-    # Expect ...HH:MM:SS...
     date_part, time_part = ts.split("T", 1)
-    hh, mm, rest = time_part.split(":", 2)
+    hh, mm, _rest = time_part.split(":", 2)
     minute = int(hh) * 60 + int(mm)
     return date_part, minute
+
+
+def _parse_open_dt(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _group_is_consecutive(group: list[Candle], *, minutes: int) -> bool:
+    """Require exactly ``minutes`` M1 bars, aligned bucket start, and minute-by-minute continuity."""
+    if len(group) != minutes:
+        return False
+    first_dt = _parse_open_dt(group[0].open_time_utc)
+    if (first_dt.hour * 60 + first_dt.minute) % minutes != 0:
+        return False
+    for i in range(1, len(group)):
+        expected = _parse_open_dt(group[i - 1].open_time_utc) + timedelta(minutes=1)
+        if _parse_open_dt(group[i].open_time_utc) != expected:
+            return False
+    return True
 
 
 def aggregate_timeframe(candles: Sequence[Candle], *, minutes: int, timeframe: str) -> list[Candle]:
@@ -34,9 +52,8 @@ def aggregate_timeframe(candles: Sequence[Candle], *, minutes: int, timeframe: s
         buckets[key].append(candle)
     out: list[Candle] = []
     for key in order:
-        group = buckets[key]
-        if len(group) < minutes:
-            # Incomplete bucket — do not mark complete
+        group = sorted(buckets[key], key=lambda c: c.open_time_utc)
+        if not _group_is_consecutive(group, minutes=minutes):
             continue
         first, last = group[0], group[-1]
         out.append(

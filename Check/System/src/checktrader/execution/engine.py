@@ -28,6 +28,9 @@ def submit_open(
     setup_id: str,
     setup_fingerprint: str,
     created_at_utc: str,
+    account_number: str,
+    server: str,
+    instance_id: str,
 ) -> tuple[OrderCommand, Path]:
     command = build_open_command(
         symbol=symbol,
@@ -40,6 +43,9 @@ def submit_open(
         setup_id=setup_id,
         setup_fingerprint=setup_fingerprint,
         created_at_utc=created_at_utc,
+        account_number=account_number,
+        server=server,
+        instance_id=instance_id,
     )
     path = write_command(commands_dir, command, sequence=sequence)
     return command, path
@@ -58,6 +64,9 @@ def submit_modify(
     trailing_reason: str,
     trailing_step: float,
     created_at_utc: str,
+    account_number: str,
+    server: str,
+    instance_id: str,
 ) -> tuple[OrderCommand, Path]:
     command = build_modify_command(
         ticket=ticket,
@@ -69,6 +78,9 @@ def submit_modify(
         trailing_reason=trailing_reason,
         trailing_step=trailing_step,
         created_at_utc=created_at_utc,
+        account_number=account_number,
+        server=server,
+        instance_id=instance_id,
     )
     path = write_command(commands_dir, command, sequence=sequence)
     return command, path
@@ -85,6 +97,9 @@ def submit_close(
     requested_price: float,
     close_reason: str,
     created_at_utc: str,
+    account_number: str,
+    server: str,
+    instance_id: str,
 ) -> tuple[OrderCommand, Path]:
     command = build_close_command(
         ticket=ticket,
@@ -94,6 +109,9 @@ def submit_close(
         requested_price=requested_price,
         close_reason=close_reason,
         created_at_utc=created_at_utc,
+        account_number=account_number,
+        server=server,
+        instance_id=instance_id,
     )
     path = write_command(commands_dir, command, sequence=sequence)
     return command, path
