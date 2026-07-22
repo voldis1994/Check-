@@ -24,7 +24,7 @@ Double-click from `Check\System`:
 | `FIX_BRIDGE.bat` | Redeploy EA + checklist when Python waits for market/status files |
 | `STOP.bat` | Create `runtime\STOP_TRADING` kill switch |
 
-After `SETUP_ALL.bat`: compile EA in MetaEditor (F7), attach to M1 with **BridgeRootPath empty** (AUTO → `MQL4\Files\CHECK_SYSTEM`). Enable **Allow DLL imports**. Symbol, account, and bridge path come from MT4 automatically.
+After `SETUP_ALL.bat`: compile EA in MetaEditor (F7), attach to M1 on **each** account with **BridgeRootPath empty** (AUTO). Enable **Allow DLL imports**. One `START_LIVE.bat` trades **all** discovered MT4 accounts automatically.
 
 ## Config
 

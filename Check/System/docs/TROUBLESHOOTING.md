@@ -14,9 +14,9 @@
 
 **Fix:** reattach EA, fix path, enable DLLs, wait for ticks; use `python tools/inspect_bridge.py`.
 
-If logs flip between two `account=` / `bridge=mt4-files:...` values every second, you have **two MT4 terminals** both writing bridges. `START_LIVE` now locks to one for the session — still prefer **one** live terminal, or pin `account.allowed_account_numbers` to the account you want.
+If logs show two accounts alternating every second with shared state corruption — upgrade: current `START_LIVE` runs **all** discovered MT4 bridges each tick with **per-account** state under `runtime/state/accounts/`.
 
-`NO_SIGNAL` with `action=NONE` means the stack is healthy and waiting for a TREND_PULLBACK_BREAK setup — not a bridge failure.
+`NO_SIGNAL` with `action=NONE` means that account is healthy and waiting for a TREND_PULLBACK_BREAK setup — not a bridge failure.
 
 ## Broker error 130 (invalid stops)
 

@@ -56,26 +56,47 @@ def discover_mt4_bridges() -> list[BridgeLocation]:
     return found
 
 
-def resolve_bridge_directory(*, configured_bridge: Path) -> BridgeLocation:
+def list_active_bridges(*, configured_bridge: Path) -> list[BridgeLocation]:
     """
-    Prefer configured System runtime/bridge when it has snapshots;
-    otherwise use the freshest MT4 Files/CHECK_SYSTEM bridge.
+    Every bridge that currently has market+status snapshots.
+
+    Multi-account AUTO: each MT4 terminal with CHECK_SYSTEM_V2 attached shows up
+    here and is traded in the same START_LIVE process.
     """
     configured_bridge.mkdir(parents=True, exist_ok=True)
     candidates = [BridgeLocation(configured_bridge, "config")] + discover_mt4_bridges()
-    best = BridgeLocation(configured_bridge, "config")
-    best_score = _snapshot_score(configured_bridge)
-    for loc in candidates[1:]:
+    seen: set[Path] = set()
+    active: list[BridgeLocation] = []
+    for loc in candidates:
+        try:
+            key = loc.bridge_root.resolve()
+        except OSError:
+            key = loc.bridge_root
+        if key in seen:
+            continue
+        seen.add(key)
         loc.bridge_root.mkdir(parents=True, exist_ok=True)
         (loc.bridge_root / "market").mkdir(parents=True, exist_ok=True)
         (loc.bridge_root / "status").mkdir(parents=True, exist_ok=True)
         (loc.bridge_root / "commands").mkdir(parents=True, exist_ok=True)
         (loc.bridge_root / "acknowledgements").mkdir(parents=True, exist_ok=True)
-        score = _snapshot_score(loc.bridge_root)
-        if score > best_score:
-            best = loc
-            best_score = score
-    return best
+        if bridge_has_snapshots(loc.bridge_root):
+            active.append(loc)
+    # Freshest first (stable ordering for logs)
+    active.sort(key=lambda item: _snapshot_score(item.bridge_root), reverse=True)
+    return active
+
+
+def resolve_bridge_directory(*, configured_bridge: Path) -> BridgeLocation:
+    """
+    Prefer configured System runtime/bridge when it has snapshots;
+    otherwise use the freshest MT4 Files/CHECK_SYSTEM bridge.
+    """
+    active = list_active_bridges(configured_bridge=configured_bridge)
+    if active:
+        return active[0]
+    configured_bridge.mkdir(parents=True, exist_ok=True)
+    return BridgeLocation(configured_bridge, "config")
 
 
 def stick_or_resolve_bridge(
@@ -85,13 +106,7 @@ def stick_or_resolve_bridge(
     missing_cycles: int,
     unlock_after_missing: int = 40,
 ) -> tuple[BridgeLocation, int, bool]:
-    """
-    Keep one MT4 bridge for the process lifetime.
-
-    With two terminals writing NATURALGAS, mtime races used to flip accounts every
-    cycle (DATA_STALE / wrong account state). Stay locked while snapshots exist;
-    only rediscover after unlock_after_missing empty cycles.
-    """
+    """Legacy single-bridge helper (tests / tools). Prefer list_active_bridges for live."""
     if locked is not None:
         if bridge_has_snapshots(locked.bridge_root):
             return locked, 0, False
@@ -107,17 +122,17 @@ def bridge_wait_hint(configured_bridge: Path) -> str:
     lines = [
         f"waiting for market/status under: {configured_bridge}",
         "Checklist:",
-        "  1) EA CHECK_SYSTEM_V2 attached to M1 chart",
-        "  2) AutoTrading ON (toolbar) + Allow live trading + Allow DLL imports",
-        "  3) BridgeRootPath empty (AUTO) OR set to Check\\System folder",
+        "  1) EA CHECK_SYSTEM_V2 on each account M1 chart",
+        "  2) AutoTrading ON + Allow live trading + Allow DLL imports",
+        "  3) BridgeRootPath empty (AUTO) on every EA",
         "  4) MetaEditor F7 compile succeeded (0 errors)",
-        "  5) Experts tab must show: CHECK_SYSTEM_V2 initialized ... bridge=...",
-        "  6) Prefer ONE live MT4 terminal (or pin account.allowed_account_numbers)",
+        "  5) Experts: CHECK_SYSTEM_V2 initialized ... bridge=...",
+        "  6) Multi-account: one START_LIVE trades ALL discovered MT4 bridges",
     ]
     discovered = discover_mt4_bridges()
     if discovered:
         lines.append("Discovered MT4 bridge candidates:")
-        for loc in discovered[:5]:
+        for loc in discovered[:8]:
             score = _snapshot_score(loc.bridge_root)
             lines.append(f"  - {loc.bridge_root} files_score={score}")
     else:
