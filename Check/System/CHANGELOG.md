@@ -8,6 +8,7 @@
 - Fix `BARS_NOT_SEQUENTIAL` on real markets: allow session gaps (multiples of TF); use one freshest sticky bridge so two MT4 terminals do not corrupt shared history.
 - Harden live path for NATURALGAS: partial M15 aggregation, heartbeat freshness (not M1 open age), broker GMT bar times, AUTO specs from bridge, clear `HISTORY_INSUFFICIENT m15=N/200` warm-up.
 - Multi-account: every discovered MT4 bridge runs each cycle with isolated history/state/dedupe under `runtime/accounts/<id>/` (no more sticky single-account).
+- Unblock trading: stop freezing on EMA200 warm-up; always reconcile/manage open broker trades; detect regime with available M15 (ema200 clamped).
 
 ## v3.0.0
 

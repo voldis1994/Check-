@@ -73,11 +73,10 @@ def test_trend_down_with_softened_config() -> None:
 
 
 def test_insufficient_history_returns_unknown_via_detector() -> None:
-    """Detector returns UNKNOWN when fewer than ema200_period bars are available."""
+    """Detector returns UNKNOWN only when below minimum operable bars (~EMA50)."""
     cfg = load_config()
     det = RegimeDetector(cfg)
-    # Default ema200_period = 200; use 50 bars → UNKNOWN
-    bars = _make_bars(50, start=100.0, drift=0.1)
+    bars = _make_bars(10, start=100.0, drift=0.1)
     snap = det.update(bars)
     assert snap.regime == MarketRegime.UNKNOWN
     assert snap.reason == ReasonCode.HISTORY_INSUFFICIENT
