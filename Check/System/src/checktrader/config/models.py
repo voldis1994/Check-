@@ -94,6 +94,15 @@ class ExecutionConfig(BaseModel):
     retry_delay_ms: int = 750
     price_tolerance_points: int = 2
     maximum_spread_points: float | None = None
+    maximum_spread_atr: float | None = None
+    slippage_points: int = 3
+
+    @field_validator("slippage_points")
+    @classmethod
+    def positive_slippage(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("slippage_points must be >= 0")
+        return value
 
 
 class HighLockConfig(BaseModel):

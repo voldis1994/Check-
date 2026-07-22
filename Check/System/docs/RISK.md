@@ -2,9 +2,21 @@
 
 Risk approval lives in `risk/engine.py` (`approve_order`). Config block: `position_sizing`.
 
-## Sizing — fixed lot only
+## Universal instruments
 
-Production uses **only**:
+Same code path for Forex, Natural Gas, gold, indices, and other MT4 symbols.
+
+Canonical broker fields:
+
+- `tick_size`, `tick_value`, `digits`, `point`
+- `stop_level_points`, `freeze_level_points`
+- `minimum_lot`, `maximum_lot`, `lot_step`
+
+ATR distances → absolute price → round to `tick_size` → check stop/freeze.
+
+Do **not** use Forex pip assumptions for strategy, risk, or trailing.
+
+## Sizing — fixed lot only
 
 ```json
 "position_sizing": {
@@ -14,49 +26,13 @@ Production uses **only**:
 }
 ```
 
-- Volume is always exactly `fixed_lot` (default `0.01`)
-- Equity, balance, SL distance, ATR, loss streaks, and daily PnL **never** change lot size
-- Broker lot normalization is forbidden — if `0.01` is not allowed, the order is rejected
+If the broker cannot trade exactly `0.01` → `FIXED_LOT_NOT_SUPPORTED` (no rewrite).  
+Insufficient margin → `MARGIN_INSUFFICIENT_FOR_FIXED_LOT`.
 
-### Broker lot gate
+## Symbol gate
 
-If the broker cannot trade exactly `fixed_lot`:
+Configured `instrument.symbol` must match the market snapshot symbol, otherwise `SYMBOL_MISMATCH`.
 
-| Condition | Result |
-|-----------|--------|
-| `fixed_lot < minimum_lot` | `FIXED_LOT_NOT_SUPPORTED` |
-| `fixed_lot > maximum_lot` | `FIXED_LOT_NOT_SUPPORTED` |
-| `fixed_lot` not aligned to `lot_step` | `FIXED_LOT_NOT_SUPPORTED` |
+## Spread gate
 
-Logged fields: `requested_lot`, `minimum_lot`, `maximum_lot`, `lot_step`, `symbol`, `broker_server`.
-
-The system never silently opens `minimum_lot`, `0.10`, or any other size.
-
-## Stop loss (ATR, not pips)
-
-- BUY: SL below entry; SELL: above entry
-- Distance must be ≤ `maximum_stop_atr * ATR` (tick-rounded)
-- Must respect broker `stop_level` / `freeze_level`
-- ATR distance → absolute price → round to `tick_size` → validate levels
-
-Take-profit (optional): `minimum_reward_risk` × SL distance when `fixed_take_profit_enabled`.
-
-## Margin
-
-If free margin is insufficient for the exact fixed lot → `MARGIN_INSUFFICIENT_FOR_FIXED_LOT`.  
-Lot is **not** reduced.
-
-## Not used in production
-
-These must not participate in OPEN decisions:
-
-- `risk_percent` / equity or balance percentage sizing
-- daily loss / profit limits
-- drawdown limits
-- consecutive-loss limits
-- cooldowns after loss or trade
-- martingale / anti-martingale / dynamic position sizing
-
-## Live gates outside risk
-
-Account allow-list, expert enabled, trade allowed, freshness, kill switch, and max open positions are enforced in the application cycle — not by rewriting the lot.
+Optional: `execution.maximum_spread_points` and/or `execution.maximum_spread_atr` block OPEN with `SPREAD_EXECUTION_BLOCKED`.

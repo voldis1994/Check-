@@ -46,8 +46,8 @@ def choose_protective_action(
     config: TradeManagementConfig,
     trailing: TrailingState,
     recent_m1: list[Candle],
-    current_spread_pips: float,
-    median_spread_pips: float,
+    current_spread_price: float,
+    median_spread_price: float,
     bid: float,
     ask: float,
     atr: float,
@@ -71,10 +71,9 @@ def choose_protective_action(
         peak_net_profit=state.peak_net_profit,
         current_net_profit=current_net_profit,
         recent_m1=recent_m1,
-        current_spread_pips=current_spread_pips,
-        median_spread_pips=median_spread_pips,
+        current_spread_price=current_spread_price,
+        median_spread_price=median_spread_price,
         trailing_step_price=step_price,
-        pip_size=specs.pip_size,
         config=config.exit_pressure,
     )
     if pressure.critical_close:

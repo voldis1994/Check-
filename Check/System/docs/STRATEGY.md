@@ -2,22 +2,22 @@
 
 Trend pullback break: M15 context → M5 setup → M1 trigger.
 
+Works on **any** MT4 instrument (Forex, Natural Gas, gold, indices, CFDs) using:
+
+1. Fixed lot `0.01`
+2. ATR price distances
+3. Broker `tick_size` / `tick_value` / `point` / `digits` / stop & freeze levels
+
 ## Pullback (ATR band)
 
-Distance from close to HMA must lie in:
-
-`[pullback_min_atr, pullback_max_atr] × ATR`
-
-BUY also requires `low ≤ HMA`; SELL requires `high ≥ HMA`.
+Distance from close to HMA must lie in `[pullback_min_atr, pullback_max_atr] × ATR`.
 
 ## Trigger buffer
 
-`trigger_buffer_atr × ATR` is converted to absolute price and rounded to `tick_size` (no Forex pip assumption).
+`trigger_buffer_atr × ATR` → absolute price → round to `tick_size`.
 
-## Stop loss proposal
+## Stop
 
-Structure invalidation ± one `tick_size`, then risk engine validates against `maximum_stop_atr × ATR`, stop/freeze levels, and fixed lot `0.01`.
+Structure invalidation ± one `tick_size`, then risk validates against `maximum_stop_atr × ATR` and broker stop/freeze levels.
 
-## Universality
-
-Forex, Natural Gas, gold, indices use the same ATR + broker-spec path (`tick_size`, `tick_value`, `digits`, `point`, `stop_level`, `freeze_level`, lot bounds).
+No Forex pip assumptions in the strategy path.

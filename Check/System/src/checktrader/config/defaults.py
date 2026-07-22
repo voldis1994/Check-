@@ -58,6 +58,8 @@ def default_system_dict() -> dict[str, Any]:
             "retry_delay_ms": 750,
             "price_tolerance_points": 2,
             "maximum_spread_points": None,
+            "maximum_spread_atr": None,
+            "slippage_points": 3,
         },
         "trade_management": {
             "enabled": True,

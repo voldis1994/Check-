@@ -25,6 +25,7 @@ def build_open_command(
     account_number: str,
     server: str,
     instance_id: str,
+    slippage_points: int = 3,
 ) -> OrderCommand:
     return OrderCommand(
         command_id=new_command_id(),
@@ -42,6 +43,7 @@ def build_open_command(
         take_profit=0.0 if take_profit is None else take_profit,
         setup_id=setup_id,
         setup_fingerprint=setup_fingerprint,
+        slippage_points=slippage_points,
     )
 
 
@@ -90,6 +92,7 @@ def build_close_command(
     account_number: str,
     server: str,
     instance_id: str,
+    slippage_points: int = 3,
 ) -> OrderCommand:
     return OrderCommand(
         command_id=new_command_id(),
@@ -104,6 +107,7 @@ def build_close_command(
         volume=volume,
         requested_price=requested_price,
         close_reason=close_reason,
+        slippage_points=slippage_points,
     )
 
 

@@ -25,11 +25,9 @@ MARKET_REQUIRED = ENVELOPE_FIELDS + (
     "symbol",
     "digits",
     "point",
-    "pip_size",
     "bid",
     "ask",
     "spread_points",
-    "spread_pips",
     "tick_size",
     "tick_value",
     "minimum_lot",
@@ -40,6 +38,13 @@ MARKET_REQUIRED = ENVELOPE_FIELDS + (
     "trade_allowed",
     "market_open",
     "bars_m1",
+)
+
+# Optional / display fields: pip_size, spread_pips, spread_price, spread_ticks
+MARKET_RECOMMENDED = (
+    "spread_price",
+    "spread_ticks",
+    "pip_size",
 )
 
 STATUS_REQUIRED = ENVELOPE_FIELDS + (

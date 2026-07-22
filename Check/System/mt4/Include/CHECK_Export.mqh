@@ -36,7 +36,7 @@ string CHECK_BuildBarJson(const string symbol, const int shift, const bool compl
 {
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
    if(digits <= 0)
-      digits = 5;
+      return "";
 
    datetime open_time = iTime(symbol, PERIOD_M1, shift);
    datetime close_time = open_time + 60;
@@ -84,19 +84,27 @@ string CHECK_BuildMarketSnapshotJson()
 {
    string symbol = g_check_symbol;
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
-   if(digits <= 0)
-      digits = 5;
    double point = MarketInfo(symbol, MODE_POINT);
-   if(point <= 0.0)
-      point = MathPow(10.0, -digits);
-   double pip_size = CHECK_PipSize(symbol);
+   if(digits <= 0 || point <= 0.0)
+   {
+      // Do not invent Forex 5-digit defaults — broker must provide valid specs.
+      return "";
+   }
+   double tick_size = MarketInfo(symbol, MODE_TICKSIZE);
+   if(tick_size <= 0.0)
+      tick_size = point;
+   double tick_value = MarketInfo(symbol, MODE_TICKVALUE);
+   if(tick_value <= 0.0)
+      return "";
+   // Display-only quote unit: prefer tick_size. Forex pip convention is NOT used for trading math.
+   double quote_unit = tick_size;
    double bid = MarketInfo(symbol, MODE_BID);
    double ask = MarketInfo(symbol, MODE_ASK);
+   if(bid <= 0.0 || ask <= 0.0 || ask < bid)
+      return "";
    double spread = ask - bid;
-   double spread_points = (point > 0.0) ? (spread / point) : 0.0;
-   double spread_pips = (pip_size > 0.0) ? (spread / pip_size) : 0.0;
-   double tick_size = MarketInfo(symbol, MODE_TICKSIZE);
-   double tick_value = MarketInfo(symbol, MODE_TICKVALUE);
+   double spread_points = spread / point;
+   double spread_ticks = spread / tick_size;
    double min_lot = MarketInfo(symbol, MODE_MINLOT);
    double max_lot = MarketInfo(symbol, MODE_MAXLOT);
    double lot_step = MarketInfo(symbol, MODE_LOTSTEP);
@@ -118,13 +126,14 @@ string CHECK_BuildMarketSnapshotJson()
    json += CHECK_JsonKvString("symbol", symbol, true);
    json += CHECK_JsonKvInt("digits", digits, true);
    json += CHECK_JsonKvNumber("point", point, digits, true);
-   json += CHECK_JsonKvNumber("pip_size", pip_size, digits, true);
+   json += CHECK_JsonKvNumber("pip_size", quote_unit, digits, true);
    json += CHECK_JsonKvNumber("bid", bid, digits, true);
    json += CHECK_JsonKvNumber("ask", ask, digits, true);
+   json += CHECK_JsonKvNumber("spread_price", spread, digits, true);
    json += CHECK_JsonKvNumber("spread_points", spread_points, 1, true);
-   json += CHECK_JsonKvNumber("spread_pips", spread_pips, 2, true);
+   json += CHECK_JsonKvNumber("spread_ticks", spread_ticks, 2, true);
    json += CHECK_JsonKvNumber("tick_size", tick_size, digits, true);
-   json += CHECK_JsonKvNumber("tick_value", tick_value, 5, true);
+   json += CHECK_JsonKvNumber("tick_value", tick_value, 8, true);
    json += CHECK_JsonKvNumber("minimum_lot", min_lot, 2, true);
    json += CHECK_JsonKvNumber("maximum_lot", max_lot, 2, true);
    json += CHECK_JsonKvNumber("lot_step", lot_step, 2, true);
@@ -142,7 +151,9 @@ string CHECK_BuildPositionJsonFromSelected()
    string symbol = OrderSymbol();
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
    if(digits <= 0)
-      digits = 5;
+      digits = (int)MarketInfo(g_check_symbol, MODE_DIGITS);
+   if(digits <= 0)
+      return "";
    string side = (OrderType() == OP_BUY) ? CHECK_SIDE_BUY : CHECK_SIDE_SELL;
    double profit = OrderProfit();
    double swap = OrderSwap();
@@ -233,6 +244,11 @@ string CHECK_BuildStatusSnapshotJson()
 bool CHECK_ExportMarketSnapshot()
 {
    string payload = CHECK_BuildMarketSnapshotJson();
+   if(StringLen(payload) == 0)
+   {
+      Print("CHECK_SYSTEM_V2: market snapshot skipped — invalid symbol digits/point/tick metadata");
+      return false;
+   }
    return CHECK_AtomicWriteText(CHECK_MarketFilePath(), payload);
 }
 

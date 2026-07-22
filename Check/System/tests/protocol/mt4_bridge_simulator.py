@@ -102,7 +102,7 @@ class MT4V2BridgeSimulator:
     def build_market_payload(self, *, bars: int = 3) -> dict[str, Any]:
         seq = self._next_sequence()
         point = 0.00001
-        pip_size = 0.0001
+        tick_size = 0.00001
         spread = self.ask - self.bid
         bars_m1: list[dict[str, Any]] = []
         base = 1.1000
@@ -132,12 +132,13 @@ class MT4V2BridgeSimulator:
             "symbol": self.symbol,
             "digits": 5,
             "point": point,
-            "pip_size": pip_size,
+            "pip_size": tick_size,
             "bid": self.bid,
             "ask": self.ask,
+            "spread_price": spread,
             "spread_points": spread / point,
-            "spread_pips": spread / pip_size,
-            "tick_size": point,
+            "spread_ticks": spread / tick_size,
+            "tick_size": tick_size,
             "tick_value": 1.0,
             "minimum_lot": 0.01,
             "maximum_lot": 100.0,

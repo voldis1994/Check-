@@ -202,6 +202,7 @@ def _try_retry(
             setup_id=state.position.setup_id or "",
             setup_fingerprint=pending.setup_fingerprint or "",
             created_at_utc=now_utc,
+            slippage_points=config.execution.slippage_points,
             **identity,
         )
         state.position.state = PositionState.OPEN_PENDING
@@ -234,6 +235,7 @@ def _try_retry(
             requested_price=pending.requested_price or (market.bid if side is Side.BUY else market.ask),
             close_reason=pending.last_error or ReasonCode.CLOSE_SENT.value,
             created_at_utc=now_utc,
+            slippage_points=config.execution.slippage_points,
             **identity,
         )
         state.position.state = PositionState.CLOSE_PENDING
@@ -453,6 +455,11 @@ def run_cycle(
         save_instance_state(state_path, state, now_utc=now_utc)
         return CycleResult(ReasonCode.SERVER_MISMATCH)
 
+    if market.specs.symbol and market.specs.symbol != symbol:
+        state.last_reason = ReasonCode.SYMBOL_MISMATCH.value
+        save_instance_state(state_path, state, now_utc=now_utc)
+        return CycleResult(ReasonCode.SYMBOL_MISMATCH)
+
     if is_stale(
         generated_at_utc=status.generated_at_utc, now_utc=now_utc, maximum_age_ms=config.execution.maximum_status_age_ms
     ):
@@ -504,8 +511,8 @@ def run_cycle(
             config=config.trade_management,
             trailing=state.trailing,
             recent_m1=list(market.bars_m1[-30:]),
-            current_spread_pips=market.spread_pips,
-            median_spread_pips=max(market.spread_pips, 0.1),
+            current_spread_price=market.spread_price,
+            median_spread_price=max(market.spread_price, market.specs.tick_size),
             bid=market.bid,
             ask=market.ask,
             atr=atr_value,
@@ -521,6 +528,7 @@ def run_cycle(
                 requested_price=market.bid if broker_pos.side.value == "BUY" else market.ask,
                 close_reason=decision.reason.value,
                 created_at_utc=now_utc,
+                slippage_points=config.execution.slippage_points,
                 **identity,
             )
             path = write_command(commands_dir, cmd, sequence=state.next_sequence())
@@ -574,6 +582,24 @@ def run_cycle(
         return CycleResult(ReasonCode.EXPERT_NOT_ENABLED)
     if not market.market_open:
         return CycleResult(ReasonCode.MARKET_CLOSED)
+
+    if (
+        config.execution.maximum_spread_points is not None
+        and market.spread_points > config.execution.maximum_spread_points
+    ):
+        state.last_reason = ReasonCode.SPREAD_EXECUTION_BLOCKED.value
+        save_instance_state(state_path, state, now_utc=now_utc)
+        return CycleResult(ReasonCode.SPREAD_EXECUTION_BLOCKED)
+
+    atr_for_spread = _current_atr(market, atr_period=config.strategy.atr_period)
+    if (
+        config.execution.maximum_spread_atr is not None
+        and atr_for_spread > 0
+        and market.spread_price > config.execution.maximum_spread_atr * atr_for_spread
+    ):
+        state.last_reason = ReasonCode.SPREAD_EXECUTION_BLOCKED.value
+        save_instance_state(state_path, state, now_utc=now_utc)
+        return CycleResult(ReasonCode.SPREAD_EXECUTION_BLOCKED)
 
     strategy_decision = run_strategy(
         symbol=symbol,
@@ -642,6 +668,7 @@ def run_cycle(
         setup_id=strategy_decision.setup.setup_id,
         setup_fingerprint=fp,
         created_at_utc=now_utc,
+        slippage_points=config.execution.slippage_points,
         **identity,
     )
     path = write_command(commands_dir, cmd, sequence=state.next_sequence())

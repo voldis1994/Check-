@@ -51,7 +51,9 @@
     "maximum_retries": 3,
     "retry_delay_ms": 750,
     "price_tolerance_points": 2,
-    "maximum_spread_points": null
+    "maximum_spread_points": null,
+    "maximum_spread_atr": null,
+    "slippage_points": 3
   },
   "trade_management": {
     "enabled": true,

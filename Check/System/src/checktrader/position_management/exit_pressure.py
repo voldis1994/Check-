@@ -1,4 +1,4 @@
-"""Exit pressure scoring for open positions."""
+"""Exit pressure scoring for open positions — spread in absolute price."""
 
 from __future__ import annotations
 
@@ -33,10 +33,9 @@ def compute_exit_pressure(
     peak_net_profit: float,
     current_net_profit: float,
     recent_m1: list[Candle],
-    current_spread_pips: float,
-    median_spread_pips: float,
+    current_spread_price: float,
+    median_spread_price: float,
     trailing_step_price: float,
-    pip_size: float,
     config: ExitPressureConfig,
 ) -> ExitPressureResult:
     if not config.enabled:
@@ -81,11 +80,10 @@ def compute_exit_pressure(
             rejection = _clamp(lower / rng)
 
     spread_ratio = 0.0
-    if median_spread_pips > 0:
-        spread_ratio = current_spread_pips / median_spread_pips
-    spread_price = current_spread_pips * pip_size if pip_size > 0 else 0.0
-    if trailing_step_price > 0 and spread_price > 0:
-        spread_ratio = max(spread_ratio, spread_price / trailing_step_price)
+    if median_spread_price > 0 and current_spread_price > 0:
+        spread_ratio = current_spread_price / median_spread_price
+    if trailing_step_price > 0 and current_spread_price > 0:
+        spread_ratio = max(spread_ratio, current_spread_price / trailing_step_price)
     spread = _clamp((spread_ratio - 1.0) / 2.0)
 
     total = (

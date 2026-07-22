@@ -13,6 +13,7 @@ def build_dashboard_snapshot(state: InstanceRuntimeState) -> dict[str, Any]:
         "position_state": state.position.state.value,
         "ticket": state.position.ticket,
         "volume": state.position.volume,
+        "symbol": None,
         "broker_sl": state.trailing.broker_stop_loss,
         "be_confirmed": state.trailing.be_confirmed,
         "confirmed_be_sl": state.trailing.confirmed_be_sl,
