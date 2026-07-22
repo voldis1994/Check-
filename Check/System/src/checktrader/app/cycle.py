@@ -120,6 +120,11 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
     market.m5 = context.history.get("M5")
     market.m15 = context.history.get("M15")
 
+    if market.symbol and market.symbol.upper() not in {"", "AUTO"}:
+        audit.symbol = market.symbol
+        if context.specs.symbol.upper() in {"AUTO", ""}:
+            context.specs.symbol = market.symbol
+
     # ── Step 5/6: indicators + regime update ───────────────────────────────
     ok_seq, reason_seq = sequential_bars(market.m15, context.config.instrument.timeframe_decision)
     audit.reasons.append(reason_seq)
