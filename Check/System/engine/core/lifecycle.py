@@ -217,6 +217,9 @@ class LiveRuntime:
     account_loggers: dict[str, logging.Logger] = field(default_factory=dict)
     shutdown_requested: bool = False
     allow_control_writes: bool = True
+    live_safety_block_entries: bool = False
+    live_safety_warnings: tuple[str, ...] = ()
+    live_safety_reason: str | None = None
 
 def ensure_account_logger(runtime: LiveRuntime, account_id: str) -> logging.Logger:
     existing = runtime.account_loggers.get(account_id)
@@ -234,6 +237,12 @@ def log_runtime_event(runtime: LiveRuntime, *, level: str, module: str, message:
     log_event(runtime.system_logger, level=level, module=module, message=message, account_id=account_id, symbol=symbol, magic=magic)
     if account_id:
         log_event(ensure_account_logger(runtime, account_id), level=level, module=module, message=message, account_id=account_id, symbol=symbol, magic=magic)
+
+def _resolve_is_live_account() -> bool:
+    """Treat run_live as live unless SYSTEM_DEMO_ACCOUNT is set."""
+    import os
+    flag = os.getenv('SYSTEM_DEMO_ACCOUNT', '').strip().lower()
+    return flag not in {'1', 'true', 'yes', 'demo'}
 
 def startup(*, root_path: str | Path | None=None, config_path: str | Path | None=None, require_mt4_exports: bool=False, wait_for_mt4_seconds: float=0.0) -> LiveRuntime:
     bootstrap_paths = SystemPaths(root_path)
@@ -267,7 +276,25 @@ def startup(*, root_path: str | Path | None=None, config_path: str | Path | None
     memory = load_runtime_memory(paths, instances, lookback_bars=config.analysis.lookback_bars)
     spread_models = build_spread_models(memory)
     removed_hashes = invalidate_runtime_cache(paths, instances)
-    runtime = LiveRuntime(paths=paths, config=config, memory=memory, system_logger=system_logger, spread_models=spread_models)
+    from engine.risk.live_safety import validate_live_safety
+    is_live_account = _resolve_is_live_account()
+    live_safety = validate_live_safety(config, is_live_account=is_live_account)
+    for warning in live_safety.warnings:
+        print(f'LIVE SAFETY WARNING: {warning}', file=sys.stderr, flush=True)
+        log_event(system_logger, level='WARNING', module=MODULE_NAME, message=warning)
+    if live_safety.block_entries:
+        print(f'LIVE SAFETY BLOCK: new OPEN entries disabled ({live_safety.reason})', file=sys.stderr, flush=True)
+        log_event(system_logger, level='ERROR', module=MODULE_NAME, message=f'live safety blocked entries: {live_safety.reason}')
+    runtime = LiveRuntime(
+        paths=paths,
+        config=config,
+        memory=memory,
+        system_logger=system_logger,
+        spread_models=spread_models,
+        live_safety_block_entries=live_safety.block_entries,
+        live_safety_warnings=live_safety.warnings,
+        live_safety_reason=live_safety.reason,
+    )
     register_account_loggers(runtime, instances)
     log_event(system_logger, level='INFO', module=MODULE_NAME, message=f'startup complete instances={len(instances)} cache_hashes_removed={removed_hashes}')
     from engine.core.recovery import run_runtime_recovery

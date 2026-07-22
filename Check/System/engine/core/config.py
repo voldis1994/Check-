@@ -8,7 +8,7 @@ from engine.protocol.models import SystemConfig
 from engine.protocol.parser import parse_system_config
 CONFIG_MODULE = 'core.config'
 CONFIG_ENCODING = 'utf-8'
-_TOP_LEVEL_FIELDS = frozenset({'schema_version', 'system', 'paths', 'runtime', 'instances', 'risk', 'analysis', 'journal', 'trade_management', 'dashboard', 'logging', 'ai'})
+_TOP_LEVEL_FIELDS = frozenset({'schema_version', 'system', 'paths', 'runtime', 'instances', 'risk', 'analysis', 'journal', 'trade_management', 'dashboard', 'logging', 'ai', 'signal_quality'})
 _SYSTEM_FIELDS = frozenset({'name', 'root_path', 'timeframe'})
 _PATHS_FIELDS = frozenset({'clients', 'logs', 'cache', 'history', 'universe'})
 _RUNTIME_FIELDS = frozenset({'cycle_interval_ms', 'ack_timeout_ms', 'retry_max', 'retry_delay_ms', 'data_stale_threshold_ms', 'cycle_max_duration_ms', 'metrics_interval_ms', 'auto_discover_instances', 'execute_entries_on_closed_bar_only'})
@@ -22,6 +22,7 @@ _MONEY_STEP_TRAILING_FIELDS = frozenset({'enabled', 'activation_profit_money', '
 _DASHBOARD_FIELDS = frozenset({'refresh_interval_ms'})
 _LOGGING_FIELDS = frozenset({'level', 'format'})
 _AI_FIELDS = frozenset({'mode', 'fail_closed', 'reject_action', 'timeout_ms', 'retry_max', 'retry_delay_ms'})
+_SIGNAL_QUALITY_FIELDS = frozenset({'minimum_signal_score', 'minimum_score_delta', 'minimum_market_quality', 'minimum_directional_confirmations', 'cooldown_bars_after_trade', 'cooldown_bars_after_loss', 'duplicate_signal_expiry_bars'})
 
 def _config_error(message: str, **context: object) -> ConfigurationError:
     return ConfigurationError(message, module=CONFIG_MODULE, context=dict(context))
@@ -89,14 +90,20 @@ def _assert_schema_shape(payload: dict[str, Any]) -> None:
     _assert_exact_fields(_ensure_mapping(payload['dashboard'], 'dashboard'), _DASHBOARD_FIELDS, 'dashboard')
     _assert_exact_fields(_ensure_mapping(payload['logging'], 'logging'), _LOGGING_FIELDS, 'logging')
     _assert_exact_fields(_ensure_mapping(payload['ai'], 'ai'), _AI_FIELDS, 'ai')
+    if 'signal_quality' in payload:
+        _assert_exact_fields(_ensure_mapping(payload['signal_quality'], 'signal_quality'), _SIGNAL_QUALITY_FIELDS, 'signal_quality')
 
 def parse_config_payload(payload: dict[str, Any]) -> SystemConfig:
     if not isinstance(payload, dict):
         raise _config_error('config payload must be an object', field='config', value_type=type(payload).__name__)
-    _assert_no_forbidden_fields(payload)
-    _assert_schema_shape(payload)
+    from engine.decision.signal_quality import default_signal_quality_dict
+    normalized = dict(payload)
+    if 'signal_quality' not in normalized:
+        normalized['signal_quality'] = default_signal_quality_dict()
+    _assert_no_forbidden_fields(normalized)
+    _assert_schema_shape(normalized)
     try:
-        return parse_system_config(payload)
+        return parse_system_config(normalized)
     except ProtocolError as exc:
         raise _config_error('invalid config payload', protocol_message=exc.message, protocol_context=exc.context) from exc
 

@@ -9,7 +9,7 @@ from engine.journal.error_journal import log_error
 from engine.journal.trade_journal import log_external_partial_position_close, log_external_position_close
 from engine.loader.closed_trade_loader import find_closed_trade_for_ticket
 from engine.protocol.constants import ErrorType, REASON_AMBIGUOUS_PENDING_EXECUTION, REASON_CLOSE_PENDING_RECONCILIATION, REASON_EXECUTION_OUTCOME_UNRESOLVED, REASON_EXTERNAL_POSITION_CLOSE
-from engine.protocol.models import StatusPositionSnapshot, StatusRecord
+from engine.protocol.models import SignalQualityConfig, StatusPositionSnapshot, StatusRecord
 from engine.reason import build_reason
 from engine.state.instance_state import InstanceState
 MODULE_NAME = 'core.position_sync'
@@ -167,12 +167,33 @@ def _archive_money_trailing_state(paths: SystemPaths, instance: Instance, instan
     atomic_write_json(archive_path, snapshot, pretty=True)
 
 
+def _register_trade_close_cooldown(
+    instance_state: InstanceState,
+    *,
+    signal_quality_config: SignalQualityConfig | None,
+    close_bar_utc: str,
+    close_time_utc: str,
+    was_loss: bool = False,
+) -> None:
+    if signal_quality_config is None:
+        return
+    instance_state.register_trade_close(
+        close_bar_utc=close_bar_utc or close_time_utc,
+        close_time_utc=close_time_utc,
+        was_loss=was_loss,
+        cooldown_bars_after_trade=signal_quality_config.cooldown_bars_after_trade,
+        cooldown_bars_after_loss=signal_quality_config.cooldown_bars_after_loss,
+    )
+
+
 def _force_clear_broker_flat_position(
     paths: SystemPaths,
     instance: Instance,
     instance_state: InstanceState,
     *,
     timestamp_utc: str,
+    signal_quality_config: SignalQualityConfig | None = None,
+    market_bar_utc: str | None = None,
 ) -> None:
     """Broker status has no matching open position — clear ghost Python state.
 
@@ -212,11 +233,26 @@ def _force_clear_broker_flat_position(
     )
     _archive_money_trailing_state(paths, instance, instance_state)
     instance_state.clear_close_pending()
+    _register_trade_close_cooldown(
+        instance_state,
+        signal_quality_config=signal_quality_config,
+        close_bar_utc=market_bar_utc or timestamp_utc,
+        close_time_utc=timestamp_utc,
+        was_loss=False,
+    )
     instance_state.clear_position()
     instance_state.clear_pending_execution()
 
 
-def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance_state: InstanceState, *, timestamp_utc: str) -> bool:
+def _try_reconcile_closed_trade(
+    paths: SystemPaths,
+    instance: Instance,
+    instance_state: InstanceState,
+    *,
+    timestamp_utc: str,
+    signal_quality_config: SignalQualityConfig | None = None,
+    market_bar_utc: str | None = None,
+) -> bool:
     ticket = instance_state.close_pending_ticket
     if ticket is None:
         return False
@@ -299,6 +335,14 @@ def _try_reconcile_closed_trade(paths: SystemPaths, instance: Instance, instance
     )
     _archive_money_trailing_state(paths, instance, instance_state)
     instance_state.clear_close_pending()
+    net_profit = float(closed.profit) + float(closed.commission) + float(closed.swap)
+    _register_trade_close_cooldown(
+        instance_state,
+        signal_quality_config=signal_quality_config,
+        close_bar_utc=market_bar_utc or closed.close_time_utc or timestamp_utc,
+        close_time_utc=closed.close_time_utc or timestamp_utc,
+        was_loss=net_profit < 0.0,
+    )
     instance_state.clear_position()
     return True
 
@@ -399,7 +443,7 @@ def _reconcile_pending_open(
         )
     return (False, False, False)
 
-def reconcile_position_with_status(paths: SystemPaths, instance: Instance, instance_state: InstanceState, status: StatusRecord, *, timestamp_utc: str) -> PositionSyncResult:
+def reconcile_position_with_status(paths: SystemPaths, instance: Instance, instance_state: InstanceState, status: StatusRecord, *, timestamp_utc: str, signal_quality_config: SignalQualityConfig | None=None, market_bar_utc: str | None=None) -> PositionSyncResult:
     changed = False
     external_close = False
     trade_journal_logged = False
@@ -441,7 +485,7 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
         if ticket_reappeared and status_position is not None:
             instance_state.clear_close_pending()
             changed = _apply_status_position_to_state(instance_state, status_position, preserve_bars=True) or changed
-        elif _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc):
+        elif _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc, signal_quality_config=signal_quality_config, market_bar_utc=market_bar_utc):
             changed = True
             external_close = True
             trade_journal_logged = True
@@ -449,7 +493,7 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
             return PositionSyncResult(changed=changed, external_close=external_close, trade_journal_logged=trade_journal_logged, duplicate_anomaly=False, close_pending=False, close_reconciled=True, broker_execution_confirmed=False, ambiguous_pending=False)
         elif status_position is None and len(matches) == 0:
             # Still broker-flat and no usable closed history: force-clear ghost state.
-            _force_clear_broker_flat_position(paths, instance, instance_state, timestamp_utc=timestamp_utc)
+            _force_clear_broker_flat_position(paths, instance, instance_state, timestamp_utc=timestamp_utc, signal_quality_config=signal_quality_config, market_bar_utc=market_bar_utc)
             return PositionSyncResult(changed=True, external_close=True, trade_journal_logged=True, duplicate_anomaly=False, close_pending=False, close_reconciled=True, broker_execution_confirmed=False, ambiguous_pending=False)
         else:
             close_pending = True
@@ -458,12 +502,12 @@ def reconcile_position_with_status(paths: SystemPaths, instance: Instance, insta
     if instance_state.open_ticket is not None:
         if status_position is None or status_position.ticket != instance_state.open_ticket:
             _mark_position_close_pending(instance_state, timestamp_utc=timestamp_utc)
-            if _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc):
+            if _try_reconcile_closed_trade(paths, instance, instance_state, timestamp_utc=timestamp_utc, signal_quality_config=signal_quality_config, market_bar_utc=market_bar_utc):
                 close_reconciled = True
                 trade_journal_logged = True
                 external_close = True
             elif status_position is None and len(matches) == 0:
-                _force_clear_broker_flat_position(paths, instance, instance_state, timestamp_utc=timestamp_utc)
+                _force_clear_broker_flat_position(paths, instance, instance_state, timestamp_utc=timestamp_utc, signal_quality_config=signal_quality_config, market_bar_utc=market_bar_utc)
                 close_reconciled = True
                 trade_journal_logged = True
                 external_close = True

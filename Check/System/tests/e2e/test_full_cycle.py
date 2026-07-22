@@ -202,7 +202,7 @@ def test_e2e_wait_scenario(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     paths = SystemPaths(tmp_path)
     simulator = MT4Simulator(paths)
     instance = _instance()
-    result = _run_simulated_full_cycle(tmp_path, instance, simulator, monkeypatch, analysis_overrides={'weights': {'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}})
+    result = _run_simulated_full_cycle(tmp_path, instance, simulator, monkeypatch, market_scenario='flat', analysis_overrides={'weights': {'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}})
     assert result.decision_result is not None
     assert result.decision_result.decision == Decision.WAIT.value
     assert REASON_EQUAL_SCORES in result.decision_result.reason

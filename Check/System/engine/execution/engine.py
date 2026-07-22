@@ -16,7 +16,7 @@ from engine.execution.control_writer import publish_control
 from engine.journal.error_journal import log_error
 from engine.journal.trade_journal import TradeIntentParams, log_trade_ack, log_trade_ack_timeout, log_trade_intent
 from engine.protocol.constants import AckStatus, ErrorType, OrderAction, Side
-from engine.protocol.models import AckRecord, RuntimeConfig, TradeJournalEntry
+from engine.protocol.models import AckRecord, RuntimeConfig, SignalQualityConfig, TradeJournalEntry
 from engine.state.instance_state import InstanceState
 if TYPE_CHECKING:
     from engine.decision.engine import DecisionResult
@@ -113,6 +113,27 @@ def apply_ack_to_instance_state(instance_state: InstanceState, order_command: Or
     else:
         instance_state.clear_pending_execution()
 
+def _is_full_close_ack(instance_state: InstanceState, order_command: OrderCommand, ack_record: AckRecord) -> bool:
+    if order_command.action != OrderAction.CLOSE.value:
+        return False
+    if ack_record.status != AckStatus.SUCCESS.value:
+        return False
+    if order_command.volume is not None and instance_state.position_volume is not None and order_command.volume < instance_state.position_volume:
+        return False
+    return True
+
+def _register_open_fingerprint(*, instance_state: InstanceState, decision_result: DecisionResult, signal_quality_config: SignalQualityConfig | None) -> None:
+    if signal_quality_config is None:
+        return
+    quality = decision_result.signal_quality
+    if quality is None or not quality.fingerprint:
+        return
+    instance_state.register_signal_fingerprint(quality.fingerprint, expiry_bars=signal_quality_config.duplicate_signal_expiry_bars)
+
+def _register_close_cooldown(*, instance_state: InstanceState, signal_quality_config: SignalQualityConfig | None, close_bar_utc: str, close_time_utc: str, was_loss: bool=False) -> None:
+    if signal_quality_config is None:
+        return
+    instance_state.register_trade_close(close_bar_utc=close_bar_utc or close_time_utc, close_time_utc=close_time_utc, was_loss=was_loss, cooldown_bars_after_trade=signal_quality_config.cooldown_bars_after_trade, cooldown_bars_after_loss=signal_quality_config.cooldown_bars_after_loss)
 def log_ack_failure(paths: SystemPaths, instance: Instance, ack_record: AckRecord) -> None:
     if ack_record.status not in {AckStatus.FAILED.value, AckStatus.REJECTED.value}:
         return
@@ -126,7 +147,7 @@ def log_ack_failure(paths: SystemPaths, instance: Instance, ack_record: AckRecor
 def _requires_trade_execution(order_command: OrderCommand) -> bool:
     return order_command.action in {OrderAction.OPEN.value, OrderAction.MODIFY.value, OrderAction.CLOSE.value}
 
-def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_state: InstanceState, decision_result: DecisionResult, risk_engine_result: RiskEngineResult, runtime: RuntimeConfig, management_result: TradeManagementResult | None=None, timestamp_utc: str | None=None, started_monotonic: float | None=None, monotonic_fn: Callable[[], float]=time.monotonic, sleep_fn: Callable[[float], None]=time.sleep, poll_interval_ms: int=50, retry_alert_context: RetryAlertContext | None=None, position_last_bar_utc: str | None=None, preexisting_tickets: tuple[int, ...]=()) -> ExecutionResult:
+def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_state: InstanceState, decision_result: DecisionResult, risk_engine_result: RiskEngineResult, runtime: RuntimeConfig, management_result: TradeManagementResult | None=None, timestamp_utc: str | None=None, started_monotonic: float | None=None, monotonic_fn: Callable[[], float]=time.monotonic, sleep_fn: Callable[[float], None]=time.sleep, poll_interval_ms: int=50, retry_alert_context: RetryAlertContext | None=None, position_last_bar_utc: str | None=None, preexisting_tickets: tuple[int, ...]=(), signal_quality_config: SignalQualityConfig | None=None) -> ExecutionResult:
     resolved_timestamp = timestamp_utc or now_utc()
     order_command = resolve_order_command(decision_result, risk_engine_result, management_result, ticket=instance_state.open_ticket, side=instance_state.position_side)
     if instance_state.last_command_id:
@@ -198,7 +219,11 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
     if order_command.action == OrderAction.CLOSE.value and interpretation.is_success:
         from engine.core.position_sync import _archive_money_trailing_state
         _archive_money_trailing_state(paths, instance, instance_state)
+    if _is_full_close_ack(instance_state, order_command, ack_record):
+        _register_close_cooldown(instance_state=instance_state, signal_quality_config=signal_quality_config, close_bar_utc=position_last_bar_utc or resolved_timestamp, close_time_utc=resolved_timestamp, was_loss=False)
     apply_ack_to_instance_state(instance_state, order_command, ack_record, entry_price=resolved_entry_price, reference_take_profit=resolve_reference_take_profit_for_open(decision_result, order_command), position_last_bar_utc=position_last_bar_utc)
+    if order_command.action == OrderAction.OPEN.value and is_valid_open_fill_ack(ack_record):
+        _register_open_fingerprint(instance_state=instance_state, decision_result=decision_result, signal_quality_config=signal_quality_config)
     trade_entry = log_trade_ack(paths, instance, ack_record, timestamp_utc=resolved_timestamp, price=resolved_entry_price if order_command.action == OrderAction.OPEN.value else None)
     archive_processed_control(paths, instance)
     archive_processed_ack(paths, instance)

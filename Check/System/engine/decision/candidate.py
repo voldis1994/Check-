@@ -11,16 +11,29 @@ from engine.normalizer.market_normalizer import NormalizedMarketBar
 from engine.protocol.constants import MarketRegime, REASON_DATA_INVALID, StructureBias, TrendDirection
 from engine.state.instance_state import InstanceState
 COMPONENT_KEYS = ('momentum', 'trend', 'structure', 'pressure', 'behavior', 'impact', 'context')
+DIRECTIONAL_COMPONENT_KEYS = ('momentum', 'trend', 'structure', 'pressure')
+QUALITY_COMPONENT_KEYS = ('behavior', 'impact', 'context')
 TradeSide = Literal['buy', 'sell']
 
 def round_price(price: float, digits: int) -> float:
     return round(price, digits)
 
 def calculate_weighted_score(component_scores: Mapping[str, float], weights: Mapping[str, float]) -> float:
+    """Legacy full weighted score (all components). Prefer directional helpers for direction."""
     weight_total = sum((weights[key] for key in COMPONENT_KEYS))
     if weight_total <= 0:
         return 0.0
     return sum((component_scores[key] * weights[key] for key in COMPONENT_KEYS)) / weight_total
+
+def calculate_directional_weighted_score(component_scores: Mapping[str, float], weights: Mapping[str, float]) -> float:
+    """Direction score from momentum/trend/structure/pressure only."""
+    from engine.decision.signal_quality import calculate_directional_score
+    return calculate_directional_score(component_scores, weights)
+
+def calculate_market_quality_from_components(component_scores: Mapping[str, float]) -> float:
+    """Market-quality score from behavior/impact/context (0..1)."""
+    from engine.decision.signal_quality import calculate_market_quality_score
+    return calculate_market_quality_score(component_scores)
 
 def build_component_scores(analysis: AnalysisEngineResult, side: TradeSide, *, market_bars: tuple[NormalizedMarketBar, ...] | None=None, ranging_recent_momentum_bars: int=0) -> dict[str, float]:
     momentum = analysis.momentum

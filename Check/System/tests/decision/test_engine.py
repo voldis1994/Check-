@@ -38,11 +38,22 @@ def _instance_state() -> InstanceState:
     state.update_instrument(digits=5, point=1e-05, pip=0.0001)
     return state
 
-def _system_config(*, analysis: dict[str, Any] | None=None, risk: dict[str, Any] | None=None) -> SystemConfig:
+def _system_config(*, analysis: dict[str, Any] | None=None, risk: dict[str, Any] | None=None, signal_quality: dict[str, Any] | None=None) -> SystemConfig:
     payload = valid_system_config_payload()
     payload['analysis'] = {**payload['analysis'], 'lookback_bars': 3, 'structure_lookback_bars': 3, **(analysis or {})}
     if risk is not None:
         payload['risk'] = {**payload['risk'], **risk}
+    # Permissive quality gates so short fixture bars can still exercise BUY/SELL paths.
+    payload['signal_quality'] = {
+        'minimum_signal_score': 0.0,
+        'minimum_score_delta': 0.0,
+        'minimum_market_quality': 0.0,
+        'minimum_directional_confirmations': 1,
+        'cooldown_bars_after_trade': 0,
+        'cooldown_bars_after_loss': 0,
+        'duplicate_signal_expiry_bars': 0,
+        **(signal_quality or {}),
+    }
     return parse_config_payload(payload)
 
 def _engine_kwargs(*, market_bars: tuple[NormalizedMarketBar, ...], relative_spread: float=1.0, spread_threshold: float=1.5, stop_loss_buffer: float=0.0002, reward_ratio: float=2.0, weights: dict[str, float] | None=None) -> dict[str, object]:

@@ -23,7 +23,24 @@ def build_decision_journal_entry(instance: Instance, decision_result: DecisionRe
     if risk_engine_result.result == RiskResult.BLOCK.value:
         reason = risk_engine_result.reason.strip()
         risk_reason = reason or None
-    return DecisionJournalEntry(decision_id=decision_result.decision_id, timestamp_utc=timestamp_utc, account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic, decision=decision_result.decision, reason=decision_result.reason, buy_score=decision_result.buy_score, sell_score=decision_result.sell_score, risk_result=risk_engine_result.result, risk_reason=risk_reason, ai_mode=ai_meta.ai_mode if ai_meta is not None else None, ai_available=ai_meta.ai_available if ai_meta is not None else None, ai_error_type=ai_meta.ai_error_type if ai_meta is not None else None, ai_fallback_used=ai_meta.ai_fallback_used if ai_meta is not None else None, ai_reason=ai_meta.ai_reason if ai_meta is not None else None, system_decision_before_ai=ai_meta.system_decision_before_ai if ai_meta is not None else None, decision_after_ai=ai_meta.decision_after_ai if ai_meta is not None else None)
+    quality = decision_result.signal_quality
+    quality_kwargs: dict[str, object] = {}
+    if quality is not None:
+        quality_kwargs['score_delta'] = quality.score_delta
+        quality_kwargs['winning_side'] = quality.winning_side
+        quality_kwargs['winning_score'] = quality.winning_score
+        quality_kwargs['market_quality_score'] = quality.market_quality_score
+        if quality.reason_code is not None:
+            quality_kwargs['reason_code'] = quality.reason_code
+        quality_kwargs['confirmation_count'] = quality.confirmation_count
+        if quality.fingerprint is not None:
+            quality_kwargs['fingerprint'] = quality.fingerprint
+        quality_kwargs['cooldown_bars_remaining'] = quality.cooldown_bars_remaining
+        if quality.confirmations:
+            quality_kwargs['component_directions'] = {item.name: item.direction for item in quality.confirmations}
+        elif isinstance(quality.details.get('component_directions'), dict):
+            quality_kwargs['component_directions'] = {str(key): str(value) for key, value in quality.details['component_directions'].items()}
+    return DecisionJournalEntry(decision_id=decision_result.decision_id, timestamp_utc=timestamp_utc, account_id=instance.account_id, symbol=instance.symbol, magic=instance.magic, decision=decision_result.decision, reason=decision_result.reason, buy_score=decision_result.buy_score, sell_score=decision_result.sell_score, risk_result=risk_engine_result.result, risk_reason=risk_reason, ai_mode=ai_meta.ai_mode if ai_meta is not None else None, ai_available=ai_meta.ai_available if ai_meta is not None else None, ai_error_type=ai_meta.ai_error_type if ai_meta is not None else None, ai_fallback_used=ai_meta.ai_fallback_used if ai_meta is not None else None, ai_reason=ai_meta.ai_reason if ai_meta is not None else None, system_decision_before_ai=ai_meta.system_decision_before_ai if ai_meta is not None else None, decision_after_ai=ai_meta.decision_after_ai if ai_meta is not None else None, **quality_kwargs)
 
 def append_decision_journal_entry(paths: SystemPaths, instance: Instance, entry: DecisionJournalEntry) -> None:
     journal_path = build_decision_journal_path(paths, instance)

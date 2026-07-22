@@ -97,5 +97,14 @@
     "timeout_ms": 2500,
     "retry_max": 2,
     "retry_delay_ms": 500
+  },
+  "signal_quality": {
+    "minimum_signal_score": 0.65,
+    "minimum_score_delta": 0.15,
+    "minimum_market_quality": 0.60,
+    "minimum_directional_confirmations": 3,
+    "cooldown_bars_after_trade": 3,
+    "cooldown_bars_after_loss": 5,
+    "duplicate_signal_expiry_bars": 10
   }
 }
