@@ -1,26 +1,54 @@
-"""Stop-loss validation helpers."""
+"""ATR-based stop distance → absolute price, tick-rounded, stop/freeze checked."""
 
 from __future__ import annotations
 
 from checktrader.domain.enums import Side
 from checktrader.domain.money import SymbolSpecs
+from checktrader.risk.broker_constraints import min_stop_distance, round_price_to_tick
 
 
-def stop_loss_distance_pips(*, entry: float, stop_loss: float, specs: SymbolSpecs) -> float:
-    if specs.pip_size <= 0:
+def atr_to_price_distance(atr: float, atr_mult: float, specs: SymbolSpecs) -> float:
+    """Convert ATR multiples to absolute price distance, rounded to tick_size."""
+    raw = float(atr) * float(atr_mult)
+    if raw <= 0 or float(specs.tick_size) <= 0:
         return 0.0
-    return abs(entry - stop_loss) / specs.pip_size
+    return round_price_to_tick(raw, float(specs.tick_size))
 
 
-def stop_loss_side_ok(*, side: Side, entry: float, stop_loss: float) -> bool:
+def build_stop_loss(
+    *,
+    side: Side,
+    entry_price: float,
+    atr: float,
+    maximum_stop_atr: float,
+    specs: SymbolSpecs,
+) -> float | None:
+    """SL at ``maximum_stop_atr * ATR`` from entry, tick-rounded; None if invalid."""
+    dist = atr_to_price_distance(atr, maximum_stop_atr, specs)
+    if dist <= 0:
+        return None
+    if dist + 1e-12 < min_stop_distance(specs):
+        return None
     if side is Side.BUY:
-        return stop_loss < entry
-    return stop_loss > entry
+        sl = round_price_to_tick(entry_price - dist, float(specs.tick_size))
+        if sl >= entry_price:
+            return None
+        return sl
+    sl = round_price_to_tick(entry_price + dist, float(specs.tick_size))
+    if sl <= entry_price:
+        return None
+    return sl
 
 
-def stop_loss_within_max(*, entry: float, stop_loss: float, specs: SymbolSpecs, maximum_stop_loss_pips: float) -> bool:
-    distance = stop_loss_distance_pips(entry=entry, stop_loss=stop_loss, specs=specs)
-    return 0.0 < distance <= maximum_stop_loss_pips
-
-
-__all__ = ["stop_loss_distance_pips", "stop_loss_side_ok", "stop_loss_within_max"]
+def money_to_price_offset(
+    *,
+    money: float,
+    lot: float,
+    tick_size: float,
+    tick_value: float,
+) -> float:
+    """Price distance that yields approximately ``money`` PnL for ``lot``."""
+    if lot <= 0 or tick_size <= 0 or tick_value <= 0:
+        return 0.0
+    ticks = money / (lot * tick_value)
+    return ticks * tick_size

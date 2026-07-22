@@ -1,46 +1,62 @@
 # Risk
 
-Risk approval lives in `risk/engine.py` (`approve_order`). Config block: `risk`.
+Risk approval lives in `risk/engine.py` (`approve_order`). Config block: `position_sizing`.
 
-## Sizing modes
+## Sizing — fixed lot only
 
-### `fixed_lot`
+Production uses **only**:
 
-- Volume = `risk.fixed_lot` (e.g. `0.01`)
-- No equity-based scaling
+```json
+"position_sizing": {
+  "mode": "fixed_lot",
+  "fixed_lot": 0.01,
+  "allow_broker_lot_normalization": false
+}
+```
 
-### `risk_percent`
+- Volume is always exactly `fixed_lot` (default `0.01`)
+- Equity, balance, SL distance, ATR, loss streaks, and daily PnL **never** change lot size
+- Broker lot normalization is forbidden — if `0.01` is not allowed, the order is rejected
 
-- Risk money = `equity * risk_percent / 100`
-- Raw volume = risk_money / (SL distance × money-per-price-unit at 1.0 lot)
-- Requires valid tick_value / tick_size
+### Broker lot gate
 
-Unknown / invalid mode or missing percent → reject with a clear reason (no silent fallback to another mode).
+If the broker cannot trade exactly `fixed_lot`:
 
-## Stop loss
+| Condition | Result |
+|-----------|--------|
+| `fixed_lot < minimum_lot` | `FIXED_LOT_NOT_SUPPORTED` |
+| `fixed_lot > maximum_lot` | `FIXED_LOT_NOT_SUPPORTED` |
+| `fixed_lot` not aligned to `lot_step` | `FIXED_LOT_NOT_SUPPORTED` |
 
-- Required when `require_stop_loss` is true
-- BUY: SL must be below entry; SELL: above entry
-- Distance in pips must be &gt; 0 and ≤ `maximum_stop_loss_pips`
-- Take-profit distance defaults to `minimum_reward_risk` × SL distance when TP is computed for the order
+Logged fields: `requested_lot`, `minimum_lot`, `maximum_lot`, `lot_step`, `symbol`, `broker_server`.
 
-## Lot bounds — no silent normalize
+The system never silently opens `minimum_lot`, `0.10`, or any other size.
 
-Default: `allow_lot_normalization: false`.
+## Stop loss (ATR, not pips)
 
-| Condition | Behavior |
-|-----------|----------|
-| Volume &lt; `minimum_lot` or &gt; `maximum_lot` | `INVALID_VOLUME` — reject |
-| Volume not aligned to `lot_step` | `INVALID_VOLUME` — reject (**no rounding**) |
-| `allow_lot_normalization: true` | Round to nearest `lot_step`, then re-check bounds |
+- BUY: SL below entry; SELL: above entry
+- Distance must be ≤ `maximum_stop_atr * ATR` (tick-rounded)
+- Must respect broker `stop_level` / `freeze_level`
+- ATR distance → absolute price → round to `tick_size` → validate levels
 
-Silent rounding of odd lots is intentionally **disabled** so misconfigured risk does not open unintended size.
+Take-profit (optional): `minimum_reward_risk` × SL distance when `fixed_take_profit_enabled`.
 
 ## Margin
 
-If `free_margin <= 0` → `MARGIN_INSUFFICIENT`.  
-Insufficient tick specs → `SYMBOL_SPEC_MISSING`. Invalid prices → `PRICE_INVALID`.
+If free margin is insufficient for the exact fixed lot → `MARGIN_INSUFFICIENT_FOR_FIXED_LOT`.  
+Lot is **not** reduced.
+
+## Not used in production
+
+These must not participate in OPEN decisions:
+
+- `risk_percent` / equity or balance percentage sizing
+- daily loss / profit limits
+- drawdown limits
+- consecutive-loss limits
+- cooldowns after loss or trade
+- martingale / anti-martingale / dynamic position sizing
 
 ## Live gates outside risk
 
-Account allow-list, expert enabled, trade allowed, freshness, kill switch, and max open positions are enforced in the application cycle before/around risk — not by silently rewriting the lot.
+Account allow-list, expert enabled, trade allowed, freshness, kill switch, and max open positions are enforced in the application cycle — not by rewriting the lot.

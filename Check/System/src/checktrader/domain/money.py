@@ -50,4 +50,5 @@ def sl_improves(*, side: Side, current_sl: float, proposed_sl: float, tolerance:
 
 
 def pip_step_price(*, trailing_step_pips: float, pip_size: float) -> float:
+    """Legacy helper for display/spread math. Trailing uses ATR × tick_size instead."""
     return float(trailing_step_pips) * float(pip_size)

@@ -21,7 +21,8 @@ def test_high_lock_activation_and_ratio() -> None:
         commission=0.0,
         config=HighLockConfig(enabled=True, activation_peak_profit_money=1.0, lock_ratio=0.6),
         be_anchor=None,
-        trailing_step_pips=3.0,
+        atr=0.0015,
+        trailing_step_atr=0.20,
         tolerance=price_tolerance(point=0.00001, digits=5),
     )
     assert sl == 1.10060
@@ -38,7 +39,8 @@ def test_high_lock_not_before_activation() -> None:
         commission=0.0,
         config=HighLockConfig(enabled=True, activation_peak_profit_money=1.0, lock_ratio=0.6),
         be_anchor=None,
-        trailing_step_pips=3.0,
+        atr=0.0015,
+        trailing_step_atr=0.20,
         tolerance=price_tolerance(point=0.00001, digits=5),
     )
     assert sl is None
@@ -57,7 +59,8 @@ def test_high_lock_snaps_to_grid_and_no_worsen() -> None:
         commission=0.0,
         config=HighLockConfig(enabled=True, activation_peak_profit_money=1.0, lock_ratio=0.6),
         be_anchor=be,
-        trailing_step_pips=3.0,
+        atr=0.0015,
+        trailing_step_atr=0.20,
         tolerance=tol,
     )
     # snap to floor steps from be: (1.10120-1.10020)/0.00030 = 3.333 → 3 steps → 1.10110
@@ -89,7 +92,8 @@ def test_high_lock_missing_metadata() -> None:
         commission=0.0,
         config=HighLockConfig(enabled=True, activation_peak_profit_money=1.0, lock_ratio=0.6),
         be_anchor=None,
-        trailing_step_pips=3.0,
+        atr=0.0015,
+        trailing_step_atr=0.20,
         tolerance=0.00002,
     )
     assert sl is None

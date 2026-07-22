@@ -35,7 +35,8 @@ def compute_exit_pressure(
     recent_m1: list[Candle],
     current_spread_pips: float,
     median_spread_pips: float,
-    trailing_step_pips: float,
+    trailing_step_price: float,
+    pip_size: float,
     config: ExitPressureConfig,
 ) -> ExitPressureResult:
     if not config.enabled:
@@ -82,8 +83,9 @@ def compute_exit_pressure(
     spread_ratio = 0.0
     if median_spread_pips > 0:
         spread_ratio = current_spread_pips / median_spread_pips
-    if trailing_step_pips > 0:
-        spread_ratio = max(spread_ratio, current_spread_pips / trailing_step_pips)
+    spread_price = current_spread_pips * pip_size if pip_size > 0 else 0.0
+    if trailing_step_price > 0 and spread_price > 0:
+        spread_ratio = max(spread_ratio, spread_price / trailing_step_price)
     spread = _clamp((spread_ratio - 1.0) / 2.0)
 
     total = (

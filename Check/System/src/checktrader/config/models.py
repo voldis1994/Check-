@@ -33,16 +33,33 @@ class PositionConfig(BaseModel):
     magic_number: int = 19942026
 
 
-class RiskConfig(BaseModel):
-    sizing_mode: str = "fixed_lot"
-    fixed_lot: float | None = 0.01
-    risk_percent: float | None = None
-    require_stop_loss: bool = True
-    maximum_stop_loss_pips: float = 25.0
-    minimum_reward_risk: float = 1.5
-    daily_loss_limit_enabled: bool = False
-    drawdown_limit_enabled: bool = False
-    allow_lot_normalization: bool = False
+class PositionSizingConfig(BaseModel):
+    """Production lot source — fixed lot only."""
+
+    mode: str = "fixed_lot"
+    fixed_lot: float = 0.01
+    allow_broker_lot_normalization: bool = False
+
+    @field_validator("mode")
+    @classmethod
+    def only_fixed_lot(cls, value: str) -> str:
+        if value != "fixed_lot":
+            raise ValueError("position_sizing.mode must be 'fixed_lot'")
+        return value
+
+    @field_validator("fixed_lot")
+    @classmethod
+    def positive_lot(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("fixed_lot must be > 0")
+        return value
+
+    @field_validator("allow_broker_lot_normalization")
+    @classmethod
+    def no_silent_normalize(cls, value: bool) -> bool:
+        if value:
+            raise ValueError("allow_broker_lot_normalization must be false in production")
+        return value
 
 
 class StrategyConfig(BaseModel):
@@ -52,8 +69,21 @@ class StrategyConfig(BaseModel):
     minimum_structure_bars: int = 30
     hma_period: int = 21
     atr_period: int = 14
-    pullback_atr_distance: float = 0.50
-    trigger_break_buffer_pips: float = 0.20
+    pullback_min_atr: float = 0.25
+    pullback_max_atr: float = 0.75
+    trigger_buffer_atr: float = 0.05
+    maximum_stop_atr: float = 2.5
+    require_stop_loss: bool = True
+
+    @model_validator(mode="after")
+    def pullback_bounds(self) -> StrategyConfig:
+        if self.pullback_min_atr < 0 or self.pullback_max_atr <= 0:
+            raise ValueError("pullback ATR bounds must be positive")
+        if self.pullback_min_atr > self.pullback_max_atr:
+            raise ValueError("pullback_min_atr must be <= pullback_max_atr")
+        if self.trigger_buffer_atr < 0 or self.maximum_stop_atr <= 0:
+            raise ValueError("trigger_buffer_atr / maximum_stop_atr invalid")
+        return self
 
 
 class ExecutionConfig(BaseModel):
@@ -63,7 +93,7 @@ class ExecutionConfig(BaseModel):
     maximum_retries: int = 3
     retry_delay_ms: int = 750
     price_tolerance_points: int = 2
-    maximum_spread_pips: float | None = None
+    maximum_spread_points: float | None = None
 
 
 class HighLockConfig(BaseModel):
@@ -97,18 +127,29 @@ class ExitPressureConfig(BaseModel):
 
 class TradeManagementConfig(BaseModel):
     enabled: bool = True
-    activation_profit_money: float = 0.50
+    be_activation_r: float | None = None
+    be_activation_atr: float = 0.60
     be_net_profit_money: float = 0.20
-    trailing_step_pips: float = 3.0
+    trailing_activation_atr: float = 0.70
+    trailing_distance_atr: float = 0.80
+    trailing_step_atr: float = 0.20
     fixed_take_profit_enabled: bool = False
+    minimum_reward_risk: float = 1.5
     high_lock: HighLockConfig = Field(default_factory=HighLockConfig)
     exit_pressure: ExitPressureConfig = Field(default_factory=ExitPressureConfig)
 
-    @field_validator("trailing_step_pips")
+    @field_validator("be_activation_r")
     @classmethod
-    def positive_step(cls, value: float) -> float:
+    def r_disabled(cls, value: float | None) -> float | None:
+        if value is not None:
+            raise ValueError("be_activation_r must be null — R/account-risk sizing is not used")
+        return value
+
+    @field_validator("be_activation_atr", "trailing_activation_atr", "trailing_distance_atr", "trailing_step_atr")
+    @classmethod
+    def positive_atr(cls, value: float) -> float:
         if value <= 0:
-            raise ValueError("trailing_step_pips must be > 0")
+            raise ValueError("ATR trade-management multipliers must be > 0")
         return value
 
 
@@ -140,7 +181,7 @@ class SystemConfig(BaseModel):
     account: AccountConfig = Field(default_factory=AccountConfig)
     instrument: InstrumentConfig = Field(default_factory=InstrumentConfig)
     position: PositionConfig = Field(default_factory=PositionConfig)
-    risk: RiskConfig = Field(default_factory=RiskConfig)
+    position_sizing: PositionSizingConfig = Field(default_factory=PositionSizingConfig)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     trade_management: TradeManagementConfig = Field(default_factory=TradeManagementConfig)

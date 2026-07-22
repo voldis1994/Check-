@@ -12,6 +12,8 @@ from checktrader.domain.money import SymbolSpecs, round_price
 from checktrader.domain.setup import Setup
 from checktrader.market_data.aggregator import atr, hma, swing_points
 from checktrader.observability.reason_codes import ReasonCode
+from checktrader.risk.broker_constraints import round_price_to_tick
+from checktrader.risk.stop_loss import atr_to_price_distance
 from checktrader.strategy.setup_identity import build_setup_fingerprint
 
 
@@ -88,10 +90,13 @@ def _in_pullback_zone(
     bias: Side,
     hma_value: float,
     atr_value: float,
-    pullback_atr_distance: float,
+    pullback_min_atr: float,
+    pullback_max_atr: float,
 ) -> bool:
     distance = abs(candle.close - hma_value)
-    if distance > pullback_atr_distance * atr_value:
+    min_dist = pullback_min_atr * atr_value
+    max_dist = pullback_max_atr * atr_value
+    if distance < min_dist - 1e-12 or distance > max_dist + 1e-12:
         return False
     if bias is Side.BUY:
         return candle.low <= hma_value
@@ -104,7 +109,8 @@ def _find_pullback_origin_index(
     bias: Side,
     hma_period: int,
     atr_period: int,
-    pullback_atr_distance: float,
+    pullback_min_atr: float,
+    pullback_max_atr: float,
 ) -> int | None:
     """First bar of the contiguous pullback zone ending at the latest M5 bar."""
     if len(m5) < max(hma_period, atr_period) + 2:
@@ -118,7 +124,8 @@ def _find_pullback_origin_index(
         bias=bias,
         hma_value=hma_m5,
         atr_value=atr_m5,
-        pullback_atr_distance=pullback_atr_distance,
+        pullback_min_atr=pullback_min_atr,
+        pullback_max_atr=pullback_max_atr,
     ):
         return None
     origin = len(m5) - 1
@@ -131,7 +138,8 @@ def _find_pullback_origin_index(
             bias=bias,
             hma_value=hma_m5,
             atr_value=atr_m5,
-            pullback_atr_distance=pullback_atr_distance,
+            pullback_min_atr=pullback_min_atr,
+            pullback_max_atr=pullback_max_atr,
         ):
             break
         origin -= 1
@@ -169,7 +177,8 @@ def evaluate_trend_pullback(
         bias=bias,
         hma_period=config.hma_period,
         atr_period=config.atr_period,
-        pullback_atr_distance=config.pullback_atr_distance,
+        pullback_min_atr=config.pullback_min_atr,
+        pullback_max_atr=config.pullback_max_atr,
     )
     if origin_idx is None:
         return StrategyDecision(
@@ -189,16 +198,17 @@ def evaluate_trend_pullback(
         invalidation = max(c.high for c in structure_window)
         trigger = min(c.low for c in prior_for_trigger)
 
-    buffer = config.trigger_break_buffer_pips * specs.pip_size
+    buffer = atr_to_price_distance(atr_m5, config.trigger_buffer_atr, specs)
+    tick = float(specs.tick_size) if specs.tick_size > 0 else float(specs.point)
     m1_last = m1[-1]
     if bias is Side.BUY:
         triggered = m1_last.close >= trigger + buffer and m1_last.close > m1_last.open
         proposed_entry = m1_last.close
-        proposed_sl = round_price(invalidation - specs.pip_size, specs.digits)
+        proposed_sl = round_price(round_price_to_tick(invalidation - tick, tick), specs.digits)
     else:
         triggered = m1_last.close <= trigger - buffer and m1_last.close < m1_last.open
         proposed_entry = m1_last.close
-        proposed_sl = round_price(invalidation + specs.pip_size, specs.digits)
+        proposed_sl = round_price(round_price_to_tick(invalidation + tick, tick), specs.digits)
 
     context_id = _stable_m15_structure_id(m15, bias)
     if context_id is None:

@@ -1,36 +1,37 @@
-"""Risk package tests (v2) — sizing already covered in unit; keep package entry."""
+"""Risk engine ATR stop bounds."""
 
 from __future__ import annotations
 
-from checktrader.config.models import RiskConfig
+from checktrader.config.models import PositionSizingConfig
 from checktrader.domain.enums import RiskDecision, Side
 from checktrader.risk.engine import approve_order
 from tests.fixtures.helpers import EURUSD_SPECS
 
 
-def test_sell_invalid_sl_below_entry() -> None:
-    risk = RiskConfig(sizing_mode="fixed_lot", fixed_lot=0.01, maximum_stop_loss_pips=50)
+def test_buy_sl_above_entry_rejected() -> None:
     result = approve_order(
-        side=Side.SELL,
+        side=Side.BUY,
         entry=1.10000,
-        stop_loss=1.09900,
+        stop_loss=1.10100,
         specs=EURUSD_SPECS,
-        risk=risk,
-        equity=10_000,
+        sizing=PositionSizingConfig(),
+        atr=0.001,
+        maximum_stop_atr=2.5,
         free_margin=5_000,
     )
     assert result.decision is RiskDecision.INVALID_STOP
 
 
-def test_max_stop_loss_pips_enforced() -> None:
-    risk = RiskConfig(sizing_mode="fixed_lot", fixed_lot=0.01, maximum_stop_loss_pips=10)
+def test_sl_beyond_maximum_stop_atr_rejected() -> None:
+    # distance 0.002, max = 1.0 * 0.001 = 0.001
     result = approve_order(
         side=Side.BUY,
         entry=1.10000,
-        stop_loss=1.09800,  # 20 pips
+        stop_loss=1.09800,
         specs=EURUSD_SPECS,
-        risk=risk,
-        equity=10_000,
+        sizing=PositionSizingConfig(),
+        atr=0.001,
+        maximum_stop_atr=1.0,
         free_margin=5_000,
     )
     assert result.decision is RiskDecision.INVALID_STOP

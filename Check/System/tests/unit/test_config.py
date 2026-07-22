@@ -21,7 +21,9 @@ def test_valid_system_test_config_loads() -> None:
     assert config.version == "2.0.0"
     assert config.account.allowed_account_numbers == ["999"]
     assert config.instrument.symbol == "EURUSD"
-    assert config.trade_management.trailing_step_pips == 3.0
+    assert config.position_sizing.fixed_lot == 0.01
+    assert config.trade_management.trailing_step_atr == 0.20
+    assert config.trade_management.be_activation_r is None
 
 
 def test_empty_allowed_accounts_fails_live(tmp_path: Path) -> None:
@@ -49,19 +51,32 @@ def test_bad_exit_pressure_weights() -> None:
 
 def test_negative_trailing_step_rejected() -> None:
     payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["trade_management"]["trailing_step_pips"] = -1.0
+    payload["trade_management"]["trailing_step_atr"] = -1.0
+    with pytest.raises(PydanticValidationError):
+        SystemConfig.model_validate(payload)
+
+
+def test_risk_percent_mode_rejected() -> None:
+    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
+    payload["position_sizing"]["mode"] = "risk_percent"
+    with pytest.raises(PydanticValidationError):
+        SystemConfig.model_validate(payload)
+
+
+def test_be_activation_r_rejected() -> None:
+    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
+    payload["trade_management"]["be_activation_r"] = 1.0
     with pytest.raises(PydanticValidationError):
         SystemConfig.model_validate(payload)
 
 
 def test_invalid_fixed_lot_rejected(tmp_path: Path) -> None:
     payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["risk"]["fixed_lot"] = 0.0
+    payload["position_sizing"]["fixed_lot"] = 0.0
     path = tmp_path / "lot.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ConfigurationError) as exc:
+    with pytest.raises((ConfigurationError, PydanticValidationError)):
         load_system_config(path)
-    assert exc.value.reason is ReasonCode.INVALID_VOLUME
 
 
 def test_bad_timeframe_rejected(tmp_path: Path) -> None:
@@ -75,5 +90,5 @@ def test_bad_timeframe_rejected(tmp_path: Path) -> None:
 
 
 def test_load_test_config_helper_override() -> None:
-    config = load_test_config(risk={"fixed_lot": 0.05})
-    assert config.risk.fixed_lot == 0.05
+    config = load_test_config(position_sizing={"fixed_lot": 0.05})
+    assert config.position_sizing.fixed_lot == 0.05

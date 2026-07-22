@@ -30,7 +30,7 @@ def main() -> int:
     accounts = config.account.allowed_account_numbers
     print(f"OK version={config.version} instance={config.runtime.instance_id}")
     print(f"  symbol={config.instrument.symbol} magic={config.position.magic_number}")
-    print(f"  sizing={config.risk.sizing_mode} accounts={accounts or ['(empty)']}")
+    print(f"  sizing={config.position_sizing.mode} lot={config.position_sizing.fixed_lot} accounts={accounts or ['(empty)']}")
     print(f"  bridge={config.paths.bridge} state={config.paths.state}")
     if not accounts and not args.allow_empty_accounts:
         print("FAIL: allowed_account_numbers empty")

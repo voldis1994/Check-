@@ -52,7 +52,8 @@ def test_components_and_weighted_score() -> None:
         recent_m1=bars,
         current_spread_pips=1.0,
         median_spread_pips=1.0,
-        trailing_step_pips=3.0,
+        trailing_step_price=0.00030,
+        pip_size=0.0001,
         config=_cfg(),
     )
     assert 0.0 <= result.pullback <= 1.0
@@ -76,7 +77,8 @@ def test_spread_alone_does_not_close() -> None:
         recent_m1=bars,
         current_spread_pips=30.0,
         median_spread_pips=1.0,
-        trailing_step_pips=3.0,
+        trailing_step_price=0.00030,
+        pip_size=0.0001,
         config=_cfg(),
     )
     assert result.spread > 0.5
@@ -113,7 +115,8 @@ def test_critical_needs_multi_non_spread_confirmations() -> None:
         recent_m1=rebuilt,
         current_spread_pips=1.0,
         median_spread_pips=1.0,
-        trailing_step_pips=3.0,
+        trailing_step_price=0.00030,
+        pip_size=0.0001,
         config=_cfg(critical_threshold=0.5),
     )
     non_spread = sum(1 for v in (result.pullback, result.speed, result.trend, result.rejection) if v >= 0.45)
@@ -129,7 +132,8 @@ def test_critical_needs_multi_non_spread_confirmations() -> None:
             recent_m1=bars[:3],
             current_spread_pips=100.0,
             median_spread_pips=1.0,
-            trailing_step_pips=3.0,
+            trailing_step_price=0.00030,
+            pip_size=0.0001,
             config=_cfg(critical_threshold=0.05),
         )
         assert not result2.critical_close

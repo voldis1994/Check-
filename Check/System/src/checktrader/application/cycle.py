@@ -27,15 +27,25 @@ from checktrader.execution.command_factory import (
 )
 from checktrader.execution.protocol import read_json
 from checktrader.execution.reconciliation import reconcile_position_from_broker
+from checktrader.market_data.aggregator import aggregate_timeframe, atr
 from checktrader.market_data.freshness import is_stale
 from checktrader.market_data.loader import MarketSnapshot
 from checktrader.market_data.status import StatusSnapshot
 from checktrader.observability.reason_codes import ReasonCode
+from checktrader.position_management.atr_grid_trailing import count_jump_steps
 from checktrader.position_management.engine import choose_protective_action
-from checktrader.position_management.pip_grid_trailing import count_jump_steps
 from checktrader.risk.engine import approve_order
 from checktrader.state.store import InstanceRuntimeState, save_instance_state
 from checktrader.strategy.engine import run_strategy
+
+
+def _current_atr(market: MarketSnapshot, *, atr_period: int) -> float:
+    m5 = aggregate_timeframe(market.bars_m1, minutes=5, timeframe="M5")
+    value = atr(m5, atr_period) if m5 else None
+    if value is not None and value > 0:
+        return float(value)
+    m1_value = atr(list(market.bars_m1), atr_period)
+    return float(m1_value) if m1_value is not None else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +119,7 @@ def _confirm_modify_trailing(
     market: MarketSnapshot,
     config: SystemConfig,
     tol: float,
+    atr_value: float,
 ) -> None:
     prev = state.trailing.confirmed_stop_loss or state.trailing.confirmed_be_sl
     if state.trailing.be_confirmed and prev is not None:
@@ -116,9 +127,9 @@ def _confirm_modify_trailing(
             side=side,
             previous_sl=prev,
             applied_sl=applied_sl,
-            trailing_step_pips=config.trade_management.trailing_step_pips,
-            pip_size=market.specs.pip_size,
-            digits=market.specs.digits,
+            atr=atr_value,
+            trailing_step_atr=config.trade_management.trailing_step_atr,
+            specs=market.specs,
             tolerance=tol,
         )
         state.trailing.confirmed_grid_step += max(jump, 1) if jump else 1
@@ -204,7 +215,7 @@ def _try_retry(
             requested_take_profit=pending.requested_take_profit or 0.0,
             previous_broker_stop_loss=(broker_pos.stop_loss if broker_pos else state.trailing.broker_stop_loss or 0.0),
             trailing_reason=state.trailing.last_reason or ReasonCode.MODIFY_SENT.value,
-            trailing_step=config.trade_management.trailing_step_pips,
+            trailing_step=config.trade_management.trailing_step_atr,
             created_at_utc=now_utc,
             **identity,
         )
@@ -316,6 +327,7 @@ def _handle_pending(
                     market=market,
                     config=config,
                     tol=tol,
+                    atr_value=_current_atr(market, atr_period=config.strategy.atr_period),
                 )
                 save_instance_state(state_path, state, now_utc=now_utc)
                 return CycleResult(ReasonCode(state.last_reason or ReasonCode.MODIFY_CONFIRMED.value))
@@ -386,6 +398,7 @@ def _handle_pending(
                 market=market,
                 config=config,
                 tol=tol,
+                atr_value=_current_atr(market, atr_period=config.strategy.atr_period),
             )
             state.trailing.confirmation_source = ConfirmationSource.STATUS
             state.last_reason = ReasonCode.RECONCILIATION_CONFIRMED.value
@@ -477,6 +490,7 @@ def run_cycle(
 
     if broker_pos is not None and state.position.state in {PositionState.OPEN, PositionState.RECONCILING}:
         state.position.state = PositionState.OPEN
+        atr_value = _current_atr(market, atr_period=config.strategy.atr_period)
         decision = choose_protective_action(
             side=broker_pos.side,
             open_price=broker_pos.open_price,
@@ -494,6 +508,7 @@ def run_cycle(
             median_spread_pips=max(market.spread_pips, 0.1),
             bid=market.bid,
             ask=market.ask,
+            atr=atr_value,
         )
         if decision.state is not None:
             state.trailing = decision.state
@@ -528,7 +543,7 @@ def run_cycle(
                 requested_take_profit=broker_pos.take_profit,
                 previous_broker_stop_loss=broker_pos.stop_loss,
                 trailing_reason=decision.reason.value,
-                trailing_step=config.trade_management.trailing_step_pips,
+                trailing_step=config.trade_management.trailing_step_atr,
                 created_at_utc=now_utc,
                 **identity,
             )
@@ -583,23 +598,32 @@ def run_cycle(
 
     side = strategy_decision.setup.direction
     entry = market.ask if side.value == "BUY" else market.bid
+    atr_value = _current_atr(market, atr_period=config.strategy.atr_period)
     risk = approve_order(
         side=side,
         entry=entry,
         stop_loss=strategy_decision.setup.proposed_stop_loss,
         specs=market.specs,
-        risk=config.risk,
-        equity=status.equity,
+        sizing=config.position_sizing,
+        atr=atr_value,
+        maximum_stop_atr=config.strategy.maximum_stop_atr,
         free_margin=status.free_margin,
+        broker_server=identity["server"],
         fixed_take_profit_enabled=config.trade_management.fixed_take_profit_enabled,
+        minimum_reward_risk=config.trade_management.minimum_reward_risk,
+        bid=market.bid,
+        ask=market.ask,
     )
     if risk.decision is not RiskDecision.APPROVED:
         mapping = {
             RiskDecision.INVALID_STOP: ReasonCode.INVALID_STOP_LOSS,
-            RiskDecision.INVALID_VOLUME: ReasonCode.INVALID_VOLUME,
-            RiskDecision.MARGIN_INSUFFICIENT: ReasonCode.MARGIN_INSUFFICIENT,
+            RiskDecision.FIXED_LOT_NOT_SUPPORTED: ReasonCode.FIXED_LOT_NOT_SUPPORTED,
+            RiskDecision.MARGIN_INSUFFICIENT_FOR_FIXED_LOT: ReasonCode.MARGIN_INSUFFICIENT_FOR_FIXED_LOT,
+            RiskDecision.STOP_LEVEL_VIOLATION: ReasonCode.STOP_LEVEL_VIOLATION,
+            RiskDecision.FREEZE_LEVEL_VIOLATION: ReasonCode.FREEZE_LEVEL_VIOLATION,
             RiskDecision.SYMBOL_SPEC_MISSING: ReasonCode.SYMBOL_SPEC_MISSING,
             RiskDecision.PRICE_INVALID: ReasonCode.INVALID_ENTRY_PRICE,
+            RiskDecision.RISK_CONFIG_INVALID: ReasonCode.RISK_CONFIG_INVALID,
         }
         reason = mapping.get(risk.decision, ReasonCode.INTERNAL_ERROR)
         state.last_reason = reason.value
