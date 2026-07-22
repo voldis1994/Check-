@@ -600,7 +600,9 @@ string CHECK_BuildAckJson(const CHECK_Command &command, const CHECK_AckResult &r
 {
    int digits = (int)MarketInfo(command.symbol, MODE_DIGITS);
    if(digits <= 0)
-      digits = 5;
+      digits = (int)MarketInfo(g_check_symbol, MODE_DIGITS);
+   if(digits <= 0)
+      digits = 0;
    long sequence = command.sequence;
    if(sequence <= 0)
       sequence = g_check_sequence;
@@ -1008,9 +1010,29 @@ bool CHECK_ExecuteClose(const CHECK_Command &command, CHECK_AckResult &result, s
    }
 
    int order_type = OrderType();
-   double close_volume = command.has_volume ? CHECK_NormalizeLot(command.symbol, command.volume) : OrderLots();
+   // Never silently rewrite lot size — use exact requested volume or full position lots.
+   double close_volume = command.has_volume ? command.volume : OrderLots();
    if(close_volume <= 0.0 || close_volume > OrderLots() + 1e-8)
       close_volume = OrderLots();
+   if(command.has_volume)
+   {
+      double step = MarketInfo(command.symbol, MODE_LOTSTEP);
+      if(step > 0.0)
+      {
+         double steps = command.volume / step;
+         if(MathAbs(steps - MathRound(steps)) > 1e-8)
+         {
+            CHECK_SetRejectedAck(result, "CLOSE volume not aligned to lot_step");
+            error_message = result.broker_error_text;
+            return false;
+         }
+      }
+      if(MathAbs(command.volume - OrderLots()) > 1e-8 && command.volume < OrderLots() - 1e-8)
+      {
+         // Partial close only with exact broker-aligned volume; never normalize.
+         close_volume = command.volume;
+      }
+   }
 
    RefreshRates();
    double close_price = (order_type == OP_BUY)

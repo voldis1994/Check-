@@ -483,23 +483,22 @@ void CHECK_MarkCommandIdProcessed(const string command_id)
 
 double CHECK_PipSize(const string symbol)
 {
-   int digits = (int)MarketInfo(symbol, MODE_DIGITS);
+   // Legacy name — returns tick_size (or point). Never invent Forex ×10 pip.
+   double tick_size = MarketInfo(symbol, MODE_TICKSIZE);
+   if(tick_size > 0.0)
+      return tick_size;
    double point = MarketInfo(symbol, MODE_POINT);
-   if(point <= 0.0)
-      point = MathPow(10.0, -MathMax(digits, 1));
-   if(digits == 3 || digits == 5)
-      return point * 10.0;
-   return point;
+   if(point > 0.0)
+      return point;
+   return 0.0;
 }
 
 double CHECK_PriceTolerance(const string symbol)
 {
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
-   if(digits <= 0)
-      digits = 5;
    double point = MarketInfo(symbol, MODE_POINT);
-   if(point <= 0.0)
-      point = MathPow(10.0, -digits);
+   if(digits <= 0 || point <= 0.0)
+      return 0.0;
    return MathMax(point, MathPow(10.0, -digits));
 }
 
@@ -509,7 +508,7 @@ double CHECK_NormalizePrice(const string symbol, const double price)
       return 0.0;
    int digits = (int)MarketInfo(symbol, MODE_DIGITS);
    if(digits < 0)
-      digits = 5;
+      return 0.0;
    return NormalizeDouble(price, digits);
 }
 

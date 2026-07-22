@@ -23,7 +23,6 @@ EURUSD_SPECS = SymbolSpecs(
     symbol="EURUSD",
     digits=5,
     point=0.00001,
-    pip_size=0.0001,
     tick_size=0.00001,
     tick_value=1.0,
     minimum_lot=0.01,
@@ -31,6 +30,7 @@ EURUSD_SPECS = SymbolSpecs(
     lot_step=0.01,
     stop_level_points=0,
     freeze_level_points=0,
+    pip_size=0.0001,
 )
 
 
@@ -82,7 +82,8 @@ def eurusd_market_payload(
         "bid": bid,
         "ask": ask,
         "spread_points": round((ask - bid) / 0.00001),
-        "spread_pips": round((ask - bid) / 0.0001, 2),
+        "spread_price": round(ask - bid, 5),
+        "spread_ticks": round((ask - bid) / tick_size, 2),
         "tick_size": tick_size,
         "tick_value": tick_value,
         "minimum_lot": 0.01,

@@ -1,4 +1,4 @@
-"""Money and price helpers."""
+"""Money and price helpers — instrument-agnostic (tick/point/digits)."""
 
 from __future__ import annotations
 
@@ -9,10 +9,11 @@ from checktrader.domain.enums import Side
 
 @dataclass(frozen=True, slots=True)
 class SymbolSpecs:
+    """Broker symbol contract. Canonical distance unit is tick_size, not pip."""
+
     symbol: str
     digits: int
     point: float
-    pip_size: float
     tick_size: float
     tick_value: float
     minimum_lot: float
@@ -20,6 +21,13 @@ class SymbolSpecs:
     lot_step: float
     stop_level_points: int
     freeze_level_points: int
+    # Legacy display field only — never use for strategy/risk distances.
+    # Defaults to tick_size when broker does not define a Forex-style pip.
+    pip_size: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.pip_size <= 0 and self.tick_size > 0:
+            object.__setattr__(self, "pip_size", float(self.tick_size))
 
 
 def price_tolerance(*, point: float, digits: int, points: int = 2) -> float:
@@ -49,5 +57,21 @@ def sl_improves(*, side: Side, current_sl: float, proposed_sl: float, tolerance:
     return proposed_sl < current_sl - tolerance
 
 
-def pip_step_price(*, trailing_step_pips: float, pip_size: float) -> float:
-    return float(trailing_step_pips) * float(pip_size)
+def spread_price(*, bid: float, ask: float) -> float:
+    if bid <= 0 or ask <= 0 or ask < bid:
+        return 0.0
+    return float(ask) - float(bid)
+
+
+def spread_ticks(*, bid: float, ask: float, tick_size: float) -> float:
+    price = spread_price(bid=bid, ask=ask)
+    if tick_size <= 0 or price <= 0:
+        return 0.0
+    return price / tick_size
+
+
+def spread_points(*, bid: float, ask: float, point: float) -> float:
+    price = spread_price(bid=bid, ask=ask)
+    if point <= 0 or price <= 0:
+        return 0.0
+    return price / point

@@ -26,16 +26,10 @@
     "one_position_per_symbol_magic": true,
     "magic_number": 19942026
   },
-  "risk": {
-    "sizing_mode": "fixed_lot",
+  "position_sizing": {
+    "mode": "fixed_lot",
     "fixed_lot": 0.01,
-    "risk_percent": null,
-    "require_stop_loss": true,
-    "maximum_stop_loss_pips": 25.0,
-    "minimum_reward_risk": 1.5,
-    "daily_loss_limit_enabled": false,
-    "drawdown_limit_enabled": false,
-    "allow_lot_normalization": false
+    "allow_broker_lot_normalization": false
   },
   "strategy": {
     "enabled_setup": "trend_pullback_break",
@@ -44,8 +38,11 @@
     "minimum_structure_bars": 30,
     "hma_period": 21,
     "atr_period": 14,
-    "pullback_atr_distance": 0.5,
-    "trigger_break_buffer_pips": 0.2
+    "pullback_min_atr": 0.0,
+    "pullback_max_atr": 2.0,
+    "trigger_buffer_atr": 0.05,
+    "maximum_stop_atr": 5.0,
+    "require_stop_loss": true
   },
   "execution": {
     "maximum_status_age_ms": 2000,
@@ -54,14 +51,20 @@
     "maximum_retries": 3,
     "retry_delay_ms": 750,
     "price_tolerance_points": 2,
-    "maximum_spread_pips": null
+    "maximum_spread_points": null,
+    "maximum_spread_atr": null,
+    "slippage_points": 3
   },
   "trade_management": {
     "enabled": true,
-    "activation_profit_money": 0.5,
-    "be_net_profit_money": 0.2,
-    "trailing_step_pips": 3.0,
+    "be_activation_r": null,
+    "be_activation_atr": 0.01,
+    "be_net_profit_money": 0.20,
+    "trailing_activation_atr": 0.01,
+    "trailing_distance_atr": 0.80,
+    "trailing_step_atr": 0.20,
     "fixed_take_profit_enabled": false,
+    "minimum_reward_risk": 1.5,
     "high_lock": {
       "enabled": true,
       "activation_peak_profit_money": 1.0,

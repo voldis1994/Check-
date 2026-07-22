@@ -24,5 +24,6 @@ class TickQuote:
     bid: float
     ask: float
     time_utc: str
+    spread_price: float
     spread_points: float
-    spread_pips: float
+    spread_ticks: float

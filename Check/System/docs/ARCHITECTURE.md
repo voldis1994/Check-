@@ -62,7 +62,7 @@ runtime/
 1. **Broker is truth** — confirm protective SL from ACK `applied_stop_loss` or matching status SL, never from the requested value alone.
 2. **One position** — `maximum_open_positions: 1` and one symbol/magic pair by default.
 3. **Deterministic reasons** — every skip/reject carries a `ReasonCode`.
-4. **No silent lot normalize** — unless `risk.allow_lot_normalization` is true.
+4. **No silent lot normalize** — `allow_broker_lot_normalization` is always false; unsupported lots reject with `FIXED_LOT_NOT_SUPPORTED`.
 5. **Setup identity** — duplicate fingerprints block re-entry; no mandatory post-trade cooldown.
 
 ## Entry points

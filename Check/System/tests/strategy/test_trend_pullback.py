@@ -16,8 +16,10 @@ def _cfg(**kwargs: object) -> StrategyConfig:
         minimum_structure_bars=30,
         hma_period=21,
         atr_period=14,
-        pullback_atr_distance=0.5,
-        trigger_break_buffer_pips=0.2,
+        pullback_min_atr=0.0,
+        pullback_max_atr=2.0,
+        trigger_buffer_atr=0.05,
+        maximum_stop_atr=5.0,
         setup_expiry_bars=200,
         use_closed_bars_only=True,
     )

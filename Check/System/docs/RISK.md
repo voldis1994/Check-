@@ -1,46 +1,38 @@
 # Risk
 
-Risk approval lives in `risk/engine.py` (`approve_order`). Config block: `risk`.
+Risk approval lives in `risk/engine.py` (`approve_order`). Config block: `position_sizing`.
 
-## Sizing modes
+## Universal instruments
 
-### `fixed_lot`
+Same code path for Forex, Natural Gas, gold, indices, and other MT4 symbols.
 
-- Volume = `risk.fixed_lot` (e.g. `0.01`)
-- No equity-based scaling
+Canonical broker fields:
 
-### `risk_percent`
+- `tick_size`, `tick_value`, `digits`, `point`
+- `stop_level_points`, `freeze_level_points`
+- `minimum_lot`, `maximum_lot`, `lot_step`
 
-- Risk money = `equity * risk_percent / 100`
-- Raw volume = risk_money / (SL distance × money-per-price-unit at 1.0 lot)
-- Requires valid tick_value / tick_size
+ATR distances → absolute price → round to `tick_size` → check stop/freeze.
 
-Unknown / invalid mode or missing percent → reject with a clear reason (no silent fallback to another mode).
+Do **not** use Forex pip assumptions for strategy, risk, or trailing.
 
-## Stop loss
+## Sizing — fixed lot only
 
-- Required when `require_stop_loss` is true
-- BUY: SL must be below entry; SELL: above entry
-- Distance in pips must be &gt; 0 and ≤ `maximum_stop_loss_pips`
-- Take-profit distance defaults to `minimum_reward_risk` × SL distance when TP is computed for the order
+```json
+"position_sizing": {
+  "mode": "fixed_lot",
+  "fixed_lot": 0.01,
+  "allow_broker_lot_normalization": false
+}
+```
 
-## Lot bounds — no silent normalize
+If the broker cannot trade exactly `0.01` → `FIXED_LOT_NOT_SUPPORTED` (no rewrite).  
+Insufficient margin → `MARGIN_INSUFFICIENT_FOR_FIXED_LOT`.
 
-Default: `allow_lot_normalization: false`.
+## Symbol gate
 
-| Condition | Behavior |
-|-----------|----------|
-| Volume &lt; `minimum_lot` or &gt; `maximum_lot` | `INVALID_VOLUME` — reject |
-| Volume not aligned to `lot_step` | `INVALID_VOLUME` — reject (**no rounding**) |
-| `allow_lot_normalization: true` | Round to nearest `lot_step`, then re-check bounds |
+Configured `instrument.symbol` must match the market snapshot symbol, otherwise `SYMBOL_MISMATCH`.
 
-Silent rounding of odd lots is intentionally **disabled** so misconfigured risk does not open unintended size.
+## Spread gate
 
-## Margin
-
-If `free_margin <= 0` → `MARGIN_INSUFFICIENT`.  
-Insufficient tick specs → `SYMBOL_SPEC_MISSING`. Invalid prices → `PRICE_INVALID`.
-
-## Live gates outside risk
-
-Account allow-list, expert enabled, trade allowed, freshness, kill switch, and max open positions are enforced in the application cycle before/around risk — not by silently rewriting the lot.
+Optional: `execution.maximum_spread_points` and/or `execution.maximum_spread_atr` block OPEN with `SPREAD_EXECUTION_BLOCKED`.

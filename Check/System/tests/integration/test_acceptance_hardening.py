@@ -175,7 +175,13 @@ def test_sequence_10_preferred_over_9(tmp_path: Path) -> None:
 def test_fingerprint_stable_across_m1_same_structure() -> None:
     from checktrader.config.models import StrategyConfig
 
-    cfg = StrategyConfig(minimum_structure_bars=30, setup_expiry_bars=200)
+    cfg = StrategyConfig(
+        minimum_structure_bars=30,
+        setup_expiry_bars=200,
+        pullback_min_atr=0.0,
+        pullback_max_atr=2.0,
+        maximum_stop_atr=5.0,
+    )
     base = synthesize_buy_setup_m1(trigger=False)
     d1 = run_strategy(symbol="EURUSD", specs=EURUSD_SPECS, bars_m1=base, config=cfg, now_utc=NOW)
     assert d1.setup is not None
@@ -205,8 +211,9 @@ def test_fixed_take_profit_disabled_sends_zero_tp(tmp_path: Path) -> None:
         entry=1.10000,
         stop_loss=1.09800,
         specs=EURUSD_SPECS,
-        risk=config.risk,
-        equity=10_000,
+        sizing=config.position_sizing,
+        atr=0.001,
+        maximum_stop_atr=config.strategy.maximum_stop_atr,
         free_margin=5_000,
         fixed_take_profit_enabled=False,
     )
@@ -345,23 +352,29 @@ def test_buy_path_open_be_grid_close(tmp_path: Path) -> None:
     assert state.trailing.be_confirmed is True
     assert state.pending is None
 
-    # After BE: price far above BE enables a 3-pip grid MODIFY (jump steps allowed).
-    from checktrader.position_management.pip_grid_trailing import compute_grid_stop_loss
+    # After BE: ATR grid MODIFY (jump steps allowed).
+    from checktrader.application.cycle import _current_atr
+    from checktrader.position_management.atr_grid_trailing import atr_step_price, compute_grid_stop_loss
 
-    bid = be_sl + 0.00100
+    atr_value = _current_atr(market, atr_period=config.strategy.atr_period)
+    step = atr_step_price(
+        atr=atr_value,
+        trailing_step_atr=config.trade_management.trailing_step_atr,
+        specs=market.specs,
+    )
+    # Ensure price is far enough for several ATR steps
+    bid = be_sl + max(step * 5, 0.00100)
     grid_sl, steps = compute_grid_stop_loss(
         side=Side.BUY,
         confirmed_be_sl=be_sl,
         current_price=bid,
-        trailing_step_pips=3.0,
-        pip_size=0.0001,
-        digits=5,
-        point=0.00001,
-        stop_level_points=0,
-        freeze_level_points=0,
+        atr=atr_value,
+        trailing_step_atr=config.trade_management.trailing_step_atr,
+        specs=market.specs,
     )
-    assert steps >= 3
-    assert grid_sl == round(be_sl + steps * 0.00030, 5)
+    assert steps >= 1
+    assert grid_sl is not None
+    assert grid_sl == round(be_sl + steps * step, 5) or abs(float(grid_sl) - (be_sl + steps * step)) < 1e-8
     pos = broker_position(
         ticket=ticket,
         open_price=open_px,
@@ -377,7 +390,7 @@ def test_buy_path_open_be_grid_close(tmp_path: Path) -> None:
     assert state.pending is not None
     pending_sl = float(state.trailing.pending_stop_loss or 0.0)
     # Protective selector may choose grid or a stronger high-lock on the same grid.
-    assert pending_sl >= grid_sl - 1e-9
+    assert pending_sl >= float(grid_sl) - 1e-9
     assert pending_sl > be_sl
     cid = state.pending.command_id
     _ack(
@@ -406,7 +419,7 @@ def test_buy_path_open_be_grid_close(tmp_path: Path) -> None:
     # Reason after BE is TRAILING_GRID_CONFIRMED when be_confirmed was already true.
     assert state.last_reason == ReasonCode.TRAILING_GRID_CONFIRMED.value
     assert state.trailing.confirmed_stop_loss == pending_sl
-    assert state.trailing.confirmed_grid_step >= 3
+    assert state.trailing.confirmed_grid_step >= 1
 
 
 def test_restart_open_pending_no_double_open(tmp_path: Path) -> None:
