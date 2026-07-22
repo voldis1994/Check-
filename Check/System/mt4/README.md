@@ -1,69 +1,46 @@
-# CHECK MT4 V2 (file bridge)
+# CHECK SYSTEM v3 MT4 Bridge
 
-Expert Advisor + includes that speak protocol **2.0.0** with the Python engine under `runtime/bridge/`.
+`Experts/CHECK_SYSTEM_V3.mq4` is an MT4 transport bridge. It does not contain strategy decisions. It exports market/status JSON and executes command JSON created by the external CHECK SYSTEM v3 Python process.
 
-## Layout
+## Install
 
-| Path | Role |
-|------|------|
-| `Experts/CHECK_SYSTEM_V2.mq4` | EA entrypoint (M1 only) |
-| `Include/CHECK_Protocol.mqh` | Protocol constants, bridge paths, atomic IO |
-| `Include/CHECK_Json.mqh` | JSON escape / format / field extract helpers |
-| `Include/CHECK_Export.mqh` | Market + status snapshot writers |
-| `Include/CHECK_Execution.mqh` | OPEN / MODIFY / CLOSE + ACK + idempotence |
+Copy:
 
-## Bridge directories
+- `mt4/Experts/CHECK_SYSTEM_V3.mq4` to `<TerminalDataPath>/MQL4/Experts/`
+- `mt4/Include/CHECK_V3_*.mqh` to `<TerminalDataPath>/MQL4/Include/`
 
-Relative to `BridgeRootPath` (SYSTEM root):
+Then restart MetaTrader 4 or refresh Navigator, compile the EA, and attach it to an M1 chart for the traded symbol.
 
+## Required MT4 settings
+
+- Attach the EA to an M1 chart. Initialization fails on any other timeframe.
+- Enable AutoTrading if live order execution is required.
+- Enable **Allow DLL imports** on the EA settings tab. The bridge imports `kernel32.dll` functions (`CreateDirectoryW`, `GetFileAttributesW`, `MoveFileExW`) to create absolute bridge paths and atomically replace JSON files.
+- Confirm the EA input `MagicNumber` matches the Python configuration for the account.
+
+## BridgeRootPath
+
+`BridgeRootPath` defaults to an empty string. Empty means AUTO:
+
+```text
+TerminalDataPath\MQL4\Files\CHECK_SYSTEM
 ```
-runtime/bridge/market/
-runtime/bridge/status/
-runtime/bridge/commands/
-runtime/bridge/acknowledgements/
-runtime/bridge/archive/
-runtime/bridge/archive/commands/
+
+The EA creates this layout:
+
+```text
+runtime\bridge\
+  market\
+  status\
+  commands\
+  acknowledgements\
+  archive\
 ```
 
-- Market file: `market/market_{SYMBOL}_{MAGIC}.json`
-- Status file: `status/status_{ACCOUNT}.json`
-- Command file: `commands/{sequence}_{command_id}.json`
-- ACK file: `acknowledgements/{sequence}_{command_id}.ack.json`
-- Processed IDs: `archive/processed_commands_{SYMBOL}_{MAGIC}.txt`
+Use a non-empty `BridgeRootPath` only when the Python process and MT4 terminal share another absolute path.
 
-Writes are atomic: content goes to `*.tmp`, then `MoveFileExW` replace.
+## Multi-account operation
 
-## MetaEditor compile steps
+Run one MT4 terminal instance per broker account. Each terminal has a distinct `TerminalDataPath`, so the default AUTO path naturally separates accounts. For shared roots, use a different `BridgeRootPath` per account or configure the Python process to read each account-specific bridge.
 
-`SETUP_ALL.bat` / `DEPLOY_MT4.bat` copy files into every:
-
-`%APPDATA%\MetaQuotes\Terminal\<id>\MQL4\Experts\` and `...\Include\`
-
-Also mirrors to `runtime/mt4_deploy/` for manual copy.
-
-Then:
-
-1. Open MetaTrader 4 → **File → Open Data Folder**.
-2. Confirm `MQL4/Experts/CHECK_SYSTEM_V2.mq4` and `MQL4/Include/CHECK_*.mqh` exist.
-3. In MetaEditor, open `CHECK_SYSTEM_V2.mq4`.
-4. Press **F7** (Compile). The Errors tab must show **0** errors.
-5. In the Terminal Navigator, refresh Experts if needed.
-
-### Attach and configure
-
-1. Open your symbol on **M1** (e.g. NATURALGAS).
-2. Drag `CHECK_SYSTEM_V2` onto the chart.
-3. On the **Common** tab: enable **Allow live trading** and **Allow DLL imports** (required).
-4. Inputs:
-   - `BridgeRootPath` — **leave EMPTY** for AUTO (`Terminal\MQL4\Files\CHECK_SYSTEM`)
-     or set absolute `Check\System` folder if you prefer repo bridge
-   - `MagicNumber` — must match config (default `19942026`)
-5. Confirm AutoTrading is ON. Chart comment should show `CHECK V2 bridge=...`.
-
-Python auto-discovers the MT4 Files bridge under `%APPDATA%\MetaQuotes\Terminal\`.
-
-If Python says `waiting for market/status bridge files`, run `FIX_BRIDGE.bat`.
-
-## Linux / CI note
-
-MetaEditor cannot compile MQL4 on Linux CI. Protocol shapes and MODIFY protection rules are covered by Python fixtures under `tests/protocol/`.
+The EA writes account and symbol identifiers into MARKET, STATUS, ACK, and archive files. Commands are idempotent by `command_id`; processed command markers are written under `archive`.

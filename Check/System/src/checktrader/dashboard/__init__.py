@@ -1,1 +1,0 @@
-"""checktrader package."""

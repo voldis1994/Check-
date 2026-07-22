@@ -1,77 +1,301 @@
 from __future__ import annotations
+
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
+
 from checktrader.domain.enums import Decision, MarketRegime, OrderAction, ReasonCode, SetupState, Side, StrategyType
 
-def utc_now() -> datetime: return datetime.now(UTC)
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def _clean(v: Any) -> Any:
-    if isinstance(v, datetime): return v.isoformat()
-    if hasattr(v, 'value'): return v.value
-    if isinstance(v, list): return [_clean(x) for x in v]
-    if isinstance(v, dict): return {str(k): _clean(x) for k, x in v.items()}
+    if isinstance(v, datetime):
+        return v.isoformat()
+    if hasattr(v, "value"):
+        return v.value
+    if isinstance(v, list):
+        return [_clean(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _clean(x) for k, x in v.items()}
     return v
+
+
 @dataclass(slots=True)
 class Serializable:
-    def to_dict(self) -> dict[str, Any]: return _clean(asdict(self))
+    def to_dict(self) -> dict[str, Any]:
+        cleaned = _clean(asdict(self))
+        assert isinstance(cleaned, dict)
+        return cleaned
+
+
 @dataclass(slots=True)
 class Candle(Serializable):
-    time: datetime; open: float; high: float; low: float; close: float; volume: float=0.0; timeframe: str='M1'; closed: bool=True
+    time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+    timeframe: str = "M1"
+    closed: bool = True
+
     @classmethod
-    def from_dict(cls, d: dict[str, Any], timeframe: str|None=None) -> 'Candle':
-        raw=d.get('time') or d.get('timestamp')
-        if isinstance(raw, datetime): t=raw
-        elif isinstance(raw, (int,float)): t=datetime.fromtimestamp(raw, UTC)
-        elif isinstance(raw, str): t=datetime.fromisoformat(raw.replace('Z','+00:00'))
-        else: raise ValueError('candle time is required')
-        if t.tzinfo is None: t=t.replace(tzinfo=UTC)
-        return cls(t,float(d['open']),float(d['high']),float(d['low']),float(d['close']),float(d.get('volume',d.get('tick_volume',0.0))),str(timeframe or d.get('timeframe','M1')),bool(d.get('closed',True)))
+    def from_dict(cls, d: dict[str, Any], timeframe: str | None = None) -> Candle:
+        raw = d.get("time") or d.get("timestamp")
+        if isinstance(raw, datetime):
+            t = raw
+        elif isinstance(raw, (int, float)):
+            t = datetime.fromtimestamp(raw, UTC)
+        elif isinstance(raw, str):
+            t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        else:
+            raise ValueError("candle time is required")
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=UTC)
+        return cls(
+            t,
+            float(d["open"]),
+            float(d["high"]),
+            float(d["low"]),
+            float(d["close"]),
+            float(d.get("volume", d.get("tick_volume", 0.0))),
+            str(timeframe or d.get("timeframe", "M1")),
+            bool(d.get("closed", True)),
+        )
+
+
 @dataclass(slots=True)
 class SymbolSpecs(Serializable):
-    symbol: str; digits: int; point: float; pip_size: float; min_lot: float; max_lot: float; lot_step: float; contract_size: float; stop_level_points: float=0.0; freeze_level_points: float=0.0
+    symbol: str
+    digits: int
+    point: float
+    tick_size: float
+    pip_size: float
+    min_lot: float
+    max_lot: float
+    lot_step: float
+    contract_size: float
+    stop_level_points: float = 0.0
+    freeze_level_points: float = 0.0
+
+
 @dataclass(slots=True)
 class AccountStatus(Serializable):
-    account_id: str; balance: float; equity: float; margin_free: float; currency: str; trading_allowed: bool=True; connected: bool=True; timestamp: datetime=field(default_factory=utc_now)
+    account_id: str
+    balance: float
+    equity: float
+    margin_free: float
+    currency: str
+    trading_allowed: bool = True
+    connected: bool = True
+    timestamp: datetime = field(default_factory=utc_now)
+
+
 @dataclass(slots=True)
 class Position(Serializable):
-    position_id: str; symbol: str; side: Side; lot: float; entry_price: float; stop_loss: float|None; take_profit: float|None; opened_at: datetime; strategy: StrategyType; current_price: float|None=None; profit: float=0.0; magic_number: int|None=None; metadata: dict[str, Any]=field(default_factory=dict)
+    position_id: str
+    symbol: str
+    side: Side
+    lot: float
+    entry_price: float
+    stop_loss: float | None
+    take_profit: float | None
+    opened_at: datetime
+    strategy: StrategyType
+    current_price: float | None = None
+    profit: float = 0.0
+    magic_number: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class Setup(Serializable):
-    setup_id: str; symbol: str; strategy: StrategyType; side: Side; state: SetupState; created_at_bar: datetime; expires_at_bar: datetime|None; trigger_price: float; stop_loss: float; take_profit: float|None; reason: ReasonCode; metadata: dict[str, Any]=field(default_factory=dict)
+    setup_id: str
+    symbol: str
+    strategy: StrategyType
+    side: Side
+    state: SetupState
+    created_at_bar: datetime
+    expires_at_bar: datetime | None
+    trigger_price: float
+    stop_loss: float
+    take_profit: float | None
+    reason: ReasonCode
+    metadata: dict[str, Any] = field(default_factory=dict)
+
     @classmethod
-    def create(cls, symbol: str, strategy: StrategyType, side: Side, state: SetupState, created_at_bar: datetime, expires_at_bar: datetime|None, trigger_price: float, stop_loss: float, take_profit: float|None, reason: ReasonCode, metadata: dict[str, Any]|None=None) -> 'Setup':
-        return cls(f'{strategy.value}-{side.value}-{uuid4().hex[:12]}', symbol, strategy, side, state, created_at_bar, expires_at_bar, trigger_price, stop_loss, take_profit, reason, metadata or {})
+    def create(
+        cls,
+        symbol: str,
+        strategy: StrategyType,
+        side: Side,
+        state: SetupState,
+        created_at_bar: datetime,
+        expires_at_bar: datetime | None,
+        trigger_price: float,
+        stop_loss: float,
+        take_profit: float | None,
+        reason: ReasonCode,
+        metadata: dict[str, Any] | None = None,
+    ) -> Setup:
+        return cls(
+            f"{strategy.value}-{side.value}-{uuid4().hex[:12]}",
+            symbol,
+            strategy,
+            side,
+            state,
+            created_at_bar,
+            expires_at_bar,
+            trigger_price,
+            stop_loss,
+            take_profit,
+            reason,
+            metadata or {},
+        )
+
+
 @dataclass(slots=True)
-class SwingPoint(Serializable): time: datetime; price: float; side: Side; index: int; confirmed_at: datetime
+class SwingPoint(Serializable):
+    time: datetime
+    price: float
+    side: Side
+    index: int
+    confirmed_at: datetime
+
+
 @dataclass(slots=True)
 class IndicatorSnapshot(Serializable):
-    time: datetime; ema_fast: float|None=None; ema_slow: float|None=None; ema_signal: float|None=None; atr: float|None=None; adx: float|None=None; plus_di: float|None=None; minus_di: float|None=None; metadata: dict[str, Any]=field(default_factory=dict)
+    time: datetime
+    ema_fast: float | None = None
+    ema_slow: float | None = None
+    ema200: float | None = None
+    ema_signal: float | None = None
+    atr: float | None = None
+    adx: float | None = None
+    plus_di: float | None = None
+    minus_di: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
-class RegimeSnapshot(Serializable): regime: MarketRegime; time: datetime; reason: ReasonCode; confidence: float; indicators: IndicatorSnapshot; metadata: dict[str, Any]=field(default_factory=dict)
+class RegimeSnapshot(Serializable):
+    regime: MarketRegime
+    time: datetime
+    reason: ReasonCode
+    confidence: float
+    indicators: IndicatorSnapshot
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class MarketSnapshot(Serializable):
-    symbol: str; bid: float; ask: float; timestamp: datetime; m1: list[Candle]=field(default_factory=list); m5: list[Candle]=field(default_factory=list); m15: list[Candle]=field(default_factory=list); account: AccountStatus|None=None; positions: list[Position]=field(default_factory=list); heartbeat_at: datetime|None=None
+    symbol: str
+    bid: float
+    ask: float
+    timestamp: datetime
+    m1: list[Candle] = field(default_factory=list)
+    m5: list[Candle] = field(default_factory=list)
+    m15: list[Candle] = field(default_factory=list)
+    account: AccountStatus | None = None
+    positions: list[Position] = field(default_factory=list)
+    heartbeat_at: datetime | None = None
+
     @property
-    def mid(self) -> float: return (self.bid+self.ask)/2.0
+    def mid(self) -> float:
+        return (self.bid + self.ask) / 2.0
+
+
 @dataclass(slots=True)
 class StrategySignal(Serializable):
-    strategy: StrategyType; side: Side; symbol: str; entry_price: float; stop_loss: float; take_profit: float|None; reason: ReasonCode; setup_id: str|None=None; metadata: dict[str, Any]=field(default_factory=dict)
+    strategy: StrategyType
+    side: Side
+    symbol: str
+    entry_price: float
+    stop_loss: float
+    take_profit: float | None
+    reason: ReasonCode
+    setup_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
-class StrategyResult(Serializable): decision: Decision; reason: ReasonCode; signal: StrategySignal|None=None; setup: Setup|None=None; diagnostics: dict[str, Any]=field(default_factory=dict)
+class StrategyResult(Serializable):
+    decision: Decision
+    reason: ReasonCode
+    signal: StrategySignal | None = None
+    setup: Setup | None = None
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class RiskResult(Serializable):
-    decision: Decision; reason: ReasonCode; lot: float=0.0; messages: list[ReasonCode]=field(default_factory=list); metadata: dict[str, Any]=field(default_factory=dict)
+    decision: Decision
+    reason: ReasonCode
+    lot: float = 0.0
+    messages: list[ReasonCode] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
     @property
-    def allowed(self) -> bool: return self.decision == Decision.ALLOW
+    def allowed(self) -> bool:
+        return self.decision == Decision.ALLOW
+
+
 @dataclass(slots=True)
-class Command(Serializable): command_id: str; action: OrderAction; symbol: str; protocol_version: str; created_at: datetime; payload: dict[str, Any]
+class Command(Serializable):
+    command_id: str
+    action: OrderAction
+    symbol: str
+    protocol_version: str
+    created_at: datetime
+    payload: dict[str, Any]
+
+
 @dataclass(slots=True)
-class Acknowledgement(Serializable): command_id: str; accepted: bool; reason: ReasonCode; broker_order_id: str|None=None; message: str=''; timestamp: datetime=field(default_factory=utc_now); payload: dict[str, Any]=field(default_factory=dict)
+class Acknowledgement(Serializable):
+    command_id: str
+    accepted: bool
+    reason: ReasonCode
+    broker_order_id: str | None = None
+    message: str = ""
+    timestamp: datetime = field(default_factory=utc_now)
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
-class ManagementAction(Serializable): decision: Decision; reason: ReasonCode; action: OrderAction=OrderAction.NONE; stop_loss: float|None=None; take_profit: float|None=None; close_fraction: float|None=None; metadata: dict[str, Any]=field(default_factory=dict)
+class ManagementAction(Serializable):
+    decision: Decision
+    reason: ReasonCode
+    action: OrderAction = OrderAction.NONE
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    close_fraction: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
-class LimitState(Serializable): trade_date: str; daily_trades: int=0; consecutive_losses: int=0; cooldown_until: datetime|None=None; last_trade_at: datetime|None=None
+class LimitState(Serializable):
+    trade_date: str
+    daily_trades: int = 0
+    consecutive_losses: int = 0
+    cooldown_until: datetime | None = None
+    last_trade_at: datetime | None = None
+
+
 @dataclass(slots=True)
 class CycleAudit(Serializable):
-    cycle_id: str; started_at: datetime; completed_at: datetime|None=None; symbol: str=''; reasons: list[ReasonCode]=field(default_factory=list); regime: MarketRegime|None=None; strategy: StrategyType|None=None; signal: StrategySignal|None=None; risk: RiskResult|None=None; command: Command|None=None; management: ManagementAction|None=None; metrics: dict[str, Any]=field(default_factory=dict)
+    cycle_id: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    symbol: str = ""
+    reasons: list[ReasonCode] = field(default_factory=list)
+    regime: MarketRegime | None = None
+    strategy: StrategyType | None = None
+    signal: StrategySignal | None = None
+    risk: RiskResult | None = None
+    command: Command | None = None
+    management: ManagementAction | None = None
+    metrics: dict[str, Any] = field(default_factory=dict)
