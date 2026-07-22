@@ -1,3 +1,3 @@
-"""SYSTEM checktrader v2."""
-
-__version__ = "2.0.0"
+"""CHECK SYSTEM v3 trading engine."""
+__version__ = "3.0.0"
+protocol_version = "3.0.0"

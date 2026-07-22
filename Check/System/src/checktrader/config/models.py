@@ -1,203 +1,38 @@
-"""Configuration models (Pydantic)."""
-
 from __future__ import annotations
-
-from pydantic import BaseModel, Field, field_validator, model_validator
-
-
-class RuntimeConfig(BaseModel):
-    mode: str = "live"
-    trading_enabled: bool = True
-    cycle_interval_ms: int = 250
-    timezone: str = "UTC"
-    instance_id: str = "PRIMARY"
-
-
-class AccountConfig(BaseModel):
-    """Empty / AUTO allow-list → accept the account reported by the MT4 status snapshot."""
-
-    allowed_account_numbers: list[str] = Field(default_factory=list)
-    required_server: str = ""
-    require_trade_allowed: bool = True
-    require_expert_enabled: bool = True
-
-
-class InstrumentConfig(BaseModel):
-    """``symbol`` may be a concrete MT4 name, or AUTO to follow the EA chart."""
-
-    symbol: str = "AUTO"
-    entry_timeframe: str = "M1"
-    setup_timeframe: str = "M5"
-    context_timeframe: str = "M15"
-
-
-class PositionConfig(BaseModel):
-    maximum_open_positions: int = 1
-    one_position_per_symbol_magic: bool = True
-    magic_number: int = 19942026
-
-
-class PositionSizingConfig(BaseModel):
-    """Production lot source — fixed lot only."""
-
-    mode: str = "fixed_lot"
-    fixed_lot: float = 0.01
-    allow_broker_lot_normalization: bool = False
-
-    @field_validator("mode")
+from pathlib import Path
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator, model_validator
+class StrictModel(BaseModel): model_config=ConfigDict(extra='forbid', frozen=True)
+class RuntimeConfig(StrictModel):
+    mode: Literal['paper','live']='paper'; trading_enabled: bool=False; cycle_interval_seconds: PositiveFloat=5.0; timezone: str='UTC'; instance_id: str='check-system-v3'; protocol_version: str='3.0.0'
+class InstrumentConfig(StrictModel):
+    symbol: str='XAUUSD'; timeframe_execution: str='M1'; timeframe_management: str='M5'; timeframe_decision: str='M15'; digits: int=2; point: PositiveFloat=0.01; pip_size: PositiveFloat=0.10; contract_size: PositiveFloat=100.0; stop_level_points: float=Field(0.0, ge=0.0); freeze_level_points: float=Field(0.0, ge=0.0)
+class AccountConfig(StrictModel): account_id: str='PAPER'; currency: str='USD'; min_equity: PositiveFloat=100.0; max_drawdown_percent: float=Field(25.0, ge=0.0, le=100.0)
+class PositionConfig(StrictModel): max_open_positions: int=Field(1, ge=0); allow_hedging: bool=False; default_lot: PositiveFloat=0.01
+class PositionSizingConfig(StrictModel): method: Literal['fixed_lot']='fixed_lot'; fixed_lot: PositiveFloat=0.01; min_lot: PositiveFloat=0.01; max_lot: PositiveFloat=100.0; lot_step: PositiveFloat=0.01
+class RegimeTrendConfig(StrictModel): ema_fast_period: int=Field(20, ge=1); ema_slow_period: int=Field(50, ge=1); adx_period: int=Field(14, ge=1); atr_period: int=Field(14, ge=1); min_adx: float=Field(25.0, ge=0.0); min_ema_separation_atr: float=Field(0.25, ge=0.0); min_slope_points: float=Field(5.0, ge=0.0); confirmation_bars: int=Field(2, ge=1)
+class RegimeRangeConfig(StrictModel): ema_fast_period: int=Field(20, ge=1); ema_slow_period: int=Field(50, ge=1); adx_period: int=Field(14, ge=1); atr_period: int=Field(14, ge=1); max_adx: float=Field(20.0, ge=0.0); max_ema_separation_atr: float=Field(0.20, ge=0.0); lookback_bars: int=Field(48, ge=2); min_touches: int=Field(2, ge=1); boundary_tolerance_atr: float=Field(0.25, ge=0.0)
+class RegimeTransitionConfig(StrictModel): hold_bars: int=Field(2, ge=1); min_bars_between_changes: int=Field(1, ge=0)
+class RegimeConfig(StrictModel): trend: RegimeTrendConfig=Field(default_factory=RegimeTrendConfig); range: RegimeRangeConfig=Field(default_factory=RegimeRangeConfig); transition: RegimeTransitionConfig=Field(default_factory=RegimeTransitionConfig)
+class TrendContinuationConfig(StrictModel): enabled: bool=True; pullback_ema_period: int=Field(20, ge=1); swing_lookback: int=Field(2, ge=1); max_pullback_atr: float=Field(1.0, ge=0.0); min_close_beyond_ema_points: float=Field(2.0, ge=0.0); entry_buffer_points: float=Field(2.0, ge=0.0); stop_atr_multiplier: float=Field(1.5, gt=0.0); take_profit_rr: float=Field(2.0, gt=0.0); min_adx: float=Field(25.0, ge=0.0); require_regime_alignment: bool=True
+class RangeReversionConfig(StrictModel): enabled: bool=True; lookback_bars: int=Field(48, ge=2); boundary_tolerance_atr: float=Field(0.25, ge=0.0); rejection_close_fraction: float=Field(0.60, ge=0.0, le=1.0); stop_buffer_atr: float=Field(0.50, gt=0.0); take_profit_fraction: float=Field(0.50, gt=0.0, le=1.0); min_range_atr: float=Field(1.50, gt=0.0); max_adx: float=Field(20.0, ge=0.0)
+class BreakoutConfig(StrictModel): enabled: bool=True; box_lookback_bars: int=Field(32, ge=2); min_box_atr: float=Field(1.0, gt=0.0); max_box_atr: float=Field(4.0, gt=0.0); breakout_buffer_atr: float=Field(0.10, ge=0.0); retest_required: bool=True; retest_tolerance_atr: float=Field(0.20, ge=0.0); stop_buffer_atr: float=Field(0.50, gt=0.0); take_profit_rr: float=Field(2.0, gt=0.0); setup_expiry_bars: int=Field(8, ge=1); min_adx: float=Field(20.0, ge=0.0)
+class StrategiesConfig(StrictModel): trend_continuation: TrendContinuationConfig=Field(default_factory=TrendContinuationConfig); range_reversion: RangeReversionConfig=Field(default_factory=RangeReversionConfig); breakout: BreakoutConfig=Field(default_factory=BreakoutConfig)
+class RiskConfig(StrictModel): max_daily_loss_percent: float=Field(3.0, ge=0.0, le=100.0); max_risk_per_trade_percent: float=Field(1.0, ge=0.0, le=100.0); min_stop_points: float=Field(50.0, gt=0.0); max_stop_points: float=Field(5000.0, gt=0.0); min_reward_risk: float=Field(1.20, gt=0.0); max_slippage_points: float=Field(20.0, ge=0.0)
+class ManagementConfig(StrictModel): breakeven_trigger_rr: float=Field(1.0, gt=0.0); breakeven_offset_points: float=Field(2.0, ge=0.0); trailing_start_rr: float=Field(1.5, gt=0.0); trend_trailing_atr_multiplier: float=Field(1.0, gt=0.0); breakout_trailing_atr_multiplier: float=Field(1.2, gt=0.0); range_trailing_atr_multiplier: float=Field(0.8, gt=0.0); take_profit_rr: float=Field(2.0, gt=0.0); partial_close_enabled: bool=False; exit_on_regime_flip: bool=True
+class ExecutionConfig(StrictModel): magic_number: int=30001; command_ttl_seconds: PositiveFloat=30.0; ack_timeout_seconds: PositiveFloat=10.0; dedupe_window_seconds: PositiveFloat=300.0; paper_fill_spread_points: float=Field(0.0, ge=0.0); max_retries: int=Field(1, ge=0)
+class SpreadConfig(StrictModel): max_points: float=Field(30.0, ge=0.0); max_atr_fraction: float=Field(0.10, ge=0.0)
+class PathsConfig(StrictModel): runtime_dir: Path=Path('runtime'); history_file: Path=Path('runtime/history/history.json'); state_file: Path=Path('runtime/state.json'); audit_file: Path=Path('runtime/audit.jsonl'); metrics_file: Path=Path('runtime/metrics.json'); bridge_dir: Path|None=None; bridge_discovery_roots: tuple[Path,...]=(); appdata_metaquotes_discovery: bool=True
+class LimitsConfig(StrictModel): max_daily_trades: int=Field(3, ge=0); max_consecutive_losses: int=Field(2, ge=0); cooldown_minutes: float=Field(30.0, ge=0.0); max_cycles_without_market: int=Field(12, ge=0); heartbeat_max_age_seconds: float=Field(20.0, ge=0.0); history_max_bars_m1: int=Field(5000, ge=1); history_max_bars_m5: int=Field(1500, ge=1); history_max_bars_m15: int=Field(1000, ge=1)
+class SystemConfig(StrictModel):
+    version: str='3.0.0'; protocol_version: str='3.0.0'; runtime: RuntimeConfig=Field(default_factory=RuntimeConfig); instrument: InstrumentConfig=Field(default_factory=InstrumentConfig); account: AccountConfig=Field(default_factory=AccountConfig); position: PositionConfig=Field(default_factory=PositionConfig); position_sizing: PositionSizingConfig=Field(default_factory=PositionSizingConfig); regimes: RegimeConfig=Field(default_factory=RegimeConfig); strategies: StrategiesConfig=Field(default_factory=StrategiesConfig); risk: RiskConfig=Field(default_factory=RiskConfig); management: ManagementConfig=Field(default_factory=ManagementConfig); execution: ExecutionConfig=Field(default_factory=ExecutionConfig); spread: SpreadConfig=Field(default_factory=SpreadConfig); paths: PathsConfig=Field(default_factory=PathsConfig); limits: LimitsConfig=Field(default_factory=LimitsConfig)
+    @field_validator('version','protocol_version')
     @classmethod
-    def only_fixed_lot(cls, value: str) -> str:
-        if value != "fixed_lot":
-            raise ValueError("position_sizing.mode must be 'fixed_lot'")
-        return value
-
-    @field_validator("fixed_lot")
-    @classmethod
-    def positive_lot(cls, value: float) -> float:
-        if value <= 0:
-            raise ValueError("fixed_lot must be > 0")
-        return value
-
-    @field_validator("allow_broker_lot_normalization")
-    @classmethod
-    def no_silent_normalize(cls, value: bool) -> bool:
-        if value:
-            raise ValueError("allow_broker_lot_normalization must be false in production")
-        return value
-
-
-class StrategyConfig(BaseModel):
-    enabled_setup: str = "trend_pullback_break"
-    use_closed_bars_only: bool = True
-    setup_expiry_bars: int = 8
-    minimum_structure_bars: int = 30
-    hma_period: int = 21
-    atr_period: int = 14
-    pullback_min_atr: float = 0.25
-    pullback_max_atr: float = 0.75
-    trigger_buffer_atr: float = 0.05
-    maximum_stop_atr: float = 2.5
-    require_stop_loss: bool = True
-
-    @model_validator(mode="after")
-    def pullback_bounds(self) -> StrategyConfig:
-        if self.pullback_min_atr < 0 or self.pullback_max_atr <= 0:
-            raise ValueError("pullback ATR bounds must be positive")
-        if self.pullback_min_atr > self.pullback_max_atr:
-            raise ValueError("pullback_min_atr must be <= pullback_max_atr")
-        if self.trigger_buffer_atr < 0 or self.maximum_stop_atr <= 0:
-            raise ValueError("trigger_buffer_atr / maximum_stop_atr invalid")
+    def must_be_v3(cls, v: str) -> str:
+        if v != '3.0.0': raise ValueError('CHECK SYSTEM v3 requires 3.0.0')
+        return v
+    @model_validator(mode='after')
+    def coherent(self) -> 'SystemConfig':
+        if self.runtime.protocol_version != self.protocol_version: raise ValueError('runtime.protocol_version must match protocol_version')
+        if self.position.default_lot != self.position_sizing.fixed_lot: raise ValueError('default_lot must match fixed_lot')
         return self
-
-
-class ExecutionConfig(BaseModel):
-    maximum_status_age_ms: int = 4000
-    maximum_market_age_ms: int = 3500
-    ack_timeout_ms: int = 5000
-    maximum_retries: int = 3
-    retry_delay_ms: int = 750
-    price_tolerance_points: int = 2
-    maximum_spread_points: float | None = None
-    maximum_spread_atr: float | None = None
-    slippage_points: int = 3
-
-    @field_validator("slippage_points")
-    @classmethod
-    def positive_slippage(cls, value: int) -> int:
-        if value < 0:
-            raise ValueError("slippage_points must be >= 0")
-        return value
-
-
-class HighLockConfig(BaseModel):
-    enabled: bool = True
-    activation_peak_profit_money: float = 1.0
-    lock_ratio: float = 0.60
-
-
-class ExitPressureConfig(BaseModel):
-    enabled: bool = True
-    pullback_weight: float = 0.30
-    speed_weight: float = 0.20
-    trend_weight: float = 0.20
-    rejection_weight: float = 0.20
-    spread_weight: float = 0.10
-    tighten_threshold: float = 0.45
-    high_lock_threshold: float = 0.70
-    critical_threshold: float = 0.85
-    critical_close_enabled: bool = True
-    minimum_non_spread_confirmations_for_close: int = 3
-
-    @model_validator(mode="after")
-    def weights_sum_to_one(self) -> ExitPressureConfig:
-        total = (
-            self.pullback_weight + self.speed_weight + self.trend_weight + self.rejection_weight + self.spread_weight
-        )
-        if abs(total - 1.0) > 1e-6:
-            raise ValueError(f"exit_pressure weights must sum to 1.0, got {total}")
-        return self
-
-
-class TradeManagementConfig(BaseModel):
-    enabled: bool = True
-    be_activation_r: float | None = None
-    be_activation_atr: float = 0.60
-    be_net_profit_money: float = 0.20
-    trailing_activation_atr: float = 0.70
-    trailing_distance_atr: float = 0.80
-    trailing_step_atr: float = 0.20
-    fixed_take_profit_enabled: bool = False
-    minimum_reward_risk: float = 1.5
-    high_lock: HighLockConfig = Field(default_factory=HighLockConfig)
-    exit_pressure: ExitPressureConfig = Field(default_factory=ExitPressureConfig)
-
-    @field_validator("be_activation_r")
-    @classmethod
-    def r_disabled(cls, value: float | None) -> float | None:
-        if value is not None:
-            raise ValueError("be_activation_r must be null — R/account-risk sizing is not used")
-        return value
-
-    @field_validator("be_activation_atr", "trailing_activation_atr", "trailing_distance_atr", "trailing_step_atr")
-    @classmethod
-    def positive_atr(cls, value: float) -> float:
-        if value <= 0:
-            raise ValueError("ATR trade-management multipliers must be > 0")
-        return value
-
-
-class LoggingConfig(BaseModel):
-    level: str = "INFO"
-    signal_audit_enabled: bool = True
-    trailing_audit_enabled: bool = True
-    execution_audit_enabled: bool = True
-    rotate_mb: int = 50
-    retention_days: int = 30
-
-
-class DashboardConfig(BaseModel):
-    enabled: bool = True
-    host: str = "127.0.0.1"
-    port: int = 8765
-
-
-class PathsConfig(BaseModel):
-    root: str = "."
-    bridge: str = "runtime/bridge"
-    state: str = "runtime/state"
-    logs: str = "runtime/logs"
-
-
-class SystemConfig(BaseModel):
-    version: str = "2.0.0"
-    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
-    account: AccountConfig = Field(default_factory=AccountConfig)
-    instrument: InstrumentConfig = Field(default_factory=InstrumentConfig)
-    position: PositionConfig = Field(default_factory=PositionConfig)
-    position_sizing: PositionSizingConfig = Field(default_factory=PositionSizingConfig)
-    strategy: StrategyConfig = Field(default_factory=StrategyConfig)
-    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
-    trade_management: TradeManagementConfig = Field(default_factory=TradeManagementConfig)
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
-    paths: PathsConfig = Field(default_factory=PathsConfig)

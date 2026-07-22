@@ -1,0 +1,18 @@
+from __future__ import annotations
+from checktrader.config.models import RiskConfig
+from checktrader.domain.enums import ReasonCode, Side
+from checktrader.domain.models import StrategySignal, SymbolSpecs
+
+def stop_distance_points(signal: StrategySignal, specs: SymbolSpecs) -> float: return abs(signal.entry_price-signal.stop_loss)/specs.point
+def validate_stop_distance(signal: StrategySignal, specs: SymbolSpecs, config: RiskConfig) -> ReasonCode:
+    distance=stop_distance_points(signal,specs); minimum=max(config.min_stop_points,specs.stop_level_points)
+    if distance<minimum: return ReasonCode.RISK_STOP_TOO_CLOSE
+    if distance>config.max_stop_points: return ReasonCode.RISK_STOP_TOO_FAR
+    return ReasonCode.RISK_ACCEPTED
+def validate_reward_risk(signal: StrategySignal, config: RiskConfig) -> ReasonCode:
+    if signal.take_profit is None: return ReasonCode.RISK_ACCEPTED
+    risk=abs(signal.entry_price-signal.stop_loss); reward=abs(signal.take_profit-signal.entry_price)
+    if risk<=0.0 or reward/risk<config.min_reward_risk: return ReasonCode.RISK_REWARD_TOO_LOW
+    if signal.side==Side.LONG and not (signal.stop_loss<signal.entry_price<signal.take_profit): return ReasonCode.RISK_REWARD_TOO_LOW
+    if signal.side==Side.SHORT and not (signal.take_profit<signal.entry_price<signal.stop_loss): return ReasonCode.RISK_REWARD_TOO_LOW
+    return ReasonCode.RISK_ACCEPTED

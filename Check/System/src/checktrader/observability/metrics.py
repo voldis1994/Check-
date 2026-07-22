@@ -1,27 +1,10 @@
-"""Lightweight in-process counters for ops visibility."""
-
 from __future__ import annotations
-
-from collections import Counter
-from threading import Lock
-
-_lock = Lock()
-_counters: Counter[str] = Counter()
-
-
-def incr(name: str, amount: int = 1) -> None:
-    with _lock:
-        _counters[name] += amount
-
-
-def get_metrics() -> dict[str, int]:
-    with _lock:
-        return dict(_counters)
-
-
-def reset_metrics() -> None:
-    with _lock:
-        _counters.clear()
-
-
-__all__ = ["incr", "get_metrics", "reset_metrics"]
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+@dataclass(slots=True)
+class Metrics:
+    counters: dict[str,int]=field(default_factory=dict)
+    def inc(self, name: str, value: int=1) -> None: self.counters[name]=self.counters.get(name,0)+value
+    def snapshot(self) -> dict[str,int]: return dict(self.counters)
+    def save(self, path: Path) -> None: path.parent.mkdir(parents=True,exist_ok=True); path.write_text(json.dumps(self.snapshot(),indent=2,sort_keys=True),encoding='utf-8')
