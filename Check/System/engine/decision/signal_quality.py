@@ -4,14 +4,21 @@ Directional scores (momentum, trend, structure, pressure) choose the side.
 Market quality (behavior, impact, context) decides whether the market is
 tradeable. Absolute score floors, score deltas, confirmations, cooldown, and
 duplicate fingerprints reduce M1 noise entries.
+
+A setup fingerprint identifies one market impulse / structure setup across
+consecutive closed bars. It must NOT include the current signal candle time or
+the moving candidate entry/close price.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from hashlib import sha1
+from hashlib import sha256
+from math import isfinite
 from typing import Any, Mapping
+from engine.analysis.structure import normalize_price_level
 from engine.decision.reason import build_reason
 from engine.protocol.constants import (
     REASON_CODE_DESCRIPTIONS,
+    REASON_DATA_INVALID,
     REASON_DUPLICATE_SIGNAL,
     REASON_INSUFFICIENT_DIRECTIONAL_CONFIRMATIONS,
     REASON_MARKET_QUALITY_TOO_LOW,
@@ -63,6 +70,10 @@ class SignalQualityResult:
     confirmation_count: int = 0
     fingerprint: str | None = None
     cooldown_bars_remaining: int = 0
+    signal_candle_timestamp: str | None = None
+    setup_origin_timestamp: str | None = None
+    setup_type: str | None = None
+    structure_id: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -80,6 +91,10 @@ class SignalQualityResult:
             'confirmation_count': self.confirmation_count,
             'fingerprint': self.fingerprint,
             'cooldown_bars_remaining': self.cooldown_bars_remaining,
+            'signal_candle_timestamp': self.signal_candle_timestamp,
+            'setup_origin_timestamp': self.setup_origin_timestamp,
+            'setup_type': self.setup_type,
+            'structure_id': self.structure_id,
             'details': dict(self.details),
         }
 
@@ -139,14 +154,90 @@ def build_component_confirmations(*, buy_components: Mapping[str, float], sell_c
 def count_directional_confirmations(confirmations: tuple[ComponentConfirmation, ...], side: str) -> int:
     return sum(1 for item in confirmations if item.direction == side)
 
-def build_signal_fingerprint(*, symbol: str, side: str, candle_time_utc: str, structure_level: float, setup_type: str = 'directional') -> str:
-    """Stable setup identity for duplicate-signal protection (closed-bar only)."""
-    level = f'{structure_level:.5f}'
-    raw = f'{symbol}|{TIMEFRAME_M1}|{side}|{level}|{candle_time_utc}|{setup_type}'
-    digest = sha1(raw.encode('utf-8')).hexdigest()[:16]
-    return f'{raw}|{digest}'
+def build_setup_fingerprint(
+    *,
+    symbol: str,
+    direction: str,
+    setup_type: str,
+    structure_id: str,
+    setup_origin_timestamp: str,
+    structure_level: float,
+    digits: int = 5,
+    timeframe: str = TIMEFRAME_M1,
+) -> str:
+    """Stable setup identity for duplicate-signal protection.
 
-def _wait_result(*, reason_code: str, message: str, winning_side: str, winning_score: float, losing_score: float, score_delta: float, market_quality_score: float, confirmations: tuple[ComponentConfirmation, ...] = (), confirmation_count: int = 0, fingerprint: str | None = None, cooldown_bars_remaining: int = 0, **details: Any) -> SignalQualityResult:
+    Identity is independent of the current signal candle. Use
+    ``signal_candle_timestamp`` separately for audit metadata.
+    """
+    level = normalize_price_level(structure_level, digits=digits)
+    canonical = '|'.join(
+        (
+            symbol.upper(),
+            timeframe,
+            direction.upper(),
+            setup_type,
+            structure_id,
+            setup_origin_timestamp,
+            level,
+        )
+    )
+    digest = sha256(canonical.encode('utf-8')).hexdigest()[:20]
+    return f'{canonical}|{digest}'
+
+def build_signal_fingerprint(
+    *,
+    symbol: str,
+    side: str,
+    candle_time_utc: str | None = None,
+    structure_level: float,
+    setup_type: str = 'directional',
+    structure_id: str = '',
+    setup_origin_timestamp: str | None = None,
+    digits: int = 5,
+    timeframe: str = TIMEFRAME_M1,
+) -> str:
+    """Build a setup fingerprint.
+
+    ``candle_time_utc`` is accepted only for backward-compatible call sites and
+    is intentionally ignored for identity. Prefer ``build_setup_fingerprint``.
+    """
+    del candle_time_utc  # never part of setup identity
+    origin = setup_origin_timestamp or ''
+    resolved_structure_id = structure_id or f'legacy|{normalize_price_level(structure_level, digits=digits)}|{setup_type}'
+    return build_setup_fingerprint(
+        symbol=symbol,
+        direction=side,
+        setup_type=setup_type,
+        structure_id=resolved_structure_id,
+        setup_origin_timestamp=origin,
+        structure_level=structure_level,
+        digits=digits,
+        timeframe=timeframe,
+    )
+
+def _scores_are_numeric(buy_score: float, sell_score: float) -> bool:
+    return isfinite(float(buy_score)) and isfinite(float(sell_score))
+
+def _wait_result(
+    *,
+    reason_code: str,
+    message: str,
+    winning_side: str,
+    winning_score: float,
+    losing_score: float,
+    score_delta: float,
+    market_quality_score: float,
+    confirmations: tuple[ComponentConfirmation, ...] = (),
+    confirmation_count: int = 0,
+    fingerprint: str | None = None,
+    cooldown_bars_remaining: int = 0,
+    signal_candle_timestamp: str | None = None,
+    setup_origin_timestamp: str | None = None,
+    setup_type: str | None = None,
+    structure_id: str | None = None,
+    **details: Any,
+) -> SignalQualityResult:
     human = REASON_CODE_DESCRIPTIONS.get(reason_code, message)
     reason = build_reason(reason_code, message, **details)
     return SignalQualityResult(
@@ -163,6 +254,10 @@ def _wait_result(*, reason_code: str, message: str, winning_side: str, winning_s
         confirmation_count=confirmation_count,
         fingerprint=fingerprint,
         cooldown_bars_remaining=cooldown_bars_remaining,
+        signal_candle_timestamp=signal_candle_timestamp,
+        setup_origin_timestamp=setup_origin_timestamp,
+        setup_type=setup_type,
+        structure_id=structure_id,
         details=dict(details),
     )
 
@@ -184,15 +279,44 @@ def evaluate_signal_quality(
     last_trade_close_time_utc: str | None = None,
     last_trade_close_bar_utc: str | None = None,
     active_fingerprints: Mapping[str, str] | None = None,
+    setup_origin_timestamp: str = '',
+    structure_id: str = '',
+    setup_type: str = 'directional',
+    digits: int = 5,
+    timeframe: str = TIMEFRAME_M1,
 ) -> SignalQualityResult:
     """Run all signal-quality gates and return BUY, SELL, or WAIT.
 
     Only closed-bar inputs should be passed (``candle_time_utc`` of the last
     closed market bar). No future bars are consulted.
+
+    Score delta is always enforced when both BUY and SELL scores are finite
+    numbers — including when the opposite candidate is invalid for another rule.
     """
     confirmations = build_component_confirmations(buy_components=buy_components, sell_components=sell_components)
     score_delta = abs(float(buy_score) - float(sell_score))
     active_fingerprints = active_fingerprints or {}
+    signal_meta = {
+        'signal_candle_timestamp': candle_time_utc,
+        'setup_origin_timestamp': setup_origin_timestamp or None,
+        'setup_type': setup_type,
+        'structure_id': structure_id or None,
+    }
+
+    if not _scores_are_numeric(buy_score, sell_score):
+        return _wait_result(
+            reason_code=REASON_DATA_INVALID,
+            message='buy or sell score is not a finite number',
+            winning_side=Side.NONE.value,
+            winning_score=0.0,
+            losing_score=0.0,
+            score_delta=0.0,
+            market_quality_score=market_quality_score,
+            confirmations=confirmations,
+            buy_score=buy_score,
+            sell_score=sell_score,
+            **signal_meta,
+        )
 
     if cooldown_bars_remaining > 0:
         return _wait_result(
@@ -209,6 +333,7 @@ def evaluate_signal_quality(
             last_trade_result=last_trade_result,
             last_trade_close_time_utc=last_trade_close_time_utc,
             last_trade_close_bar_utc=last_trade_close_bar_utc,
+            **signal_meta,
         )
 
     if market_quality_score < float(signal_quality_config.minimum_market_quality):
@@ -223,6 +348,7 @@ def evaluate_signal_quality(
             confirmations=confirmations,
             market_quality_score_value=market_quality_score,
             minimum_market_quality=float(signal_quality_config.minimum_market_quality),
+            **signal_meta,
         )
 
     if not buy_valid and not sell_valid:
@@ -235,6 +361,7 @@ def evaluate_signal_quality(
             score_delta=0.0,
             market_quality_score=market_quality_score,
             confirmations=confirmations,
+            **signal_meta,
         )
 
     if buy_valid and sell_valid:
@@ -255,6 +382,7 @@ def evaluate_signal_quality(
                 buy_score=float(buy_score),
                 sell_score=float(sell_score),
                 minimum_score_delta=float(signal_quality_config.minimum_score_delta),
+                **signal_meta,
             )
     elif buy_valid:
         winning_side, winning_score, losing_score = Side.BUY.value, float(buy_score), float(sell_score)
@@ -263,7 +391,16 @@ def evaluate_signal_quality(
 
     score_delta = abs(winning_score - losing_score)
     confirmation_count = count_directional_confirmations(confirmations, winning_side)
-    fingerprint = build_signal_fingerprint(symbol=symbol, side=winning_side, candle_time_utc=candle_time_utc, structure_level=structure_level)
+    fingerprint = build_setup_fingerprint(
+        symbol=symbol,
+        direction=winning_side,
+        setup_type=setup_type,
+        structure_id=structure_id or f'legacy|{normalize_price_level(structure_level, digits=digits)}',
+        setup_origin_timestamp=setup_origin_timestamp,
+        structure_level=structure_level,
+        digits=digits,
+        timeframe=timeframe,
+    )
 
     if winning_score < float(signal_quality_config.minimum_signal_score):
         return _wait_result(
@@ -281,9 +418,12 @@ def evaluate_signal_quality(
             sell_score=float(sell_score),
             winning_score_value=winning_score,
             minimum_signal_score=float(signal_quality_config.minimum_signal_score),
+            **signal_meta,
         )
 
-    if buy_valid and sell_valid and score_delta < float(signal_quality_config.minimum_score_delta):
+    # Always enforce delta when both numeric scores exist — even if the opposite
+    # candidate is invalid for an unrelated filter.
+    if score_delta < float(signal_quality_config.minimum_score_delta):
         return _wait_result(
             reason_code=REASON_SIGNAL_DELTA_TOO_SMALL,
             message='score delta below minimum_score_delta',
@@ -299,6 +439,9 @@ def evaluate_signal_quality(
             sell_score=float(sell_score),
             score_delta_value=score_delta,
             minimum_score_delta=float(signal_quality_config.minimum_score_delta),
+            buy_valid=buy_valid,
+            sell_valid=sell_valid,
+            **signal_meta,
         )
 
     if confirmation_count < int(signal_quality_config.minimum_directional_confirmations):
@@ -317,6 +460,7 @@ def evaluate_signal_quality(
             minimum_directional_confirmations=int(signal_quality_config.minimum_directional_confirmations),
             component_directions={item.name: item.direction for item in confirmations},
             component_confidences={item.name: item.confidence for item in confirmations},
+            **signal_meta,
         )
 
     if fingerprint in active_fingerprints:
@@ -333,6 +477,7 @@ def evaluate_signal_quality(
             fingerprint=fingerprint,
             fingerprint_value=fingerprint,
             fingerprint_expiry_bar_utc=active_fingerprints.get(fingerprint),
+            **signal_meta,
         )
 
     human = f'{winning_side} passed signal quality gates'
@@ -350,6 +495,10 @@ def evaluate_signal_quality(
         confirmation_count=confirmation_count,
         fingerprint=fingerprint,
         cooldown_bars_remaining=0,
+        signal_candle_timestamp=candle_time_utc,
+        setup_origin_timestamp=setup_origin_timestamp or None,
+        setup_type=setup_type,
+        structure_id=structure_id or None,
         details={
             'buy_score': float(buy_score),
             'sell_score': float(sell_score),
@@ -359,5 +508,7 @@ def evaluate_signal_quality(
             'minimum_directional_confirmations': int(signal_quality_config.minimum_directional_confirmations),
             'component_directions': {item.name: item.direction for item in confirmations},
             'component_confidences': {item.name: item.confidence for item in confirmations},
+            'buy_valid': buy_valid,
+            'sell_valid': sell_valid,
         },
     )

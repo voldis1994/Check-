@@ -241,17 +241,57 @@ class InstanceState:
         self.duplicate_position_anomaly = False
         self.clear_money_trailing_state()
 
-    def register_trade_close(self, *, close_bar_utc: str, close_time_utc: str, was_loss: bool, cooldown_bars_after_trade: int, cooldown_bars_after_loss: int) -> None:
-        """Start bar-based cooldown after a position is flattened."""
-        bars = int(cooldown_bars_after_loss if was_loss else cooldown_bars_after_trade)
-        self.last_trade_result = 'loss' if was_loss else 'win'
+    def register_trade_close(
+        self,
+        *,
+        close_bar_utc: str,
+        close_time_utc: str,
+        cooldown_bars_after_trade: int,
+        cooldown_bars_after_loss: int,
+        outcome: str | None = None,
+        was_loss: bool | None = None,
+    ) -> None:
+        """Start bar-based cooldown after a position is flattened.
+
+        Semantics for ``cooldown_bars_after_trade = N``:
+        block the next N fully closed bars after the close bar; allow entry on
+        the (N+1)-th subsequent closed bar.
+
+        Implementation: store remaining=N with ``cooldown_last_counted_bar_utc``
+        set to the close bar. Decision path **checks** remaining before
+        decrementing; ``advance_cooldown_for_closed_bar`` runs once per unique
+        closed bar after the quality check.
+        """
+        from engine.protocol.constants import TradeOutcome
+        resolved = outcome
+        if resolved is None:
+            if was_loss is True:
+                resolved = TradeOutcome.LOSS.value
+            elif was_loss is False:
+                # Do not invent WIN when PnL is unknown.
+                resolved = TradeOutcome.UNKNOWN.value
+            else:
+                resolved = TradeOutcome.UNKNOWN.value
+        resolved = str(resolved).upper()
+        if resolved not in {item.value for item in TradeOutcome}:
+            resolved = TradeOutcome.UNKNOWN.value
+        bars = int(cooldown_bars_after_loss if resolved == TradeOutcome.LOSS.value else cooldown_bars_after_trade)
+        self.last_trade_result = resolved
         self.last_trade_close_time_utc = close_time_utc
         self.last_trade_close_bar_utc = close_bar_utc
         self.cooldown_remaining_bars = max(0, bars)
         self.cooldown_last_counted_bar_utc = close_bar_utc
 
-    def cooldown_bars_remaining(self, *, current_bar_utc: str) -> int:
-        """Return remaining cooldown bars, decrementing once per new closed bar."""
+    def peek_cooldown_bars_remaining(self) -> int:
+        """Return remaining cooldown without mutating state."""
+        return max(0, int(self.cooldown_remaining_bars))
+
+    def advance_cooldown_for_closed_bar(self, *, current_bar_utc: str) -> int:
+        """Decrement cooldown once for a new unique fully closed bar.
+
+        Must be called after the decision/quality check for that bar so that
+        ``cooldown_bars_after_trade=3`` blocks three bars and allows the fourth.
+        """
         if self.cooldown_remaining_bars <= 0:
             return 0
         if current_bar_utc and self.cooldown_last_counted_bar_utc and current_bar_utc > self.cooldown_last_counted_bar_utc:
@@ -260,6 +300,16 @@ class InstanceState:
         elif current_bar_utc and not self.cooldown_last_counted_bar_utc:
             self.cooldown_last_counted_bar_utc = current_bar_utc
         return max(0, int(self.cooldown_remaining_bars))
+
+    def cooldown_bars_remaining(self, *, current_bar_utc: str) -> int:
+        """Peek remaining cooldown for ``current_bar_utc`` without decrementing.
+
+        Decrementing is performed separately via
+        ``advance_cooldown_for_closed_bar`` after the quality gate so bar
+        counting is not off-by-one.
+        """
+        del current_bar_utc
+        return self.peek_cooldown_bars_remaining()
 
     def register_signal_fingerprint(self, fingerprint: str, *, expiry_bars: int) -> None:
         if not fingerprint or expiry_bars <= 0:

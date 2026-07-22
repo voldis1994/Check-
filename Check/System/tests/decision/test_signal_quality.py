@@ -115,6 +115,12 @@ def test_score_delta_too_small_waits() -> None:
     assert result.reason_code == REASON_SIGNAL_DELTA_TOO_SMALL
     assert result.score_delta == pytest.approx(0.08)
 
+def test_score_delta_too_small_when_opposite_invalid() -> None:
+    result = evaluate_signal_quality(**_quality_kwargs(buy_score=0.68, sell_score=0.62, sell_valid=False, sell_components=_sell_components(weak=False)))
+    assert result.passed is False
+    assert result.reason_code == REASON_SIGNAL_DELTA_TOO_SMALL
+    assert result.score_delta == pytest.approx(0.06)
+
 def test_market_quality_too_low_waits() -> None:
     result = evaluate_signal_quality(**_quality_kwargs(market_quality_score=0.40))
     assert result.passed is False
@@ -135,8 +141,16 @@ def test_cooldown_active_waits() -> None:
     assert result.cooldown_bars_remaining == 2
 
 def test_duplicate_fingerprint_waits() -> None:
-    fingerprint = build_signal_fingerprint(symbol='EURUSD', side=Side.BUY.value, candle_time_utc='2026-07-07T06:02:00.000Z', structure_level=1.10310)
-    result = evaluate_signal_quality(**_quality_kwargs(active_fingerprints={fingerprint: '5'}))
+    fingerprint = build_signal_fingerprint(
+        symbol='EURUSD',
+        side=Side.BUY.value,
+        candle_time_utc='2026-07-07T06:02:00.000Z',
+        structure_level=1.10310,
+        setup_type='directional',
+        structure_id='legacy-test',
+        setup_origin_timestamp='2026-07-07T06:00:00.000Z',
+    )
+    result = evaluate_signal_quality(**_quality_kwargs(active_fingerprints={fingerprint: '5'}, structure_level=1.10310, structure_id='legacy-test', setup_origin_timestamp='2026-07-07T06:00:00.000Z', setup_type='directional'))
     assert result.passed is False
     assert result.reason_code == REASON_DUPLICATE_SIGNAL
     assert result.fingerprint == fingerprint
