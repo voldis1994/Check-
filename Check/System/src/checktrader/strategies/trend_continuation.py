@@ -112,7 +112,9 @@ class TrendContinuationStrategy:
             return StrategyResult(Decision.SKIP, ReasonCode.NO_STRATEGY_FOR_REGIME)
 
         regime = context.regime.regime
-        if regime not in {MarketRegime.TREND_UP, MarketRegime.TREND_DOWN}:
+        # TRANSITION often wraps a real impulse (EMA/ADX not fully stacked yet).
+        # Still allow pullback continuation when M5 filters below pass.
+        if regime not in {MarketRegime.TREND_UP, MarketRegime.TREND_DOWN, MarketRegime.TRANSITION}:
             return StrategyResult(Decision.SKIP, ReasonCode.NO_STRATEGY_FOR_REGIME)
 
         # M5 context indicators
@@ -211,7 +213,19 @@ class TrendContinuationStrategy:
             return StrategyResult(Decision.HOLD, ReasonCode.TRIGGER_NOT_CONFIRMED, setup=setup, diagnostics=diag)
 
         # ── Phase 2: M5 context → create new ARMED setup ──────────────────────
-        is_up = regime == MarketRegime.TREND_UP
+        if regime == MarketRegime.TRANSITION:
+            if ema20 > ema50 and last_m5.close > ema50:
+                is_up = True
+            elif ema20 < ema50 and last_m5.close < ema50:
+                is_up = False
+            else:
+                return StrategyResult(
+                    Decision.HOLD,
+                    ReasonCode.REGIME_TRANSITION,
+                    diagnostics={"ema20": ema20, "ema50": ema50, "close": last_m5.close},
+                )
+        else:
+            is_up = regime == MarketRegime.TREND_UP
 
         # EMA alignment
         passed_arm: list[str] = []

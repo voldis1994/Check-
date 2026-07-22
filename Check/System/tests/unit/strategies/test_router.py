@@ -34,7 +34,7 @@ def test_unknown_blocks_all(specs: SymbolSpecs) -> None:
     assert result.reason is ReasonCode.REGIME_UNKNOWN
 
 
-def test_transition_does_not_open_trend(specs: SymbolSpecs) -> None:
+def test_transition_still_evaluates_breakout_then_trend(specs: SymbolSpecs) -> None:
     router = StrategyRouter()
     result = router.evaluate(_ctx(MarketRegime.TRANSITION, specs))
     assert result.decision is Decision.HOLD
@@ -45,5 +45,8 @@ def test_transition_does_not_open_trend(specs: SymbolSpecs) -> None:
         ReasonCode.NO_BREAKOUT_TRIGGER,
         ReasonCode.FALSE_BREAKOUT,
         ReasonCode.BREAKOUT_FILTERS_NOT_READY,
+        ReasonCode.TREND_FILTERS_NOT_READY,
+        ReasonCode.NO_STRATEGY_FOR_REGIME,
         ReasonCode.NO_TRADE,
+        ReasonCode.TRIGGER_NOT_CONFIRMED,
     }

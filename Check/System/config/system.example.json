@@ -119,7 +119,10 @@
       "false_breakout_close_back_atr": 0.10,
       "stop_buffer_atr": 0.20,
       "take_profit_rr": 2.0,
-      "expiry_m1_bars": 8
+      "expiry_m1_bars": 8,
+      "m1_impulse_enabled": true,
+      "m1_impulse_lookback": 30,
+      "m1_impulse_min_body_atr": 0.12
     }
   },
   "risk": {

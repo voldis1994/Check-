@@ -21,7 +21,7 @@ class StrategyRouter:
       3. RANGE_REVERSION — only in RANGE
 
     Special regime handling:
-      - TRANSITION: only BREAKOUT is considered (no trend / range)
+      - TRANSITION: BREAKOUT first, then TREND_CONTINUATION (no range)
       - UNKNOWN: no trades at all
 
     Range ARMED setups are cancelled when a confirmed BREAKOUT OPEN fires.
@@ -46,27 +46,14 @@ class StrategyRouter:
             _cancel_range_setups(context)
             return bo_result
 
-        # TRANSITION → only breakout; do not fall through to trend/range
-        if regime == MarketRegime.TRANSITION:
-            if bo_result.decision == Decision.HOLD and bo_result.reason in {
-                ReasonCode.BREAKOUT_RETEST_PENDING,
-                ReasonCode.BREAKOUT_BOX_PENDING,
-                ReasonCode.NO_BREAKOUT_TRIGGER,
-                ReasonCode.FALSE_BREAKOUT,
-                ReasonCode.SETUP_ARMED,
-            }:
-                return bo_result
-            # Breakout skipped or not applicable → generic TRANSITION hold
-            return StrategyResult(Decision.HOLD, ReasonCode.REGIME_TRANSITION)
-
-        # 2. Trend continuation — TREND_UP / TREND_DOWN only
+        # 2. Trend continuation — TREND_UP / TREND_DOWN, and TRANSITION (impulse markets)
         tr_result: StrategyResult | None = None
-        if regime in {MarketRegime.TREND_UP, MarketRegime.TREND_DOWN}:
+        if regime in {MarketRegime.TREND_UP, MarketRegime.TREND_DOWN, MarketRegime.TRANSITION}:
             tr_result = self.trend.evaluate(context)
             if tr_result.decision == Decision.OPEN:
                 return tr_result
 
-        # 3. Range reversion — RANGE only
+        # 3. Range reversion — RANGE only (not during TRANSITION)
         rr_result: StrategyResult | None = None
         if regime == MarketRegime.RANGE:
             rr_result = self.range_reversion.evaluate(context)
@@ -74,17 +61,23 @@ class StrategyRouter:
                 return rr_result
 
         # Propagate the most-informative HOLD result:
-        # breakout ARMED setup > trend ARMED setup > range result > generic NO_TRADE
+        # breakout ARMED setup > trend ARMED setup > range result > breakout hold > generic
         if bo_result.setup is not None:
             return bo_result
         if tr_result is not None and tr_result.setup is not None:
             return tr_result
         if rr_result is not None and rr_result.setup is not None:
             return rr_result
-        if tr_result is not None:
+        if bo_result.decision != Decision.SKIP and bo_result.reason not in {
+            ReasonCode.NO_STRATEGY_FOR_REGIME,
+        }:
+            return bo_result
+        if tr_result is not None and tr_result.decision != Decision.SKIP:
             return tr_result
         if rr_result is not None:
             return rr_result
+        if regime == MarketRegime.TRANSITION:
+            return StrategyResult(Decision.HOLD, ReasonCode.REGIME_TRANSITION)
 
         return StrategyResult(Decision.HOLD, ReasonCode.NO_TRADE)
 
