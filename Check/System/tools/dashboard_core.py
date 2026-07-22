@@ -201,6 +201,34 @@ def read_last_audit(path: Path) -> dict[str, Any] | None:
     return None
 
 
+def read_last_audits_by_account(path: Path, *, limit_accounts: int = 8) -> dict[str, dict[str, Any]]:
+    """Newest audit row per account_number (or '-')."""
+    if not path.exists():
+        return {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    found: dict[str, dict[str, Any]] = {}
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        acct = str(data.get("account_number") or "-")
+        if acct in found:
+            continue
+        found[acct] = data
+        if len(found) >= limit_accounts:
+            break
+    return found
+
+
 def collect_health(config_path: Path) -> HealthSnapshot:
     data = load_config_json(config_path)
     runtime = data.get("runtime") or {}
