@@ -17,6 +17,7 @@ $OldPythonPath = $env:PYTHONPATH
 $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($OldPythonPath)) { Join-Path $Root "src" } else { (Join-Path $Root "src") + ";" + $OldPythonPath }
 
 try {
+  python .\tools\sync_system_config.py --config $Config --example $Example
   python .\tools\dashboard.py
 } finally {
   $env:PYTHONPATH = $OldPythonPath

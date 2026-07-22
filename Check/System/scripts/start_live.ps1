@@ -18,12 +18,13 @@ if (!(Test-Path $Config)) {
   throw "Config not found: $Config"
 }
 
-python .\tools\validate_config.py --config $Config --live
-
 $OldPythonPath = $env:PYTHONPATH
 $env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($OldPythonPath)) { Join-Path $Root "src" } else { (Join-Path $Root "src") + ";" + $OldPythonPath }
 
 try {
+  python .\tools\sync_system_config.py --config $Config
+  python .\tools\validate_config.py --config $Config --live
+
   $Args = @("-m", "checktrader", "--config", $Config, "--mode", "live")
   if ($Once) {
     $Args += "--once"

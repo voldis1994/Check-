@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from checktrader.config.migrate import apply_shipped_trading_profile, example_config_path, sync_system_json
 from checktrader.config.models import SystemConfig
 from checktrader.config.validation import validate_runtime_safety
 from checktrader.domain.errors import ConfigurationError
@@ -16,7 +17,7 @@ except ModuleNotFoundError:
     Draft202012Validator = None  # type: ignore[assignment,misc]
 
 # Default example config shipped with the package
-EXAMPLE_CONFIG_PATH: Path = Path(__file__).parent.parent.parent.parent / "config" / "system.example.json"
+EXAMPLE_CONFIG_PATH: Path = example_config_path()
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -50,11 +51,15 @@ def load_config(
     Load and validate a SystemConfig from a JSON file.
 
     If `path` is None, the bundled ``config/system.example.json`` is used.
+    Local ``system.json`` always receives the shipped regimes/strategies profile
+    (live/runtime/account/paths are preserved) so pulls apply without hand-edits.
     Pass ``validate_live=False`` to skip the live-mode safety check during
     bootstrap (the bootstrap function calls it separately).
     """
     resolved = Path(path) if path is not None else EXAMPLE_CONFIG_PATH
-    data = _load_json(resolved)
+    if resolved.name == "system.json":
+        sync_system_json(resolved, example_path=EXAMPLE_CONFIG_PATH)
+    data = apply_shipped_trading_profile(_load_json(resolved))
     if schema_path is not None:
         validate_schema(data, Path(schema_path))
     try:

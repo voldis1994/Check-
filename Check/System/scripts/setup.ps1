@@ -31,6 +31,14 @@ if (!(Test-Path $Config) -and (Test-Path $Example)) {
   Write-Host "Created config\system.json from config\system.example.json"
 }
 
+$OldPythonPath = $env:PYTHONPATH
+$env:PYTHONPATH = if ([string]::IsNullOrWhiteSpace($OldPythonPath)) { Join-Path $Root "src" } else { (Join-Path $Root "src") + ";" + $OldPythonPath }
+try {
+  python .\tools\sync_system_config.py --config $Config --example $Example
+} finally {
+  $env:PYTHONPATH = $OldPythonPath
+}
+
 if ($Install) {
   python -m pip install --upgrade pip
   if ($Dev) {

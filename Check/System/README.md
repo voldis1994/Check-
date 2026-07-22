@@ -17,6 +17,8 @@ There is no profit guarantee. Trading can lose money, including in live mode.
 
 Double-click `START_DASHBOARD.bat` (or run `.\scripts\start_dashboard.ps1`).
 
+On every start the app refreshes `config/system.json` trading filters (`regimes` / `strategies`) from the shipped example while keeping your live/runtime/account/paths settings.
+
 Dark pro console (CHECK SYSTEM brand) with:
 
 - sidebar account switcher (all MT4 bridges)
