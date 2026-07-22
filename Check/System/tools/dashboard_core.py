@@ -167,6 +167,7 @@ class BridgeSnapshot:
     acks: int
     market_file: str | None
     status_file: str | None
+    account_id: str = "-"
 
 
 @dataclass(slots=True)
@@ -217,6 +218,15 @@ def collect_health(config_path: Path) -> HealthSnapshot:
         status = _latest_status_json(bridge / "status")
         commands = list((bridge / "commands").glob("*.json")) if (bridge / "commands").exists() else []
         acks = list((bridge / "acknowledgements").glob("*.json")) if (bridge / "acknowledgements").exists() else []
+        account_id = "-"
+        if status is not None:
+            try:
+                payload = json.loads(status.read_text(encoding="utf-8"))
+                body = payload.get("payload", payload) if isinstance(payload, dict) else {}
+                if isinstance(body, dict):
+                    account_id = str(body.get("account_number") or body.get("account_id") or "-")
+            except (OSError, json.JSONDecodeError):
+                account_id = "-"
         bridges.append(
             BridgeSnapshot(
                 path=bridge,
@@ -226,6 +236,7 @@ def collect_health(config_path: Path) -> HealthSnapshot:
                 acks=len(acks),
                 market_file=market.name if market else None,
                 status_file=status.name if status else None,
+                account_id=account_id,
             )
         )
 
