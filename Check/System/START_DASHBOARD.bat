@@ -3,6 +3,8 @@ setlocal EnableExtensions
 title CHECK SYSTEM - Dashboard
 cd /d "%~dp0"
 
+set "PYTHONPATH=%CD%\src;%PYTHONPATH%"
+
 if not exist "config\system.json" (
   if exist "config\system.example.json" (
     copy /Y "config\system.example.json" "config\system.json" >nul
@@ -10,7 +12,14 @@ if not exist "config\system.json" (
   )
 )
 
-set "PYTHONPATH=%CD%\src;%PYTHONPATH%"
+REM Always refresh regimes/strategies from shipped example (keeps live/runtime settings).
+python "tools\sync_system_config.py" --config "config\system.json" --example "config\system.example.json"
+if errorlevel 1 (
+  echo Config sync failed.
+  pause
+  exit /b 1
+)
+
 python -c "import tkinter" 1>nul 2>nul
 if errorlevel 1 (
   echo Tkinter missing. Install official Python 3.12+ for Windows with tcl/tk.

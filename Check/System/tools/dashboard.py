@@ -38,6 +38,11 @@ from dashboard_core import (  # noqa: E402
     write_stop,
 )
 
+try:
+    from checktrader.config.migrate import sync_system_json
+except Exception:  # noqa: BLE001
+    sync_system_json = None  # type: ignore[assignment]
+
 # Dark pro console inspired by the operator mockup — CHECK SYSTEM brand, real data only.
 C = {
     "bg": "#0B1220",
@@ -881,10 +886,13 @@ class DashboardApp:
 
 def main() -> int:
     try:
-        resolve_config()
+        cfg = resolve_config()
     except FileNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
+    if sync_system_json is not None and cfg.name == "system.json":
+        with contextlib.suppress(Exception):
+            sync_system_json(cfg)
     root = tk.Tk()
     DashboardApp(root)
     root.mainloop()
