@@ -64,6 +64,35 @@ def discover_bridges(
     return list(ready.values())
 
 
+def _market_mtime(bridge: Path) -> float:
+    latest = bridge / "market" / "latest.json"
+    if latest.exists():
+        return latest.stat().st_mtime
+    files = list((bridge / "market").glob("*.json"))
+    if not files:
+        return 0.0
+    return max(p.stat().st_mtime for p in files)
+
+
+def select_bridge(bridges: list[Path], sticky: Path | None = None, *, max_sticky_age_s: float = 90.0) -> Path | None:
+    """
+    Prefer one freshest bridge.
+
+    Mixing multiple MT4 bridges into one shared history causes BARS_NOT_SEQUENTIAL.
+    Keep a sticky bridge while its market/latest.json stays fresh.
+    """
+    if not bridges:
+        return None
+    now = time.time()
+    ranked = sorted(bridges, key=_market_mtime, reverse=True)
+    if sticky is not None:
+        sticky_res = sticky.resolve()
+        for bridge in bridges:
+            if bridge.resolve() == sticky_res and (now - _market_mtime(bridge)) <= max_sticky_age_s:
+                return bridge
+    return ranked[0]
+
+
 def run_once(context: AppContext, bridge_dir: Path | None = None) -> CycleAudit:
     is_live = context.config.runtime.mode == "live"
 
@@ -103,6 +132,7 @@ def run_once(context: AppContext, bridge_dir: Path | None = None) -> CycleAudit:
 def run_loop(context: AppContext) -> None:
     runtime_dir = context.config.paths.runtime_dir
     is_live = context.config.runtime.mode == "live"
+    sticky_bridge: Path | None = None
 
     while True:
         if _stop_requested(runtime_dir):
@@ -126,14 +156,22 @@ def run_loop(context: AppContext) -> None:
                 # Paper mode without any bridge — run a plain paper cycle
                 run_once(context)
             else:
-                for bridge in bridges or (
-                    [] if context.config.paths.bridge_dir is None else [context.config.paths.bridge_dir]
-                ):
-                    try:
-                        audit = run_once(context, bridge)
-                    except Exception:  # noqa: BLE001
-                        logger.exception("cycle failed for bridge %s", bridge)
-                        continue
+                chosen = select_bridge(bridges, sticky_bridge)
+                if chosen is None and context.config.paths.bridge_dir is not None:
+                    chosen = context.config.paths.bridge_dir
+                if chosen is None:
+                    time.sleep(context.config.runtime.cycle_interval_seconds)
+                    continue
+                if sticky_bridge is None or sticky_bridge.resolve() != chosen.resolve():
+                    if sticky_bridge is not None:
+                        logger.info("switching bridge %s -> %s (clearing history)", sticky_bridge, chosen)
+                        context.history.clear()
+                    sticky_bridge = chosen
+                try:
+                    audit = run_once(context, chosen)
+                except Exception:  # noqa: BLE001
+                    logger.exception("cycle failed for bridge %s", chosen)
+                else:
                     if audit.reason_code in {ReasonCode.BRIDGE_UNAVAILABLE, ReasonCode.DATA_STALE}:
                         logger.warning("cycle skipped: %s", audit.human_readable_reason)
         except Exception:  # noqa: BLE001

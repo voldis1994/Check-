@@ -14,6 +14,9 @@ class RollingHistory:
     max_bars: dict[str, int]
     candles: dict[str, list[Candle]] = field(default_factory=lambda: {"M1": [], "M5": [], "M15": []})
 
+    def clear(self) -> None:
+        self.candles = {tf: [] for tf in ("M1", "M5", "M15")}
+
     def merge(self, timeframe: str, incoming: list[Candle]) -> list[Candle]:
         merged = sort_unique([*self.candles.get(timeframe, []), *incoming])
         limit = self.max_bars.get(timeframe)
