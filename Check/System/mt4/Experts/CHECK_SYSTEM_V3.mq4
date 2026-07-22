@@ -15,12 +15,20 @@ input int MagicNumber = 3003001;
 // Empty = AUTO -> TerminalDataPath\MQL4\Files\CHECK_SYSTEM
 input string BridgeRootPath = "";
 
+datetime CHECK_V3_LAST_EXPORT_AT = 0;
+bool CHECK_V3_LAST_EXPORT_OK = false;
+
 void CheckV3SetChartComment()
 {
-   Comment("CHECK SYSTEM v3.0.0\n",
+   string exportState = CHECK_V3_LAST_EXPORT_OK ? "EXPORT OK" : "EXPORT FAIL";
+   string age = CHECK_V3_LAST_EXPORT_AT > 0
+      ? IntegerToString((int)(TimeCurrent() - CHECK_V3_LAST_EXPORT_AT)) + "s ago"
+      : "never";
+   Comment("CHECK SYSTEM v3.0.1\n",
            "Bridge: ", CheckV3BridgePathForComment(), "\n",
            "Protocol: ", CHECK_V3_PROTOCOL_VERSION, "\n",
-           "EA is transport only; strategy runs outside MT4.");
+           exportState, " (", age, ")\n",
+           "Files must update every ~1s. If EXPORT FAIL: Allow DLL imports.");
 }
 
 bool CheckV3ExportAndExecute()
@@ -28,8 +36,11 @@ bool CheckV3ExportAndExecute()
    bool marketOk = CheckV3ExportMarket(MagicNumber);
    bool statusOk = CheckV3ExportStatus(MagicNumber);
    CheckV3ExecuteCommands(MagicNumber);
+   CHECK_V3_LAST_EXPORT_OK = marketOk && statusOk;
+   if(CHECK_V3_LAST_EXPORT_OK)
+      CHECK_V3_LAST_EXPORT_AT = TimeCurrent();
    CheckV3SetChartComment();
-   return marketOk && statusOk;
+   return CHECK_V3_LAST_EXPORT_OK;
 }
 
 int OnInit()

@@ -19,14 +19,30 @@ def _payload(data: dict[str, Any] | None) -> dict[str, Any] | None:
     return p if isinstance(p, dict) else None
 
 
-def _read_latest_or_glob(subdir: Path) -> dict[str, Any] | None:
-    """Prefer <subdir>/latest.json; fall back to the most-recently-modified file in the dir."""
+def _read_latest_or_glob(subdir: Path, *, role: str = "market") -> dict[str, Any] | None:
+    """Prefer latest.json; then v3 *_{role}.json; avoid legacy {role}_* when newer v3 exists."""
     latest = subdir / "latest.json"
     if latest.exists():
-        return read_json(latest)
-    # Glob for any .json in the directory, pick most recently modified
-    candidates = sorted(subdir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for candidate in candidates:
+        data = read_json(latest)
+        if data is not None:
+            return data
+
+    if not subdir.exists():
+        return None
+
+    files = [p for p in subdir.glob("*.json") if p.is_file()]
+
+    def score(path: Path) -> tuple[int, float]:
+        name = path.name.lower()
+        if name.endswith(f"_{role}.json"):
+            tier = 2
+        elif name.startswith(f"{role}_"):
+            tier = 0
+        else:
+            tier = 1
+        return (tier, path.stat().st_mtime)
+
+    for candidate in sorted(files, key=score, reverse=True):
         data = read_json(candidate)
         if data is not None:
             return data
@@ -65,7 +81,7 @@ def _parse_m1_bars(rows: list[dict[str, Any]]) -> list[Candle]:
 
 def read_market(bridge_dir: Path, default_symbol: str) -> MarketSnapshot | None:
     """Read market snapshot from bridge_dir/market/latest.json (or glob fallback)."""
-    p = _payload(_read_latest_or_glob(bridge_dir / "market"))
+    p = _payload(_read_latest_or_glob(bridge_dir / "market", role="market"))
     if p is None:
         return None
 
@@ -93,7 +109,7 @@ def read_market(bridge_dir: Path, default_symbol: str) -> MarketSnapshot | None:
 
 def read_status(bridge_dir: Path) -> AccountStatus | None:
     """Read account status from bridge_dir/status/latest.json."""
-    p = _payload(_read_latest_or_glob(bridge_dir / "status"))
+    p = _payload(_read_latest_or_glob(bridge_dir / "status", role="status"))
     if p is None:
         return None
 
@@ -118,7 +134,7 @@ def read_status(bridge_dir: Path) -> AccountStatus | None:
 
 def read_positions(bridge_dir: Path) -> list[Position]:
     """Read positions from bridge_dir/status/latest.json (MT4 includes them in status)."""
-    p = _payload(_read_latest_or_glob(bridge_dir / "status"))
+    p = _payload(_read_latest_or_glob(bridge_dir / "status", role="status"))
     # Fall back to a dedicated positions.json if status lacks them
     if p is None or "positions" not in p:
         p2 = _payload(read_json(bridge_dir / "positions.json"))

@@ -100,17 +100,62 @@ def discover_bridge_dirs(configured: Path | None = None) -> list[Path]:
     return list(found.values())
 
 
-def _latest_json(folder: Path) -> Path | None:
+def _preferred_json(folder: Path, *, role: str) -> Path | None:
+    """Prefer latest.json, then v3 account_symbol role files, ignore legacy names when possible."""
     if not folder.exists():
         return None
-    files = sorted(folder.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return files[0] if files else None
+    latest = folder / "latest.json"
+    if latest.exists():
+        return latest
+
+    files = [p for p in folder.glob("*.json") if p.is_file()]
+    if not files:
+        return None
+
+    def score(path: Path) -> tuple[int, float]:
+        name = path.name.lower()
+        # Higher score wins; then newer mtime.
+        if name == "latest.json":
+            tier = 3
+        elif name.endswith(f"_{role}.json"):
+            tier = 2
+        elif name.startswith(f"{role}_"):
+            tier = 0  # legacy market_SYMBOL_*.json / status_ACCOUNT.json
+        else:
+            tier = 1
+        return (tier, path.stat().st_mtime)
+
+    return sorted(files, key=score, reverse=True)[0]
+
+
+def _latest_json(folder: Path) -> Path | None:
+    return _preferred_json(folder, role="market")
+
+
+def _latest_status_json(folder: Path) -> Path | None:
+    return _preferred_json(folder, role="status")
 
 
 def _age_seconds(path: Path | None) -> float | None:
     if path is None or not path.exists():
         return None
     return max(0.0, time.time() - path.stat().st_mtime)
+
+
+def format_age(seconds: float | None) -> str:
+    if seconds is None:
+        return "missing"
+    if seconds < 2:
+        return "fresh"
+    if seconds < 60:
+        label = f"{seconds:.0f}s ago"
+    elif seconds < 3600:
+        label = f"{seconds / 60:.1f}m ago"
+    else:
+        label = f"{seconds / 3600:.1f}h ago"
+    if seconds > 30:
+        return f"STALE {label}"
+    return label
 
 
 @dataclass(slots=True)
@@ -169,7 +214,7 @@ def collect_health(config_path: Path) -> HealthSnapshot:
     bridges: list[BridgeSnapshot] = []
     for bridge in discover_bridge_dirs(bridge_path):
         market = _latest_json(bridge / "market")
-        status = _latest_json(bridge / "status")
+        status = _latest_status_json(bridge / "status")
         commands = list((bridge / "commands").glob("*.json")) if (bridge / "commands").exists() else []
         acks = list((bridge / "acknowledgements").glob("*.json")) if (bridge / "acknowledgements").exists() else []
         bridges.append(
@@ -209,18 +254,6 @@ def format_audit_line(entry: dict[str, Any]) -> str:
         f"{stamp}  {symbol}  acct={account}  decision={decision}  "
         f"reason={reason}  regime={regime}  strategy={strategy}"
     )
-
-
-def format_age(seconds: float | None) -> str:
-    if seconds is None:
-        return "missing"
-    if seconds < 2:
-        return "fresh"
-    if seconds < 60:
-        return f"{seconds:.0f}s ago"
-    if seconds < 3600:
-        return f"{seconds / 60:.1f}m ago"
-    return f"{seconds / 3600:.1f}h ago"
 
 
 class EngineProcess:
