@@ -15,10 +15,11 @@ def main() -> None:
     parser.add_argument(
         "--allow-empty-accounts",
         action="store_true",
-        help="Allow empty allowed_account_numbers (tests/dev only)",
+        help="Deprecated no-op: empty allow-list is AUTO multi-account (default)",
     )
     args = parser.parse_args()
-    run_trading_loop(config_path=args.config, once=args.once, require_live_accounts=not args.allow_empty_accounts)
+    # Empty allowed_account_numbers is production AUTO (all MT4 accounts).
+    run_trading_loop(config_path=args.config, once=args.once, require_live_accounts=False)
 
 
 if __name__ == "__main__":

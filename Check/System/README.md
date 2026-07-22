@@ -18,9 +18,10 @@ Double-click from `Check\System`:
 
 | File | What it does |
 |------|----------------|
-| `SETUP_ALL.bat` | Python install, config seed (`AUTO` symbol), runtime dirs, **copies MQ4 into every MetaTrader Data Folder** |
+| `SETUP_ALL.bat` | Python install, config seed (`AUTO` symbol + all accounts), runtime dirs, **copies MQ4 into every MetaTrader Data Folder** |
 | `DEPLOY_MT4.bat` | Only deploy EA + includes to `%APPDATA%\MetaQuotes\Terminal\*\MQL4\` |
-| `START_LIVE.bat` | Validate config and start `python -m checktrader` |
+| `START_LIVE.bat` | Force AUTO config, deploy EA, list all accounts, start `python -m checktrader` |
+| `UPDATE_AND_START.bat` | `git pull` main then `START_LIVE.bat` |
 | `FIX_BRIDGE.bat` | Redeploy EA + checklist when Python waits for market/status files |
 | `STOP.bat` | Create `runtime\STOP_TRADING` kill switch |
 
