@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "checktrader"
+version = "2.0.0"
+description = "Deterministic Python + MT4 live trading bridge (SYSTEM v2)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "Check System" }]
+dependencies = [
+  "pydantic>=2.7,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[project.scripts]
+checktrader = "checktrader.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+checktrader = ["dashboard/templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = [
+  "tests/unit",
+  "tests/integration",
+  "tests/protocol",
+  "tests/strategy",
+  "tests/risk",
+  "tests/trailing",
+  "tests/state",
+  "tests/e2e",
+]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+  "E501",   # long domain/call lines; format still wraps where safe
+  "UP042",  # keep str, Enum for JSON-friendly domain enums
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["checktrader"]
+ignore_missing_imports = true

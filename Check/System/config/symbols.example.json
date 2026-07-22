@@ -1,0 +1,7 @@
+{
+  "EURUSD": {
+    "digits": 5,
+    "point": 1e-05,
+    "pip_size": 0.0001
+  }
+}
