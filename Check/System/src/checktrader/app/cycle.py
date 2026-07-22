@@ -4,8 +4,15 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from checktrader.app.bootstrap import AppContext
-from checktrader.domain.enums import Decision, ReasonCode, SetupState, Side
-from checktrader.domain.models import AccountStatus, Acknowledgement, CycleAudit, MarketSnapshot
+from checktrader.domain.enums import Decision, MarketRegime, ReasonCode, SetupState, Side
+from checktrader.domain.models import (
+    AccountStatus,
+    Acknowledgement,
+    CycleAudit,
+    IndicatorSnapshot,
+    MarketSnapshot,
+    RegimeSnapshot,
+)
 from checktrader.execution.commands import build_close, build_modify, build_open
 from checktrader.execution.reconciliation import reconcile
 from checktrader.management.manager import manage_position
@@ -115,7 +122,50 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
             max(context.config.limits.heartbeat_max_age_seconds, 90.0),
         )
         if not ok_fresh:
-            audit.set_reason(ReasonCode.DATA_STALE, [reason_fresh.value])
+            # Still sync/manage open broker positions on a stale heartbeat.
+            reconciled = reconcile(context.state.positions, market.positions or context.state.positions)
+            context.state.positions = reconciled.positions
+            audit.reasons.append(reconciled.reason)
+            if market.account:
+                audit.account_number = market.account.account_id
+            if context.state.positions:
+                stale_regime = RegimeSnapshot(
+                    MarketRegime.UNKNOWN,
+                    now,
+                    reason_fresh,
+                    0.0,
+                    IndicatorSnapshot(now),
+                )
+                for pos in list(context.state.positions):
+                    action = manage_position(
+                        pos,
+                        bid=market.bid,
+                        ask=market.ask,
+                        atr_value=None,
+                        regime=stale_regime,
+                        specs=context.specs,
+                        config=context.config,
+                    )
+                    audit.management = action
+                    audit.reasons.append(action.reason)
+                    if action.decision == Decision.CLOSE:
+                        cmd = build_close(pos, action)
+                        ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
+                        audit.command = cmd
+                        audit.execution_result = _ack_to_exec_result(ack)
+                        audit.decision = Decision.CLOSE
+                        audit.set_reason(ack.reason)
+                    elif action.decision == Decision.MODIFY:
+                        cmd = build_modify(pos, action)
+                        ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
+                        audit.command = cmd
+                        audit.execution_result = _ack_to_exec_result(ack)
+                        audit.decision = Decision.MODIFY
+                        audit.set_reason(ack.reason)
+                context.state_store.save(context.state)
+            if not audit.decision:
+                audit.set_reason(ReasonCode.DATA_STALE, [reason_fresh.value])
+                audit.decision = Decision.HOLD
             audit.reasons.append(reason_fresh)
             audit.completed_at = datetime.now(UTC)
             context.audit.write(audit)
@@ -153,48 +203,32 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
     # Persist M1 progress even when higher-TF validation fails later.
     save_history(context.config.paths.history_file, context.history)
 
+    # Always sync broker positions first — open trades must be managed even when
+    # history/regime is not ready for new entries.
+    reconciled = reconcile(context.state.positions, market.positions or context.state.positions)
+    context.state.positions = reconciled.positions
+    audit.reasons.append(reconciled.reason)
+    if market.account:
+        audit.account_number = market.account.account_id
+
     # ── Step 5/6: indicators + regime update ───────────────────────────────
     ok_seq, reason_seq = sequential_bars(market.m15, context.config.instrument.timeframe_decision)
     audit.reasons.append(reason_seq)
-    if not ok_seq:
-        audit.set_reason(reason_seq, [reason_seq.value])
-        audit.completed_at = datetime.now(UTC)
-        context.audit.write(audit)
-        return audit
 
-    regime = context.detector.update(market.m15)
+    if ok_seq:
+        regime = context.detector.update(market.m15)
+    else:
+        # Keep going for management; block only *new* entries via UNKNOWN regime.
+        regime = RegimeSnapshot(
+            MarketRegime.UNKNOWN,
+            datetime.now(UTC),
+            reason_seq,
+            0.0,
+            IndicatorSnapshot(datetime.now(UTC)),
+        )
+
     audit.market_regime = regime.regime
     audit.reasons.append(regime.reason)
-    if regime.reason == ReasonCode.HISTORY_INSUFFICIENT:
-        need = context.config.regimes.trend.ema200_period
-        have = len(market.m15)
-        audit.set_reason(
-            ReasonCode.HISTORY_INSUFFICIENT,
-            [f"m15={have}/{need} warming up — waiting for enough closed M15 bars"],
-        )
-        audit.decision = Decision.HOLD
-        ind = regime.indicators
-        audit.indicator_snapshot = {
-            "time": ind.time.isoformat(),
-            "ema_fast": ind.ema_fast,
-            "ema_slow": ind.ema_slow,
-            "ema200": ind.ema200,
-            "atr": ind.atr,
-            "adx": ind.adx,
-            "plus_di": ind.plus_di,
-            "minus_di": ind.minus_di,
-        }
-        if market.account:
-            audit.account_number = market.account.account_id
-        context.state_store.save(context.state)
-        context.metrics.inc("cycles")
-        context.metrics.save(context.config.paths.metrics_file)
-        audit.reasons.append(ReasonCode.CYCLE_COMPLETED)
-        audit.completed_at = datetime.now(UTC)
-        context.audit.write(audit)
-        return audit
-
-    # Capture indicator snapshot for the audit
     ind = regime.indicators
     audit.indicator_snapshot = {
         "time": ind.time.isoformat(),
@@ -206,10 +240,11 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
         "plus_di": ind.plus_di,
         "minus_di": ind.minus_di,
     }
-
-    # Populate account_number from market status if available
-    if market.account:
-        audit.account_number = market.account.account_id
+    if regime.reason == ReasonCode.HISTORY_INSUFFICIENT:
+        need = int((regime.metadata or {}).get("need") or context.config.regimes.trend.ema50_period)
+        have = len(market.m15)
+        audit.metrics["warmup_m15"] = have
+        audit.metrics["warmup_need"] = need
 
     # ── Step 7: expire/update setups ────────────────────────────────────────
     last_bar = last_closed(market.m15)
@@ -218,12 +253,7 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
             context.state.setups.upsert(setup)
             audit.reasons.append(setup.reason)
 
-    # ── Reconcile live broker positions ─────────────────────────────────────
-    reconciled = reconcile(context.state.positions, market.positions or context.state.positions)
-    context.state.positions = reconciled.positions
-    audit.reasons.append(reconciled.reason)
-
-    # ── Step 8: position management — ALL positions ─────────────────────────
+    # ── Step 8: position management — ALWAYS for broker/open positions ──────
     if context.state.positions:
         for pos in list(context.state.positions):
             action = manage_position(
@@ -259,8 +289,8 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
             if any(p.position_id == pos.position_id for p in context.state.positions):
                 pos.current_price = market.bid if pos.side == Side.BUY else market.ask
 
-    else:
-        # ── Step 9: strategy router ──────────────────────────────────────────
+    elif ok_seq:
+        # ── Step 9: strategy router (new entries only when bars are usable) ─
         result = context.router.evaluate(
             StrategyContext(
                 context.config,

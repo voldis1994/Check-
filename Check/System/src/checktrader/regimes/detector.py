@@ -21,44 +21,68 @@ class RegimeDetector:
 
     def update(self, m15: list[Candle]) -> RegimeSnapshot:
         """
-        Recompute regime only when a new closed M15 bar is available.
-        Return UNKNOWN (section 5.5) when there is insufficient history
-        for EMA200 (< ema200_period bars).
+        Recompute regime when a new closed M15 bar arrives.
+
+        Do NOT freeze the whole system waiting for EMA200 history. Once we have
+        enough bars for EMA50/ATR/ADX, detect with ema200 clamped to available
+        length so live accounts can open/manage trades while history builds.
         """
         bars = closed_bars(m15)
         if not bars:
             ind = IndicatorSnapshot(datetime.now(UTC))
             return RegimeSnapshot(MarketRegime.UNKNOWN, ind.time, ReasonCode.NO_CLOSED_BARS, 0.0, ind)
 
-        # Only recompute when the last closed bar is new
         if self.last_m15_time == bars[-1].time and self.last_snapshot is not None:
             return self.last_snapshot
 
         self.last_m15_time = bars[-1].time
         trend_cfg = self.config.regimes.trend
-
-        # Section 5.5: insufficient history for EMA200
-        if len(bars) < trend_cfg.ema200_period:
+        min_needed = max(
+            trend_cfg.ema50_period + trend_cfg.slope_lookback + 2,
+            trend_cfg.adx_period * 2,
+            trend_cfg.atr_period + 2,
+            trend_cfg.ema20_period + 2,
+        )
+        if len(bars) < min_needed:
             ind = IndicatorSnapshot(bars[-1].time)
-            snap = RegimeSnapshot(MarketRegime.UNKNOWN, bars[-1].time, ReasonCode.HISTORY_INSUFFICIENT, 0.0, ind)
+            snap = RegimeSnapshot(
+                MarketRegime.UNKNOWN,
+                bars[-1].time,
+                ReasonCode.HISTORY_INSUFFICIENT,
+                0.0,
+                ind,
+                metadata={"m15": len(bars), "need": min_needed},
+            )
             self.last_snapshot = snap
             return snap
 
-        candidate = detect_trend(bars, trend_cfg) or detect_range(bars, self.config.regimes.range)
+        ema200_eff = min(trend_cfg.ema200_period, len(bars))
+        trend_eff = trend_cfg.model_copy(update={"ema200_period": ema200_eff})
+        warming = len(bars) < trend_cfg.ema200_period
+
+        candidate = detect_trend(bars, trend_eff) or detect_range(bars, self.config.regimes.range)
 
         if candidate is None:
-            # Section 5.4: enough history but neither trend nor range
             ind = latest_snapshot(
                 bars,
-                ema_fast_period=trend_cfg.ema20_period,
-                ema_slow_period=trend_cfg.ema50_period,
-                atr_period=trend_cfg.atr_period,
-                adx_period=trend_cfg.adx_period,
-                ema200_period=trend_cfg.ema200_period,
+                ema_fast_period=trend_eff.ema20_period,
+                ema_slow_period=trend_eff.ema50_period,
+                atr_period=trend_eff.atr_period,
+                adx_period=trend_eff.adx_period,
+                ema200_period=ema200_eff,
             )
             snap = transition_snapshot(ind, self.config.regimes.transition)
         else:
             snap = candidate
+
+        if warming:
+            snap.metadata = {
+                **dict(snap.metadata or {}),
+                "warming_up": True,
+                "m15": len(bars),
+                "ema200_target": trend_cfg.ema200_period,
+                "ema200_effective": ema200_eff,
+            }
 
         self.last_snapshot = snap
         return snap

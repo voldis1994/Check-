@@ -73,12 +73,10 @@ def test_sequence_from_empty_to_unknown() -> None:
 
 
 def test_sequence_insufficient_to_unknown() -> None:
-    """
-    Expected path: <200 bars → UNKNOWN (HISTORY_INSUFFICIENT)
-    """
+    """Expected path: below operable bars (~EMA50) → UNKNOWN (HISTORY_INSUFFICIENT)."""
     cfg = load_config()
     det = RegimeDetector(cfg)
-    bars = _uptrend_bars(50)
+    bars = _uptrend_bars(10)
     snap = det.update(bars)
     assert snap.regime == MarketRegime.UNKNOWN
     assert snap.reason == ReasonCode.HISTORY_INSUFFICIENT
@@ -128,25 +126,28 @@ def test_sequence_uptrend_eventually_produces_valid_regime() -> None:
 
 def test_sequence_incremental_bars_no_crash() -> None:
     """
-    Feed bars one-by-one; detector should never raise an exception.
-    Expected path: UNKNOWN (×200) → then varies.
+    Feed bars one-by-one; detector should never raise.
+    Below operable bars → UNKNOWN; after that regime may vary.
     """
     cfg = load_config()
     det = RegimeDetector(cfg)
     all_bars = _uptrend_bars(250, drift=0.20, noise=0.005)
+    min_needed = max(
+        cfg.regimes.trend.ema50_period + cfg.regimes.trend.slope_lookback + 2,
+        cfg.regimes.trend.adx_period * 2,
+        cfg.regimes.trend.atr_period + 2,
+        cfg.regimes.trend.ema20_period + 2,
+    )
 
     regimes_seen: list[MarketRegime] = []
     for i in range(1, len(all_bars) + 1):
         snap = det.update(all_bars[:i])
         regimes_seen.append(snap.regime)
 
-    # First 199 bars must all be UNKNOWN (insufficient history for EMA200=200)
-    for regime in regimes_seen[:199]:
+    for regime in regimes_seen[: min_needed - 1]:
         assert regime == MarketRegime.UNKNOWN
 
-    # From bar 200 onward the regime may vary
-    seen_non_unknown = {r for r in regimes_seen[199:]}
-    # At least one valid regime must appear
+    seen_non_unknown = {r for r in regimes_seen[min_needed - 1 :]}
     assert len(seen_non_unknown) >= 1
 
 
