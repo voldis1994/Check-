@@ -25,3 +25,7 @@ runtime/logs/**
 *.old
 *.tmp
 .DS_Store
+runtime/audit.jsonl
+runtime/metrics.json
+runtime/state.json
+runtime/**/*.jsonl
