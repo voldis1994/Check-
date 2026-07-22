@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CHECK SYSTEM v2</title>
+  <style>
+    :root {
+      --bg0: #0f1419;
+      --bg1: #1a2332;
+      --line: #2c3a4f;
+      --text: #e8eef7;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #e6b84d;
+      --bad: #e85d5d;
+      --mono: "IBM Plex Mono", "Cascadia Mono", "Consolas", monospace;
+      --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1e3a5f 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #163028 0%, transparent 50%),
+        var(--bg0);
+    }
+    header {
+      padding: 1.25rem 1.5rem 0.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+    }
+    header p {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    main {
+      padding: 1.25rem 1.5rem 2rem;
+      display: grid;
+      gap: 1rem;
+      max-width: 960px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.75rem;
+    }
+    .metric {
+      padding: 0.85rem 1rem;
+      background: color-mix(in srgb, var(--bg1) 88%, transparent);
+      border: 1px solid var(--line);
+    }
+    .metric label {
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .metric strong {
+      font-family: var(--mono);
+      font-size: 1.05rem;
+      font-weight: 500;
+    }
+    pre {
+      margin: 0;
+      padding: 1rem;
+      overflow: auto;
+      background: #0b1016;
+      border: 1px solid var(--line);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      max-height: 55vh;
+    }
+    .status-ok { color: var(--ok); }
+    .status-warn { color: var(--warn); }
+    .status-bad { color: var(--bad); }
+    footer {
+      padding: 0 1.5rem 1.5rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CHECK SYSTEM</h1>
+    <p>Live snapshot · protocol 2.0.0 · auto-refresh 2s · <a href="/api/snapshot">JSON</a></p>
+  </header>
+  <main>
+    <div class="row">
+      <div class="metric"><label>Position</label><strong id="pos">—</strong></div>
+      <div class="metric"><label>Ticket</label><strong id="ticket">—</strong></div>
+      <div class="metric"><label>Broker SL</label><strong id="broker_sl">—</strong></div>
+      <div class="metric"><label>BE confirmed</label><strong id="be">—</strong></div>
+      <div class="metric"><label>Peak net</label><strong id="peak">—</strong></div>
+      <div class="metric"><label>Last reason</label><strong id="reason">—</strong></div>
+    </div>
+    <pre id="raw">Loading…</pre>
+  </main>
+  <footer>Technical operability is not a profit guarantee.</footer>
+  <script>
+    function fmt(v) {
+      if (v === null || v === undefined || v === "") return "—";
+      if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(5);
+      return String(v);
+    }
+    async function refresh() {
+      try {
+        const res = await fetch("/api/snapshot", { cache: "no-store" });
+        const data = await res.json();
+        document.getElementById("pos").textContent = fmt(data.position_state);
+        document.getElementById("ticket").textContent = fmt(data.ticket);
+        document.getElementById("broker_sl").textContent = fmt(data.broker_sl);
+        document.getElementById("be").textContent = data.be_confirmed ? "yes" : "no";
+        document.getElementById("peak").textContent = fmt(data.peak_net_profit);
+        document.getElementById("reason").textContent = fmt(data.last_reason);
+        const el = document.getElementById("pos");
+        el.className = "";
+        if (data.position_state === "OPEN" || data.position_state === "MODIFY_PENDING") el.classList.add("status-ok");
+        else if (data.position_state === "ERROR" || data.position_state === "RECONCILING") el.classList.add("status-bad");
+        else el.classList.add("status-warn");
+        document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        document.getElementById("raw").textContent = String(err);
+      }
+    }
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

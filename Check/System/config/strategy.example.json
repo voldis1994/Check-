@@ -1,0 +1,5 @@
+{
+  "enabled_setup": "trend_pullback_break",
+  "hma_period": 21,
+  "atr_period": 14
+}
