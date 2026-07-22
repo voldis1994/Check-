@@ -1,7 +1,7 @@
 """Keep local system.json trading profile in sync with shipped defaults.
 
 Users should never hand-edit trading gates after a pull. Live/runtime/account_id
-and paths are preserved; regimes/strategies/risk/limits/spread + equity gates refresh.
+and paths are preserved; regimes/strategies/risk/limits/spread/position refresh.
 """
 
 from __future__ import annotations
@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import Any
 
 # Sections owned by the repo release profile (always refreshed from example).
-SHIPPED_TRADING_KEYS: tuple[str, ...] = ("regimes", "strategies", "risk", "limits", "spread")
+SHIPPED_TRADING_KEYS: tuple[str, ...] = (
+    "regimes",
+    "strategies",
+    "risk",
+    "limits",
+    "spread",
+    "position",
+    "position_sizing",
+)
 
 
 def example_config_path() -> Path:

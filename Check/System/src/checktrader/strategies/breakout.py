@@ -18,6 +18,16 @@ def _count_touches(bars: list[Candle], level: float, tol: float) -> int:
     return sum(1 for b in bars if abs(b.high - level) <= tol or abs(b.low - level) <= tol)
 
 
+def _clamp_buy_stop(entry: float, stop: float, atr_value: float, max_stop_atr: float) -> float:
+    """Keep buy SL near entry — never beyond max_stop_atr * ATR."""
+    return max(stop, entry - max_stop_atr * atr_value)
+
+
+def _clamp_sell_stop(entry: float, stop: float, atr_value: float, max_stop_atr: float) -> float:
+    """Keep sell SL near entry — never beyond max_stop_atr * ATR."""
+    return min(stop, entry + max_stop_atr * atr_value)
+
+
 class BreakoutStrategy:
     """
     Section 10: Breakout.
@@ -170,7 +180,8 @@ class BreakoutStrategy:
 
         if last_m5.close > hi + buffer:
             entry = context.market.ask
-            stop = lo - cfg.stop_buffer_atr * a
+            max_dist_atr = context.config.strategies.force_stop_atr
+            stop = _clamp_buy_stop(entry, lo - cfg.stop_buffer_atr * a, a, max_dist_atr)
             tp = entry + (entry - stop) * cfg.take_profit_rr
             # Prefer immediate OPEN — retest wait was the main pointless HOLD source.
             if cfg.confirmation_mode == "breakout_and_retest" and (last_m5.close - hi) < 0.35 * a:
@@ -211,7 +222,8 @@ class BreakoutStrategy:
 
         if last_m5.close < lo - buffer:
             entry = context.market.bid
-            stop = hi + cfg.stop_buffer_atr * a
+            max_dist_atr = context.config.strategies.force_stop_atr
+            stop = _clamp_sell_stop(entry, hi + cfg.stop_buffer_atr * a, a, max_dist_atr)
             tp = entry - (stop - entry) * cfg.take_profit_rr
             if cfg.confirmation_mode == "breakout_and_retest" and (lo - last_m5.close) < 0.35 * a:
                 setup = Setup.create(
@@ -289,7 +301,9 @@ class BreakoutStrategy:
 
         if last.close > hi + buffer and last.close > last.open:
             entry = context.market.ask
-            stop = min(lo, last.low) - cfg.stop_buffer_atr * a
+            # Tight SL: under trigger candle, not the whole lookback range low.
+            raw_stop = last.low - cfg.stop_buffer_atr * a
+            stop = _clamp_buy_stop(entry, raw_stop, a, context.config.strategies.force_stop_atr)
             risk = entry - stop
             if risk <= 0:
                 return None
@@ -308,7 +322,7 @@ class BreakoutStrategy:
                 ),
                 diagnostics={
                     "mode": "m1_impulse",
-                    "lookback": cfg.m1_impulse_lookback,
+                    "lookback": lookback,
                     "prior_high": hi,
                     "m1_close": last.close,
                     "atr": a,
@@ -317,7 +331,8 @@ class BreakoutStrategy:
 
         if last.close < lo - buffer and last.close < last.open:
             entry = context.market.bid
-            stop = max(hi, last.high) + cfg.stop_buffer_atr * a
+            raw_stop = last.high + cfg.stop_buffer_atr * a
+            stop = _clamp_sell_stop(entry, raw_stop, a, context.config.strategies.force_stop_atr)
             risk = stop - entry
             if risk <= 0:
                 return None
@@ -336,7 +351,7 @@ class BreakoutStrategy:
                 ),
                 diagnostics={
                     "mode": "m1_impulse",
-                    "lookback": cfg.m1_impulse_lookback,
+                    "lookback": lookback,
                     "prior_low": lo,
                     "m1_close": last.close,
                     "atr": a,

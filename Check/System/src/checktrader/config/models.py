@@ -43,12 +43,12 @@ class AccountConfig(StrictModel):
 class PositionConfig(StrictModel):
     max_open_positions: int = Field(1, ge=0)
     allow_hedging: bool = False
-    default_lot: PositiveFloat = 0.01
+    default_lot: PositiveFloat = 0.02
 
 
 class PositionSizingConfig(StrictModel):
     method: Literal["fixed_lot"] = "fixed_lot"
-    fixed_lot: PositiveFloat = 0.01
+    fixed_lot: PositiveFloat = 0.02
     min_lot: PositiveFloat = 0.01
     max_lot: PositiveFloat = 100.0
     lot_step: PositiveFloat = 0.01
@@ -111,8 +111,8 @@ class TrendContinuationConfig(StrictModel):
     body_ratio_min: float = Field(0.25, ge=0.0, le=1.0)
     max_candle_atr: float = Field(4.0, gt=0.0)
     entry_distance_atr: float = Field(0.80, ge=0.0)
-    stop_buffer_atr: float = Field(0.15, ge=0.0)
-    stop_max_atr: float = Field(2.5, gt=0.0)
+    stop_buffer_atr: float = Field(0.08, ge=0.0)
+    stop_max_atr: float = Field(1.20, gt=0.0)
     take_profit_rr: float = Field(1.5, gt=0.0)
     expiry_m1_bars: int = Field(12, ge=1)
     # When EMA aligned, open on M1 momentum instead of waiting forever for pullback arm
@@ -125,7 +125,7 @@ class RangeReversionConfig(StrictModel):
     adx_period: int = Field(14, ge=1)
     zone_pct: float = Field(0.30, ge=0.0, le=1.0)
     wick_pct: float = Field(0.20, ge=0.0, le=1.0)
-    stop_buffer_atr: float = Field(0.20, ge=0.0)
+    stop_buffer_atr: float = Field(0.08, ge=0.0)
     take_profit_rr: float = Field(1.5, gt=0.0)
     expiry_m1_bars: int = Field(6, ge=1)
 
@@ -143,7 +143,7 @@ class BreakoutConfig(StrictModel):
     breakout_buffer_atr: float = Field(0.05, ge=0.0)
     retest_tol_atr: float = Field(0.20, ge=0.0)
     false_breakout_close_back_atr: float = Field(0.15, ge=0.0)
-    stop_buffer_atr: float = Field(0.20, ge=0.0)
+    stop_buffer_atr: float = Field(0.08, ge=0.0)
     take_profit_rr: float = Field(1.5, gt=0.0)
     expiry_m1_bars: int = Field(8, ge=1)
     m1_impulse_enabled: bool = True
@@ -157,7 +157,7 @@ class StrategiesConfig(StrictModel):
     breakout: BreakoutConfig = Field(default_factory=BreakoutConfig)
     # If strategies would idle-HOLD, still open on M1 momentum (no pointless HOLD loops)
     force_entry_when_idle: bool = True
-    force_stop_atr: float = Field(0.50, gt=0.0)
+    force_stop_atr: float = Field(0.18, gt=0.0)
     force_tp_rr: float = Field(1.20, gt=0.0)
 
 
@@ -166,7 +166,7 @@ class RiskConfig(StrictModel):
     daily_loss_limit_r: float = Field(0.0, ge=0.0)
     # 0 = disabled (no minimum RR gate)
     min_reward_risk: float = Field(0.0, ge=0.0)
-    max_stop_atr: float = Field(3.0, gt=0.0)
+    max_stop_atr: float = Field(1.50, gt=0.0)
     min_stop_points: float = Field(1.0, gt=0.0)
     max_stop_points: float = Field(10000.0, gt=0.0)
     # When false (default): ignore broker connected/trade_allowed/min_equity for entries

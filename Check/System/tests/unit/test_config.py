@@ -15,7 +15,10 @@ def test_example_config_loads() -> None:
     assert cfg.runtime.mode == "paper"
     assert cfg.runtime.trading_enabled is False
     assert cfg.instrument.symbol == "AUTO"
-    assert cfg.position_sizing.fixed_lot == 0.01
+    assert cfg.position_sizing.fixed_lot == 0.02
+    assert cfg.position.default_lot == 0.02
+    assert cfg.strategies.force_stop_atr == 0.18
+    assert cfg.risk.max_stop_atr == 1.50
 
 
 def test_live_observe_allowed_without_trading_enabled() -> None:

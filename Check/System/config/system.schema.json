@@ -108,7 +108,7 @@
           "type": "number"
         },
         "stop_buffer_atr": {
-          "default": 0.2,
+          "default": 0.08,
           "minimum": 0.0,
           "title": "Stop Buffer Atr",
           "type": "number"
@@ -455,7 +455,7 @@
           "type": "boolean"
         },
         "default_lot": {
-          "default": 0.01,
+          "default": 0.02,
           "exclusiveMinimum": 0,
           "title": "Default Lot",
           "type": "number"
@@ -474,7 +474,7 @@
           "type": "string"
         },
         "fixed_lot": {
-          "default": 0.01,
+          "default": 0.02,
           "exclusiveMinimum": 0,
           "title": "Fixed Lot",
           "type": "number"
@@ -536,7 +536,7 @@
           "type": "number"
         },
         "stop_buffer_atr": {
-          "default": 0.2,
+          "default": 0.08,
           "minimum": 0.0,
           "title": "Stop Buffer Atr",
           "type": "number"
@@ -772,7 +772,7 @@
           "type": "number"
         },
         "max_stop_atr": {
-          "default": 3.0,
+          "default": 1.5,
           "exclusiveMinimum": 0.0,
           "title": "Max Stop Atr",
           "type": "number"
@@ -877,7 +877,7 @@
           "type": "boolean"
         },
         "force_stop_atr": {
-          "default": 0.5,
+          "default": 0.18,
           "exclusiveMinimum": 0.0,
           "title": "Force Stop Atr",
           "type": "number"
@@ -968,13 +968,13 @@
           "type": "number"
         },
         "stop_buffer_atr": {
-          "default": 0.15,
+          "default": 0.08,
           "minimum": 0.0,
           "title": "Stop Buffer Atr",
           "type": "number"
         },
         "stop_max_atr": {
-          "default": 2.0,
+          "default": 1.2,
           "exclusiveMinimum": 0.0,
           "title": "Stop Max Atr",
           "type": "number"

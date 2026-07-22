@@ -17,8 +17,8 @@ def test_account_not_ok_does_not_block_by_default() -> None:
         Side.BUY,
         "NATURALGAS",
         2.90,
-        2.85,
-        3.00,
+        2.897,  # ~0.15 ATR stop with atr_value=0.02
+        2.904,
         ReasonCode.FORCE_MOMENTUM_BUY,
     )
     # Broker says disconnected / trading not allowed — must still ALLOW
