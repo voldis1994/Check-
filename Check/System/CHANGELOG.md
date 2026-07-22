@@ -10,6 +10,7 @@
 - Multi-account: every discovered MT4 bridge runs each cycle with isolated history/state/dedupe under `runtime/accounts/<id>/` (no more sticky single-account).
 - Unblock trading: stop freezing on EMA200 warm-up; always reconcile/manage open broker trades; detect regime with available M15 (ema200 clamped).
 - Modern desktop dashboard: Baltic signal-deck UI, dual-account panel, motion (brand underline + live pulse + activity flash).
+- Pro dark console dashboard: sidebar accounts, metric cards, equity curve, bridge-health ring, quick actions, live trades + activity pages (real broker/audit data only).
 
 ## v3.0.0
 
