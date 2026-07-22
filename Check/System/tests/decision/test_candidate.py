@@ -27,11 +27,15 @@ def test_buy_and_sell_use_shared_component_score_builder() -> None:
     assert sell_scores == build_sell_component_scores(analysis)
     assert buy_scores.keys() == sell_scores.keys()
 
-def test_buy_and_sell_use_shared_weighted_score_calculation() -> None:
+def test_buy_and_sell_use_directional_weighted_score_calculation() -> None:
+    from engine.decision.candidate import calculate_directional_weighted_score
     weights = {'momentum': 1.0, 'trend': 1.0, 'structure': 1.0, 'pressure': 1.0, 'behavior': 1.0, 'impact': 1.0, 'context': 1.0}
     scores = build_component_scores(_analysis(), 'buy')
-    assert calculate_buy_score(scores, weights) == calculate_weighted_score(scores, weights)
-    assert calculate_sell_score(scores, weights) == calculate_weighted_score(scores, weights)
+    directional = calculate_directional_weighted_score(scores, weights)
+    assert calculate_buy_score(scores, weights) == directional
+    assert calculate_sell_score(scores, weights) == directional
+    # Full weighted score still includes quality components and must differ when those are non-neutral.
+    assert calculate_weighted_score(scores, weights) != directional or all(scores[key] == scores['momentum'] for key in ('behavior', 'impact', 'context'))
 
 def test_candidate_module_is_shared_by_buy_and_sell() -> None:
     buy_source = inspect.getsource(build_buy_component_scores)
