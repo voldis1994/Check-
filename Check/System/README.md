@@ -33,6 +33,7 @@ Copy-Item config\system.example.json config\local\system.json
 ```
 
 2. Edit `config/local/system.json`:
+   - Set `instrument.symbol` to `AUTO` (default) so the engine follows the MT4 chart symbol, or pin a concrete name
    - Set `account.allowed_account_numbers` to your live MT4 account(s) (empty list fails live start)
    - Set `paths.root` to the SYSTEM root if needed
    - Align `position.magic_number` with the EA input

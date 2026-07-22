@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from checktrader.application.symbol_resolve import resolve_trading_symbol
 from checktrader.config.models import SystemConfig
 from checktrader.domain.enums import ConfirmationSource, OrderAction, PositionState, RiskDecision, Side, StrategyResult
 from checktrader.domain.execution import PendingCommandState
@@ -156,11 +157,11 @@ def _try_retry(
     bridge_root: Path,
     now_utc: str,
     broker_pos: BrokerPosition | None,
+    symbol: str,
 ) -> CycleResult:
     pending = state.pending
     assert pending is not None
     state_path = Path(config.paths.root) / config.paths.state / "instance.json"
-    symbol = config.instrument.symbol
     magic = config.position.magic_number
     identity = _identity_kwargs(config, status, market)
     commands_dir = bridge_root / "commands"
@@ -265,12 +266,12 @@ def _handle_pending(
     bridge_root: Path,
     now_utc: str,
     broker_pos: BrokerPosition | None,
+    symbol: str,
 ) -> CycleResult | None:
     pending = state.pending
     if pending is None:
         return None
 
-    symbol = config.instrument.symbol
     magic = config.position.magic_number
     state_path = Path(config.paths.root) / config.paths.state / "instance.json"
     ack_dir = bridge_root / "acknowledgements"
@@ -345,6 +346,7 @@ def _handle_pending(
                 bridge_root=bridge_root,
                 now_utc=now_utc,
                 broker_pos=broker_pos,
+                symbol=symbol,
             )
 
         if pending.action is OrderAction.CLOSE and state.position.state is PositionState.CLOSE_PENDING:
@@ -427,6 +429,7 @@ def _handle_pending(
         bridge_root=bridge_root,
         now_utc=now_utc,
         broker_pos=broker_pos,
+        symbol=symbol,
     )
 
 
@@ -440,7 +443,6 @@ def run_cycle(
     now_utc: str,
     kill_switch: bool = False,
 ) -> CycleResult:
-    symbol = config.instrument.symbol
     magic = config.position.magic_number
     state_path = Path(config.paths.root) / config.paths.state / "instance.json"
     identity = _identity_kwargs(config, status, market)
@@ -455,10 +457,12 @@ def run_cycle(
         save_instance_state(state_path, state, now_utc=now_utc)
         return CycleResult(ReasonCode.SERVER_MISMATCH)
 
-    if market.specs.symbol and market.specs.symbol != symbol:
-        state.last_reason = ReasonCode.SYMBOL_MISMATCH.value
+    symbol, symbol_mode = resolve_trading_symbol(config, market)
+    if symbol is None:
+        reason = ReasonCode.SYMBOL_MISMATCH if symbol_mode == "mismatch" else ReasonCode.DATA_INVALID
+        state.last_reason = reason.value
         save_instance_state(state_path, state, now_utc=now_utc)
-        return CycleResult(ReasonCode.SYMBOL_MISMATCH)
+        return CycleResult(reason)
 
     if is_stale(
         generated_at_utc=status.generated_at_utc, now_utc=now_utc, maximum_age_ms=config.execution.maximum_status_age_ms
@@ -480,6 +484,7 @@ def run_cycle(
         bridge_root=bridge_root,
         now_utc=now_utc,
         broker_pos=broker_pos,
+        symbol=symbol,
     )
     if pending_result is not None:
         return pending_result

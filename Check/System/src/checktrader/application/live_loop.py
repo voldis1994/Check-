@@ -43,7 +43,12 @@ def run_trading_loop(*, config_path: Path, once: bool = False, require_live_acco
             now_utc=now,
             kill_switch=stop_file.exists(),
         )
-        logger.info("cycle reason=%s action=%s", result.reason.value, result.action.value)
+        logger.info(
+            "cycle reason=%s action=%s symbol=%s",
+            result.reason.value,
+            result.action.value,
+            market.specs.symbol,
+        )
         save_instance_state(root / config.paths.state / "instance.json", state, now_utc=now)
         if once:
             return

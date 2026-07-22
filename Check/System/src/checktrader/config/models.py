@@ -10,7 +10,7 @@ class RuntimeConfig(BaseModel):
     trading_enabled: bool = True
     cycle_interval_ms: int = 250
     timezone: str = "UTC"
-    instance_id: str = "EURUSD_M1_PRIMARY"
+    instance_id: str = "PRIMARY"
 
 
 class AccountConfig(BaseModel):
@@ -21,7 +21,9 @@ class AccountConfig(BaseModel):
 
 
 class InstrumentConfig(BaseModel):
-    symbol: str = "EURUSD"
+    """``symbol`` may be a concrete MT4 name, or AUTO to follow the EA chart."""
+
+    symbol: str = "AUTO"
     entry_timeframe: str = "M1"
     setup_timeframe: str = "M5"
     context_timeframe: str = "M15"
