@@ -1,15 +1,17 @@
-"""CHECK SYSTEM v3 desktop control panel (Tkinter, no browser)."""
+"""CHECK SYSTEM desktop control — modern ops console (Tkinter, no browser)."""
 
 from __future__ import annotations
 
 import contextlib
+import json
 import queue
 import sys
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -26,6 +28,7 @@ from dashboard_core import (  # noqa: E402
     format_age,
     format_audit_line,
     load_config_json,
+    read_last_audits_by_account,
     resolve_config,
     run_deploy_mt4,
     runtime_dir,
@@ -33,32 +36,53 @@ from dashboard_core import (  # noqa: E402
     write_stop,
 )
 
-# Cool steel ops console — not purple, not cream/terracotta, not dark-mode chrome.
-COLORS = {
-    "bg": "#E7EEF3",
-    "panel": "#F8FBFD",
-    "ink": "#152033",
-    "muted": "#5B6B7C",
-    "line": "#C5D2DE",
-    "go": "#0F6E56",
-    "go_bg": "#D8F3E7",
-    "warn": "#B54708",
-    "warn_bg": "#FDEAD7",
-    "stop": "#B42318",
-    "stop_bg": "#FEE4E2",
-    "idle": "#344054",
-    "log_bg": "#101828",
-    "log_fg": "#E4E7EC",
+# Visual system: Baltic signal deck — cool mist + forge teal + live copper.
+# Avoid purple gradients, cream/terracotta, neon glow, Inter/Roboto.
+THEME = {
+    "bg0": "#D7E2EA",
+    "bg1": "#EAF1F6",
+    "ink": "#0B1320",
+    "muted": "#5A6B7D",
+    "line": "#B7C7D4",
+    "brand": "#06281F",
+    "teal": "#0B6E4F",
+    "teal_soft": "#C8E8DA",
+    "copper": "#B45309",
+    "copper_soft": "#F6E1C8",
+    "danger": "#9F1239",
+    "danger_soft": "#FCE7EE",
+    "feed": "#0E1624",
+    "feed_fg": "#D7E0EA",
+    "feed_dim": "#7B8B9C",
+    "cycle": "#E8C07D",
+    "ok": "#34D399",
+    "warn": "#FBBF24",
 }
+
+
+def _pick_font(candidates: list[str], size: int, weight: str = "normal") -> tuple:
+    available = set(tkfont.families())
+    for name in candidates:
+        if name in available:
+            return (name, size, weight) if weight != "normal" else (name, size)
+    return ("TkDefaultFont", size, weight) if weight != "normal" else ("TkDefaultFont", size)
 
 
 class DashboardApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("CHECK SYSTEM")
-        self.root.geometry("1100x720")
-        self.root.minsize(900, 600)
-        self.root.configure(bg=COLORS["bg"])
+        self.root.geometry("1280x800")
+        self.root.minsize(1020, 680)
+        self.root.configure(bg=THEME["bg0"])
+
+        self.font_brand = _pick_font(["Bahnschrift", "Segoe UI Variable Display", "Calibri"], 42, "bold")
+        self.font_sub = _pick_font(["Bahnschrift SemiLight", "Calibri", "Segoe UI"], 12)
+        self.font_ui = _pick_font(["Bahnschrift", "Segoe UI", "Calibri"], 11)
+        self.font_ui_b = _pick_font(["Bahnschrift SemiBold", "Bahnschrift", "Segoe UI"], 11, "bold")
+        self.font_mono = _pick_font(["Cascadia Mono", "Consolas", "Courier New"], 10)
+        self.font_mono_b = _pick_font(["Cascadia Mono", "Consolas", "Courier New"], 11, "bold")
+        self.font_stat = _pick_font(["Bahnschrift", "Segoe UI"], 13, "bold")
 
         self.config_path = resolve_config()
         self.engine = EngineProcess()
@@ -67,148 +91,339 @@ class DashboardApp:
         self._audit_offset = 0
         self._stopping = False
         self._stale_warned = False
+        self._pulse_on = False
+        self._brand_phase = 0
+        self._account_widgets: list[dict[str, tk.Variable | tk.Label | tk.Frame]] = []
 
-        self._build_style()
         self._build_ui()
         self._tail_audit_init()
         self.refresh_status()
+        self.root.after(80, self._intro_motion)
         self.root.after(400, self._tick)
+        self.root.after(700, self._pulse_tick)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _build_style(self) -> None:
-        style = ttk.Style(self.root)
-        with contextlib.suppress(tk.TclError):
-            style.theme_use("clam")
-        style.configure("Root.TFrame", background=COLORS["bg"])
-        style.configure("Panel.TFrame", background=COLORS["panel"])
-        style.configure(
-            "Title.TLabel",
-            background=COLORS["bg"],
-            foreground=COLORS["ink"],
-            font=("Segoe UI Semibold", 22),
-        )
-        style.configure("Sub.TLabel", background=COLORS["bg"], foreground=COLORS["muted"], font=("Segoe UI", 11))
-        style.configure(
-            "PanelTitle.TLabel",
-            background=COLORS["panel"],
-            foreground=COLORS["ink"],
-            font=("Segoe UI Semibold", 12),
-        )
-        style.configure("Value.TLabel", background=COLORS["panel"], foreground=COLORS["ink"], font=("Consolas", 11))
-        style.configure("Muted.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=("Segoe UI", 10))
-        style.configure("Go.TButton", font=("Segoe UI Semibold", 11), padding=(14, 8))
-        style.configure("Stop.TButton", font=("Segoe UI Semibold", 11), padding=(14, 8))
-        style.configure("Ghost.TButton", font=("Segoe UI", 10), padding=(10, 6))
-
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self.root, style="Root.TFrame", padding=18)
-        outer.pack(fill=tk.BOTH, expand=True)
+        shell = tk.Frame(self.root, bg=THEME["bg0"])
+        shell.pack(fill=tk.BOTH, expand=True)
 
-        header = ttk.Frame(outer, style="Root.TFrame")
-        header.pack(fill=tk.X)
-        ttk.Label(header, text="CHECK SYSTEM", style="Title.TLabel").pack(anchor=tk.W)
-        ttk.Label(
-            header,
-            text="Desktop vadības panelis — palaiž motoru, rāda ciklus, aptur tirdzniecību.",
-            style="Sub.TLabel",
-        ).pack(anchor=tk.W, pady=(2, 12))
+        # Atmospheric top band
+        hero = tk.Frame(shell, bg=THEME["bg1"], height=148)
+        hero.pack(fill=tk.X)
+        hero.pack_propagate(False)
+        mist = tk.Frame(hero, bg=THEME["line"], height=2)
+        mist.pack(fill=tk.X, side=tk.BOTTOM)
 
-        controls = ttk.Frame(outer, style="Root.TFrame")
-        controls.pack(fill=tk.X, pady=(0, 12))
+        hero_inner = tk.Frame(hero, bg=THEME["bg1"])
+        hero_inner.pack(fill=tk.BOTH, expand=True, padx=28, pady=18)
 
-        self.btn_paper = ttk.Button(controls, text="Start Paper", style="Go.TButton", command=self.start_paper)
-        self.btn_paper.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_live = ttk.Button(controls, text="Start Live", style="Go.TButton", command=self.start_live)
-        self.btn_live.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_stop = ttk.Button(controls, text="Stop", style="Stop.TButton", command=self.stop_engine)
-        self.btn_stop.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_deploy = ttk.Button(controls, text="Deploy MT4", style="Ghost.TButton", command=self.deploy_mt4)
-        self.btn_deploy.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_refresh = ttk.Button(controls, text="Refresh", style="Ghost.TButton", command=self.refresh_status)
-        self.btn_refresh.pack(side=tk.LEFT)
+        left_hero = tk.Frame(hero_inner, bg=THEME["bg1"])
+        left_hero.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.state_banner = tk.Label(
-            outer,
-            text="STOPPED",
-            bg=COLORS["stop_bg"],
-            fg=COLORS["stop"],
-            font=("Segoe UI Semibold", 12),
-            padx=12,
-            pady=8,
+        self.brand = tk.Label(
+            left_hero,
+            text="CHECK SYSTEM",
+            bg=THEME["bg1"],
+            fg=THEME["brand"],
+            font=self.font_brand,
             anchor="w",
         )
-        self.state_banner.pack(fill=tk.X, pady=(0, 12))
+        self.brand.pack(anchor=tk.W)
+        self.brand_rule = tk.Frame(left_hero, bg=THEME["teal"], height=3, width=24)
+        self.brand_rule.pack(anchor=tk.W, pady=(4, 8))
 
-        body = ttk.Frame(outer, style="Root.TFrame")
-        body.pack(fill=tk.BOTH, expand=True)
-
-        left = tk.Frame(body, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 12))
-        left.configure(width=360)
-        left.pack_propagate(False)
-
-        ttk.Label(left, text="Status", style="PanelTitle.TLabel").pack(anchor=tk.W, padx=14, pady=(12, 8))
-        self.status_vars: dict[str, tk.StringVar] = {}
-        for key, label in (
-            ("engine", "Engine"),
-            ("mode", "Mode"),
-            ("trading", "Trading enabled"),
-            ("symbol", "Symbol"),
-            ("config", "Config"),
-            ("stop", "STOP_TRADING"),
-            ("bridge", "Bridge"),
-            ("market", "Market"),
-            ("status", "Status JSON"),
-            ("decision", "Last decision"),
-            ("reason", "Last reason"),
-            ("regime", "Regime"),
-            ("strategy", "Strategy"),
-        ):
-            row = ttk.Frame(left, style="Panel.TFrame")
-            row.pack(fill=tk.X, padx=14, pady=2)
-            ttk.Label(row, text=label, style="Muted.TLabel", width=16).pack(side=tk.LEFT)
-            var = tk.StringVar(value="-")
-            self.status_vars[key] = var
-            ttk.Label(row, textvariable=var, style="Value.TLabel", wraplength=200).pack(side=tk.LEFT, fill=tk.X)
-
-        right = tk.Frame(body, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        ttk.Label(right, text="Activity", style="PanelTitle.TLabel").pack(anchor=tk.W, padx=14, pady=(12, 6))
-        log_frame = tk.Frame(right, bg=COLORS["panel"])
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
-        self.activity = tk.Text(
-            log_frame,
-            wrap=tk.NONE,
-            bg=COLORS["log_bg"],
-            fg=COLORS["log_fg"],
-            insertbackground=COLORS["log_fg"],
-            font=("Consolas", 10),
-            relief=tk.FLAT,
-            padx=10,
-            pady=10,
-        )
-        yscroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.activity.yview)
-        self.activity.configure(yscrollcommand=yscroll.set, state=tk.DISABLED)
-        self.activity.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        yscroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        footer = ttk.Frame(outer, style="Root.TFrame")
-        footer.pack(fill=tk.X, pady=(10, 0))
-        ttk.Label(
-            footer,
-            text="Live: config jābūt mode=live un trading_enabled=true. Stop uzraksta STOP_TRADING un aptur procesu.",
-            style="Sub.TLabel",
+        tk.Label(
+            left_hero,
+            text="MT4 bridge · multi-account · open / manage / close",
+            bg=THEME["bg1"],
+            fg=THEME["muted"],
+            font=self.font_sub,
+            anchor="w",
         ).pack(anchor=tk.W)
 
+        right_hero = tk.Frame(hero_inner, bg=THEME["bg1"])
+        right_hero.pack(side=tk.RIGHT, anchor=tk.E)
+
+        self.state_dot = tk.Canvas(right_hero, width=14, height=14, bg=THEME["bg1"], highlightthickness=0)
+        self.state_dot.pack(side=tk.LEFT, padx=(0, 10))
+        self._dot_id = self.state_dot.create_oval(2, 2, 12, 12, fill=THEME["danger"], outline="")
+
+        self.state_label = tk.Label(
+            right_hero,
+            text="STOPPED",
+            bg=THEME["bg1"],
+            fg=THEME["danger"],
+            font=self.font_stat,
+            anchor="e",
+        )
+        self.state_label.pack(side=tk.LEFT)
+
+        # Control rail — primary interactions only
+        rail = tk.Frame(shell, bg=THEME["bg0"])
+        rail.pack(fill=tk.X, padx=28, pady=(16, 8))
+
+        self.btn_paper = self._action_btn(rail, "Start Paper", THEME["teal"], THEME["teal_soft"], self.start_paper)
+        self.btn_paper.pack(side=tk.LEFT, padx=(0, 10))
+        self.btn_live = self._action_btn(rail, "Start Live", THEME["copper"], THEME["copper_soft"], self.start_live)
+        self.btn_live.pack(side=tk.LEFT, padx=(0, 10))
+        self.btn_stop = self._action_btn(rail, "Stop", THEME["danger"], THEME["danger_soft"], self.stop_engine)
+        self.btn_stop.pack(side=tk.LEFT, padx=(0, 10))
+        self.btn_deploy = self._ghost_btn(rail, "Deploy MT4", self.deploy_mt4)
+        self.btn_deploy.pack(side=tk.LEFT, padx=(0, 10))
+        self.btn_refresh = self._ghost_btn(rail, "Refresh", self.refresh_status)
+        self.btn_refresh.pack(side=tk.LEFT)
+
+        self.meta_var = tk.StringVar(value="config · —")
+        tk.Label(rail, textvariable=self.meta_var, bg=THEME["bg0"], fg=THEME["muted"], font=self.font_ui).pack(
+            side=tk.RIGHT
+        )
+
+        # Body: accounts + activity
+        body = tk.Frame(shell, bg=THEME["bg0"])
+        body.pack(fill=tk.BOTH, expand=True, padx=28, pady=(8, 18))
+
+        left = tk.Frame(body, bg=THEME["bg0"], width=380)
+        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 18))
+        left.pack_propagate(False)
+
+        tk.Label(
+            left,
+            text="ACCOUNTS",
+            bg=THEME["bg0"],
+            fg=THEME["muted"],
+            font=self.font_ui_b,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(0, 8))
+
+        self.accounts_host = tk.Frame(left, bg=THEME["bg0"])
+        self.accounts_host.pack(fill=tk.BOTH, expand=True)
+
+        self.signal_title = tk.Label(
+            left,
+            text="LAST SIGNAL",
+            bg=THEME["bg0"],
+            fg=THEME["muted"],
+            font=self.font_ui_b,
+            anchor="w",
+        )
+        self.signal_title.pack(fill=tk.X, pady=(16, 6))
+
+        self.decision_var = tk.StringVar(value="—")
+        self.reason_var = tk.StringVar(value="—")
+        self.regime_var = tk.StringVar(value="—")
+        self.strategy_var = tk.StringVar(value="—")
+
+        for label, var in (
+            ("Decision", self.decision_var),
+            ("Reason", self.reason_var),
+            ("Regime", self.regime_var),
+            ("Strategy", self.strategy_var),
+        ):
+            row = tk.Frame(left, bg=THEME["bg0"])
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=label, width=10, anchor="w", bg=THEME["bg0"], fg=THEME["muted"], font=self.font_ui).pack(
+                side=tk.LEFT
+            )
+            tk.Label(
+                row,
+                textvariable=var,
+                anchor="w",
+                bg=THEME["bg0"],
+                fg=THEME["ink"],
+                font=self.font_mono_b,
+                wraplength=250,
+                justify=tk.LEFT,
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        right = tk.Frame(body, bg=THEME["bg0"])
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        head = tk.Frame(right, bg=THEME["bg0"])
+        head.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(head, text="ACTIVITY", bg=THEME["bg0"], fg=THEME["muted"], font=self.font_ui_b, anchor="w").pack(
+            side=tk.LEFT
+        )
+        self.activity_hint = tk.Label(head, text="live feed", bg=THEME["bg0"], fg=THEME["muted"], font=self.font_ui)
+        self.activity_hint.pack(side=tk.RIGHT)
+
+        feed_wrap = tk.Frame(right, bg=THEME["feed"])
+        feed_wrap.pack(fill=tk.BOTH, expand=True)
+        self.activity = tk.Text(
+            feed_wrap,
+            wrap=tk.NONE,
+            bg=THEME["feed"],
+            fg=THEME["feed_fg"],
+            insertbackground=THEME["feed_fg"],
+            font=self.font_mono,
+            relief=tk.FLAT,
+            padx=16,
+            pady=14,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        scroll = tk.Scrollbar(feed_wrap, orient=tk.VERTICAL, command=self.activity.yview, bg=THEME["feed"])
+        self.activity.configure(yscrollcommand=scroll.set, state=tk.DISABLED)
+        self.activity.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.activity.tag_configure("dim", foreground=THEME["feed_dim"])
+        self.activity.tag_configure("cycle", foreground=THEME["cycle"])
+        self.activity.tag_configure("ok", foreground=THEME["ok"])
+        self.activity.tag_configure("warn", foreground=THEME["warn"])
+        self.activity.tag_configure("err", foreground="#FB7185")
+        self.activity.tag_configure("flash", background="#1F2A3C")
+
+        foot = tk.Frame(shell, bg=THEME["bg0"])
+        foot.pack(fill=tk.X, padx=28, pady=(0, 14))
+        tk.Label(
+            foot,
+            text="Stop raksta STOP_TRADING. Live vajag AutoTrading + DLL. Abi konti iet katrā ciklā.",
+            bg=THEME["bg0"],
+            fg=THEME["muted"],
+            font=self.font_ui,
+            anchor="w",
+        ).pack(fill=tk.X)
+
+    def _action_btn(self, parent: tk.Misc, text: str, fg: str, bg: str, command) -> tk.Button:
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=self.font_ui_b,
+            fg=fg,
+            bg=bg,
+            activeforeground=fg,
+            activebackground=bg,
+            relief=tk.FLAT,
+            padx=18,
+            pady=10,
+            cursor="hand2",
+            bd=0,
+            highlightthickness=0,
+        )
+        btn.bind("<Enter>", lambda _e, b=btn, c=fg: b.configure(bg=THEME["bg1"], highlightbackground=c))
+        btn.bind("<Leave>", lambda _e, b=btn, c=bg: b.configure(bg=c))
+        return btn
+
+    def _ghost_btn(self, parent: tk.Misc, text: str, command) -> tk.Button:
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=self.font_ui,
+            fg=THEME["ink"],
+            bg=THEME["bg1"],
+            activeforeground=THEME["ink"],
+            activebackground=THEME["bg1"],
+            relief=tk.FLAT,
+            padx=14,
+            pady=10,
+            cursor="hand2",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=THEME["line"],
+            highlightcolor=THEME["teal"],
+        )
+
+    def _clear_accounts(self) -> None:
+        for child in self.accounts_host.winfo_children():
+            child.destroy()
+        self._account_widgets.clear()
+
+    def _render_accounts(self, bridges, audits_by_acct: dict) -> None:
+        self._clear_accounts()
+        if not bridges:
+            tk.Label(
+                self.accounts_host,
+                text="Nav bridge — palaid EA abos MT4",
+                bg=THEME["bg0"],
+                fg=THEME["danger"],
+                font=self.font_ui,
+                anchor="w",
+            ).pack(fill=tk.X)
+            return
+
+        for bridge in bridges:
+            block = tk.Frame(self.accounts_host, bg=THEME["bg0"])
+            block.pack(fill=tk.X, pady=(0, 14))
+            top = tk.Frame(block, bg=THEME["bg0"])
+            top.pack(fill=tk.X)
+            tk.Label(
+                top,
+                text=str(bridge.account_id),
+                bg=THEME["bg0"],
+                fg=THEME["ink"],
+                font=self.font_mono_b,
+                anchor="w",
+            ).pack(side=tk.LEFT)
+            age = format_age(bridge.market_age_s)
+            age_fg = THEME["teal"] if "STALE" not in age and age != "missing" else THEME["copper"]
+            if age == "missing":
+                age_fg = THEME["danger"]
+            tk.Label(top, text=age, bg=THEME["bg0"], fg=age_fg, font=self.font_ui_b, anchor="e").pack(side=tk.RIGHT)
+
+            tk.Frame(block, bg=THEME["line"], height=1).pack(fill=tk.X, pady=(6, 6))
+
+            audit = audits_by_acct.get(str(bridge.account_id)) or audits_by_acct.get("-") or {}
+            detail = (
+                f"{audit.get('decision') or '—'}  ·  {audit.get('reason_code') or '—'}\n"
+                f"mkt {bridge.market_file or '—'}  ·  {bridge.path.name}"
+            )
+            tk.Label(
+                block,
+                text=detail,
+                bg=THEME["bg0"],
+                fg=THEME["muted"],
+                font=self.font_mono,
+                justify=tk.LEFT,
+                anchor="w",
+            ).pack(fill=tk.X)
+
     def _append_activity(self, line: str) -> None:
+        tag = "dim"
+        upper = line.upper()
+        if line.startswith("CYCLE"):
+            tag = "cycle"
+        elif "ERROR" in upper or "FAILED" in upper:
+            tag = "err"
+        elif "WARN" in upper or "STALE" in upper:
+            tag = "warn"
+        elif "CTRL" in upper or "EXPORT OK" in upper or "cycle ok" in line.lower():
+            tag = "ok"
+
         self.activity.configure(state=tk.NORMAL)
-        self.activity.insert(tk.END, line.rstrip() + "\n")
-        # Keep last ~2000 lines
+        start = self.activity.index(tk.END)
+        self.activity.insert(tk.END, line.rstrip() + "\n", (tag, "flash"))
+        end = self.activity.index(tk.END)
         total = int(float(self.activity.index("end-1c").split(".")[0]))
         if total > 2000:
             self.activity.delete("1.0", f"{total - 2000}.0")
         self.activity.see(tk.END)
         self.activity.configure(state=tk.DISABLED)
+        # Motion: brief highlight on new lines
+        self.root.after(220, lambda s=start, e=end: self._clear_flash(s, e))
+
+    def _clear_flash(self, start: str, end: str) -> None:
+        with contextlib.suppress(tk.TclError):
+            self.activity.tag_remove("flash", start, end)
+
+    def _intro_motion(self) -> None:
+        # Brand underline grows in
+        self._brand_phase += 1
+        width = min(220, 24 + self._brand_phase * 18)
+        self.brand_rule.configure(width=width)
+        if width < 220:
+            self.root.after(28, self._intro_motion)
+
+    def _pulse_tick(self) -> None:
+        running = self.engine.running
+        if running:
+            self._pulse_on = not self._pulse_on
+            color = THEME["ok"] if self._pulse_on else THEME["teal"]
+            mode = (self.engine.mode or "").lower()
+            if mode == "live":
+                color = THEME["copper"] if self._pulse_on else "#D97706"
+            self.state_dot.itemconfigure(self._dot_id, fill=color)
+        self.root.after(650, self._pulse_tick)
 
     def _tail_audit_init(self) -> None:
         path = audit_file(load_config_json(self.config_path) if self.config_path.exists() else None)
@@ -237,8 +452,6 @@ class DashboardApp:
             if not raw:
                 continue
             try:
-                import json
-
                 entry = json.loads(raw)
             except Exception:  # noqa: BLE001
                 self._append_activity(f"AUDIT  {raw[:240]}")
@@ -273,8 +486,9 @@ class DashboardApp:
         try:
             self.config_path = resolve_config(self.config_path)
             health = collect_health(self.config_path)
+            audits_by_acct = read_last_audits_by_account(audit_file(load_config_json(self.config_path)))
         except Exception as exc:  # noqa: BLE001
-            self.status_vars["engine"].set(f"error: {exc}")
+            self.state_label.configure(text=f"ERROR · {exc}", fg=THEME["danger"])
             return
 
         running = self.engine.running
@@ -285,85 +499,52 @@ class DashboardApp:
         partial_stale = bool(ages) and any(a > 30 for a in ages) and not stale
         n_accounts = len(health.bridges)
 
-        if running and stale:
-            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — ALL BRIDGES STALE")
-            self.state_banner.configure(
-                text="RUNNING — ALL BRIDGES STALE (pārbaudi abus MT4 EA)",
-                bg=COLORS["warn_bg"],
-                fg=COLORS["warn"],
-            )
-        elif running and partial_stale:
-            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — {n_accounts} accounts")
-            self.state_banner.configure(
-                text=f"RUNNING — {engine_mode.upper()} · {n_accounts} accounts (daži STALE)",
-                bg=COLORS["warn_bg"],
-                fg=COLORS["warn"],
-            )
-        elif running:
-            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — {n_accounts} accounts")
-            self.state_banner.configure(
-                text=f"RUNNING — {engine_mode.upper()} · {n_accounts} accounts",
-                bg=COLORS["go_bg"] if engine_mode == "paper" else COLORS["warn_bg"],
-                fg=COLORS["go"] if engine_mode == "paper" else COLORS["warn"],
-            )
-        else:
-            self.status_vars["engine"].set("STOPPED")
-            if health.stop_present:
-                self.state_banner.configure(
-                    text="STOPPED — STOP_TRADING present",
-                    bg=COLORS["stop_bg"],
-                    fg=COLORS["stop"],
-                )
-            else:
-                self.state_banner.configure(text="STOPPED", bg=COLORS["stop_bg"], fg=COLORS["stop"])
-
-        self.status_vars["mode"].set(health.mode)
-        self.status_vars["trading"].set("true" if health.trading_enabled else "false")
-        self.status_vars["symbol"].set(health.symbol)
         try:
             config_display = str(self.config_path.relative_to(ROOT))
         except ValueError:
             config_display = str(self.config_path)
-        self.status_vars["config"].set(config_display)
-        self.status_vars["stop"].set("PRESENT" if health.stop_present else "absent")
+        self.meta_var.set(
+            f"{config_display}  ·  mode={health.mode}  ·  trading={'on' if health.trading_enabled else 'off'}"
+        )
 
-        if health.bridges:
-            accounts = ", ".join(
-                f"{b.account_id}:{format_age(b.market_age_s)}" for b in health.bridges
+        if running and stale:
+            self.state_label.configure(text=f"LIVE STALE · {n_accounts} accounts · pid {pid}", fg=THEME["copper"])
+            self.state_dot.itemconfigure(self._dot_id, fill=THEME["copper"])
+        elif running and partial_stale:
+            self.state_label.configure(
+                text=f"{engine_mode.upper()} · {n_accounts} accounts · daži STALE · pid {pid}",
+                fg=THEME["copper"],
             )
-            self.status_vars["bridge"].set(f"{len(health.bridges)} accounts · {accounts}")
-            # Show freshest bridge detail in market/status rows
-            bridge = sorted(
-                health.bridges,
-                key=lambda b: b.market_age_s if b.market_age_s is not None else 1e9,
-            )[0]
-            self.status_vars["market"].set(
-                f"{format_age(bridge.market_age_s)} acct={bridge.account_id} ({bridge.market_file or '-'})"
+        elif running:
+            color = THEME["copper"] if engine_mode == "live" else THEME["teal"]
+            self.state_label.configure(
+                text=f"{engine_mode.upper()} · {n_accounts} accounts · pid {pid}",
+                fg=color,
             )
-            self.status_vars["status"].set(
-                f"{format_age(bridge.status_age_s)} acct={bridge.account_id} ({bridge.status_file or '-'})"
-            )
-            if stale and not self._stale_warned:
-                self._stale_warned = True
-                self._append_activity(
-                    "WARN   Bridge STALE — redeploy MT4 EA, Allow DLL imports, check chart comment EXPORT OK"
-                )
-            if not stale:
-                self._stale_warned = False
+            self.state_dot.itemconfigure(self._dot_id, fill=color)
         else:
-            self.status_vars["bridge"].set("none discovered")
-            self.status_vars["market"].set("missing")
-            self.status_vars["status"].set("missing")
+            text = "STOPPED · STOP_TRADING" if health.stop_present else "STOPPED"
+            self.state_label.configure(text=text, fg=THEME["danger"])
+            self.state_dot.itemconfigure(self._dot_id, fill=THEME["danger"])
+
+        self._render_accounts(health.bridges, audits_by_acct)
 
         audit = health.last_audit or {}
-        self.status_vars["decision"].set(str(audit.get("decision") or "-"))
-        self.status_vars["reason"].set(str(audit.get("reason_code") or audit.get("human_readable_reason") or "-"))
-        self.status_vars["regime"].set(str(audit.get("market_regime") or "-"))
-        self.status_vars["strategy"].set(str(audit.get("selected_strategy") or "-"))
+        self.decision_var.set(str(audit.get("decision") or "—"))
+        self.reason_var.set(str(audit.get("reason_code") or audit.get("human_readable_reason") or "—"))
+        self.regime_var.set(str(audit.get("market_regime") or "—"))
+        self.strategy_var.set(str(audit.get("selected_strategy") or "—"))
 
-        self.btn_paper.configure(state=tk.DISABLED if running else tk.NORMAL)
-        self.btn_live.configure(state=tk.DISABLED if running else tk.NORMAL)
-        self.btn_stop.configure(state=tk.NORMAL if running or health.stop_present else tk.NORMAL)
+        if stale and not self._stale_warned:
+            self._stale_warned = True
+            self._append_activity("WARN   Bridge STALE — pārbaudi abus MT4 EA / EXPORT OK")
+        if not stale:
+            self._stale_warned = False
+
+        state = tk.DISABLED if running else tk.NORMAL
+        self.btn_paper.configure(state=state)
+        self.btn_live.configure(state=state)
+        self.btn_stop.configure(state=tk.NORMAL)
 
     def start_paper(self) -> None:
         self._start_mode("paper")
@@ -383,9 +564,9 @@ class DashboardApp:
             return
         if not messagebox.askyesno(
             "Confirm LIVE",
-            "Start LIVE trading?\n\n"
+            "Start LIVE trading on all discovered accounts?\n\n"
             "Confirm MT4 AutoTrading ON, DLL imports allowed,\n"
-            "EA attached to M1, and risk settings reviewed.",
+            "EA on M1 for each account.",
         ):
             return
         self._start_mode("live")
@@ -401,6 +582,10 @@ class DashboardApp:
             if cleared:
                 msg += " (cleared STOP_TRADING)"
             self._append_activity("CTRL   " + msg)
+            # Motion: reset and replay brand underline
+            self._brand_phase = 0
+            self.brand_rule.configure(width=24)
+            self.root.after(20, self._intro_motion)
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Start failed", str(exc))
             self._append_activity(f"ERROR  start failed: {exc}")

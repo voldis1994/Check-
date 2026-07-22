@@ -9,6 +9,7 @@
 - Harden live path for NATURALGAS: partial M15 aggregation, heartbeat freshness (not M1 open age), broker GMT bar times, AUTO specs from bridge, clear `HISTORY_INSUFFICIENT m15=N/200` warm-up.
 - Multi-account: every discovered MT4 bridge runs each cycle with isolated history/state/dedupe under `runtime/accounts/<id>/` (no more sticky single-account).
 - Unblock trading: stop freezing on EMA200 warm-up; always reconcile/manage open broker trades; detect regime with available M15 (ema200 clamped).
+- Modern desktop dashboard: Baltic signal-deck UI, dual-account panel, motion (brand underline + live pulse + activity flash).
 
 ## v3.0.0
 
