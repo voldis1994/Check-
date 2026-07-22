@@ -1,93 +1,25 @@
-"""Config loader / validator tests (SYSTEM v2)."""
+"""Config and schema validation."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
-from pydantic import ValidationError as PydanticValidationError
 
-from checktrader.config.loader import load_system_config
-from checktrader.config.models import SystemConfig
-from checktrader.config.validator import validate_live_config
+from checktrader.config.loader import load_config
+from checktrader.config.validation import validate_runtime_safety
 from checktrader.domain.errors import ConfigurationError
-from checktrader.observability.reason_codes import ReasonCode
-from tests.fixtures.helpers import SYSTEM_TEST_CONFIG, load_test_config
 
 
-def test_valid_system_test_config_loads() -> None:
-    config = load_system_config(SYSTEM_TEST_CONFIG)
-    assert config.version == "2.0.0"
-    assert config.account.allowed_account_numbers == ["999"]
-    assert config.instrument.symbol == "AUTO"
-    assert config.position_sizing.fixed_lot == 0.01
-    assert config.trade_management.trailing_step_atr == 0.20
-    assert config.trade_management.be_activation_r is None
+def test_example_config_loads() -> None:
+    cfg = load_config()
+    assert cfg.version == "3.0.0"
+    assert cfg.runtime.mode == "paper"
+    assert cfg.runtime.trading_enabled is False
+    assert cfg.instrument.symbol == "AUTO"
+    assert cfg.position_sizing.fixed_lot == 0.01
 
 
-def test_empty_allowed_accounts_is_auto(tmp_path: Path) -> None:
-    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["account"]["allowed_account_numbers"] = []
-    path = tmp_path / "auto_accounts.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    config = load_system_config(path, require_live_accounts=True)
-    assert config.account.allowed_account_numbers == []
-
-
-def test_empty_allowed_accounts_ok_when_not_required() -> None:
-    config = SystemConfig.model_validate(json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8")))
-    config.account.allowed_account_numbers = []
-    validate_live_config(config, require_live_accounts=False)
-
-
-def test_bad_exit_pressure_weights() -> None:
-    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["trade_management"]["exit_pressure"]["pullback_weight"] = 0.9
-    with pytest.raises(PydanticValidationError):
-        SystemConfig.model_validate(payload)
-
-
-def test_negative_trailing_step_rejected() -> None:
-    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["trade_management"]["trailing_step_atr"] = -1.0
-    with pytest.raises(PydanticValidationError):
-        SystemConfig.model_validate(payload)
-
-
-def test_risk_percent_mode_rejected() -> None:
-    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["position_sizing"]["mode"] = "risk_percent"
-    with pytest.raises(PydanticValidationError):
-        SystemConfig.model_validate(payload)
-
-
-def test_be_activation_r_rejected() -> None:
-    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["trade_management"]["be_activation_r"] = 1.0
-    with pytest.raises(PydanticValidationError):
-        SystemConfig.model_validate(payload)
-
-
-def test_invalid_fixed_lot_rejected(tmp_path: Path) -> None:
-    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["position_sizing"]["fixed_lot"] = 0.0
-    path = tmp_path / "lot.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises((ConfigurationError, PydanticValidationError)):
-        load_system_config(path)
-
-
-def test_bad_timeframe_rejected(tmp_path: Path) -> None:
-    payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
-    payload["instrument"]["entry_timeframe"] = "M7"
-    path = tmp_path / "tf.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ConfigurationError) as exc:
-        load_system_config(path)
-    assert exc.value.reason is ReasonCode.DATA_INVALID
-
-
-def test_load_test_config_helper_override() -> None:
-    config = load_test_config(position_sizing={"fixed_lot": 0.05})
-    assert config.position_sizing.fixed_lot == 0.05
+def test_live_requires_both_flags() -> None:
+    cfg = load_config()
+    live = cfg.model_copy(update={"runtime": cfg.runtime.model_copy(update={"mode": "live", "trading_enabled": False})})
+    with pytest.raises(ConfigurationError):
+        validate_runtime_safety(live)

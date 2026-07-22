@@ -1,1 +1,1 @@
-"""checktrader package."""
+"""CHECK SYSTEM v3 package."""

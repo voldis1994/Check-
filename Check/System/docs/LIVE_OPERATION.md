@@ -1,71 +1,82 @@
-# Live operation checklist
+# Live Operation
 
-Windows live ops. Steps match `scripts/start_live.ps1`.
+Live operation requires explicit operator control. The system provides automation, but it does not remove market, broker, platform, or configuration risk.
 
-## Prerequisites
+## Pre-flight checklist
 
-- Python 3.12+ on PATH
-- Package installed: `pip install -e ".[dev]"` (or `scripts/install.ps1`)
-- MT4 EA `CHECK_SYSTEM_V2` compiled and attached to the configured symbol on **M1**
-- EA inputs: `BridgeRootPath` empty (AUTO) or SYSTEM root; `MagicNumber` matches config
-- Experts + AutoTrading on; **Allow DLL imports** enabled
+1. Use Python 3.12 or newer.
+2. Run `scripts/setup.ps1`.
+3. Validate configuration with `tools/validate_config.py`.
+4. Deploy MT4 files with `scripts/deploy_mt4.ps1`.
+5. Attach `CHECK_SYSTEM_V3` to an M1 chart for the configured symbol.
+6. Enable **Allow DLL imports** for the EA.
+7. Confirm the EA chart comment shows the expected bridge path.
+8. Confirm MARKET and STATUS files are updating.
+9. Confirm the configured magic number matches the EA input.
+10. Test in demo before real capital.
 
-## Start checklist (`start_live.ps1`)
+## Paper run
 
-1. **Resolve SYSTEM root**  
-   Script sets location to `Check/System` (parent of `scripts/`).
+```powershell
+.\scripts\start_paper.ps1
+```
 
-2. **Ensure local config**  
-   If `config/local/system.json` is missing, copy from `config/system.example.json`.
+Paper mode is for exercising the Python engine and audit flow. It is not evidence of future live results.
 
-3. **Validate config**  
-   Run `python tools/validate_config.py --config config/local/system.json`.  
-   Failures that block start:
-   - missing / invalid JSON
-   - empty `account.allowed_account_numbers` (live mode)
-   - invalid risk / paths
+## Live run
 
-4. **Confirm kill switch is clear**  
-   `runtime/STOP_TRADING` must **not** exist (unless you intentionally start paused — then remove it when ready).
+Live mode requires:
 
-5. **Ensure runtime directories**  
-   Create `runtime/bridge/{market,status,commands,acknowledgements,archive}`, `runtime/state`, `runtime/logs` if missing.
+- `runtime.mode = "live"`
+- `runtime.trading_enabled = true`
+- MT4 AutoTrading enabled
+- EA DLL imports enabled
+- A healthy bridge
 
-6. **Account allow-list**  
-   Status snapshot `account_number` must be in `allowed_account_numbers`.  
-   Script prints configured accounts; wrong account → cycle rejects with account mismatch.
+Start:
 
-7. **Bridge heartbeat**  
-   Wait until fresh files exist under:
-   - `runtime/bridge/market/*.json`
-   - `runtime/bridge/status/*.json`  
-   Default max age aligns with config `execution.maximum_market_age_ms` / `maximum_status_age_ms` (health script uses a few seconds).  
-   If stale: fix EA chart, BridgeRootPath, DLL imports, or market session.
-
-8. **Start engine**  
-   `python -m checktrader --config config/local/system.json`
-
-9. **Optional dashboard**  
-   If `dashboard.enabled`, open `http://127.0.0.1:8765/` (default host/port from config).
+```powershell
+.\scripts\start_live.ps1 -ConfirmLive
+```
 
 ## Stop
+
+Create the stop sentinel:
 
 ```powershell
 .\scripts\stop.ps1
 ```
 
-Creates `runtime/STOP_TRADING`. Remove the file to resume after a restart, or keep it to stay halted.
+Operators should also disable AutoTrading in MT4 for live stops.
 
-## Health
+## Monitoring
+
+Use:
 
 ```powershell
 .\scripts\health.ps1
+python .\tools\inspect_bridge.py --bridge runtime\bridge
+python .\tools\explain_signal.py --audit runtime\audit.jsonl
 ```
 
-Reports: config load, allowed accounts, kill switch, latest market/status age, instance state summary.
+Also monitor:
 
-## Safety reminders
+- MT4 Experts tab
+- MT4 Journal tab
+- `runtime/audit.jsonl`
+- ACK files under `runtime/bridge/acknowledgements`
+- Archive files under `runtime/bridge/archive`
 
-- Empty `allowed_account_numbers` is a **configuration error** for live start.
-- Kill switch blocks new risk; open positions still need broker/EA for protective closes depending on cycle path — verify status before walking away.
-- **Technical operability is not a profit guarantee.**
+## Multi-account
+
+Run one MT4 terminal per account. The default bridge root is terminal-specific, so AUTO paths separate accounts. If using a shared path, configure each account with a distinct `BridgeRootPath` and configure the Python process for the matching bridge.
+
+## Incident response
+
+If behavior is unexpected:
+
+1. Disable AutoTrading in MT4.
+2. Run `scripts/stop.ps1`.
+3. Preserve `runtime/`, MT4 logs, ACK files, and command archives.
+4. Inspect the latest audit entry and ACK rejection messages.
+5. Resume only after the root cause is understood.

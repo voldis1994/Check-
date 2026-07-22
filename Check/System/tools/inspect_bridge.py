@@ -1,64 +1,67 @@
-#!/usr/bin/env python3
-"""Inspect MT4 bridge directories for freshness and basic shape."""
 from __future__ import annotations
 
 import argparse
 import json
-import sys
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+SUBDIRS = ("market", "status", "commands", "acknowledgements", "archive")
 
 
-def _age_sec(path: Path) -> float:
-    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
-    return (datetime.now(tz=UTC) - mtime).total_seconds()
+def resolve_bridge(path: Path) -> Path:
+    if (path / "runtime" / "bridge").is_dir():
+        return path / "runtime" / "bridge"
+    return path
 
 
-def _latest(directory: Path) -> Path | None:
-    if not directory.is_dir():
+def load_json(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
         return None
-    files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime)
-    return files[-1] if files else None
+    return data if isinstance(data, dict) else None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Inspect runtime/bridge heartbeat")
-    parser.add_argument("--root", type=Path, default=Path("."))
-    parser.add_argument("--max-age-sec", type=float, default=5.0)
-    args = parser.parse_args()
-    root = args.root.resolve()
-    bridge = root / "runtime" / "bridge"
-    ok = True
-    for name in ("market", "status", "commands", "acknowledgements"):
+def newest_json(directory: Path) -> dict[str, Any] | None:
+    files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return None
+    data = load_json(files[0])
+    return {
+        "file": str(files[0]),
+        "mtime": files[0].stat().st_mtime,
+        "protocol_version": data.get("protocol_version") if data else None,
+        "message_type": data.get("message_type") if data else None,
+        "message_id": data.get("message_id") if data else None,
+        "generated_at_utc": data.get("generated_at_utc") if data else None,
+    }
+
+
+def inspect(bridge: Path) -> dict[str, Any]:
+    bridge = resolve_bridge(bridge)
+    result: dict[str, Any] = {"bridge": str(bridge), "exists": bridge.exists(), "subdirs": {}}
+    for name in SUBDIRS:
         directory = bridge / name
-        latest = _latest(directory)
-        if latest is None:
-            print(f"MISSING {name}: no json under {directory}")
-            if name in {"market", "status"}:
-                ok = False
-            continue
-        age = _age_sec(latest)
-        flag = "OK" if age <= args.max_age_sec or name in {"commands", "acknowledgements"} else "STALE"
-        if flag == "STALE":
-            ok = False
-        summary = ""
-        try:
-            payload = json.loads(latest.read_text(encoding="utf-8"))
-            summary = (
-                f" type={payload.get('message_type')} seq={payload.get('sequence')}"
-                f" at={payload.get('generated_at_utc')}"
-            )
-            if name == "status":
-                summary += f" account={payload.get('account_number')}"
-            if name == "market":
-                summary += f" symbol={payload.get('symbol')}"
-        except (OSError, json.JSONDecodeError) as exc:
-            flag = "BAD_JSON"
-            ok = False
-            summary = f" error={exc}"
-        print(f"{flag:8} {name}: {latest.name} age={age:.1f}s{summary}")
-    return 0 if ok else 1
+        files = list(directory.glob("*.json")) if directory.is_dir() else []
+        result["subdirs"][name] = {
+            "exists": directory.is_dir(),
+            "json_count": len(files),
+            "latest": newest_json(directory) if directory.is_dir() else None,
+        }
+    return result
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Inspect a CHECK SYSTEM v3 MT4 bridge directory.")
+    parser.add_argument("--bridge", default="runtime/bridge", help="Path to bridge directory or bridge root.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    print(json.dumps(inspect(Path(args.bridge)), indent=2, sort_keys=True))
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
