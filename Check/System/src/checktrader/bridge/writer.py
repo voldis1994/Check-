@@ -8,6 +8,9 @@ from checktrader.domain.models import Command
 
 
 def write_command(bridge_dir: Path, command: Command) -> Path:
-    path = bridge_dir / f"command_{command.command_id}.json"
+    """Write command atomically to bridge_dir/commands/command_<id>.json."""
+    commands_dir = bridge_dir / "commands"
+    commands_dir.mkdir(parents=True, exist_ok=True)
+    path = commands_dir / f"command_{command.command_id}.json"
     write_json_atomic(path, command_message(command))
     return path

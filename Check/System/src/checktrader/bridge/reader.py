@@ -16,54 +16,93 @@ def _payload(data: dict[str, Any] | None) -> dict[str, Any] | None:
     return p if isinstance(p, dict) else None
 
 
+def _read_latest_or_glob(subdir: Path) -> dict[str, Any] | None:
+    """Prefer <subdir>/latest.json; fall back to the most-recently-modified file in the dir."""
+    latest = subdir / "latest.json"
+    if latest.exists():
+        return read_json(latest)
+    # Glob for any .json in the directory, pick most recently modified
+    candidates = sorted(subdir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for candidate in candidates:
+        data = read_json(candidate)
+        if data is not None:
+            return data
+    return None
+
+
 def read_market(bridge_dir: Path, default_symbol: str) -> MarketSnapshot | None:
-    p = _payload(read_json(bridge_dir / "market.json"))
+    """Read market snapshot from bridge_dir/market/latest.json (or glob fallback)."""
+    p = _payload(_read_latest_or_glob(bridge_dir / "market"))
     if p is None:
         return None
+
     ts = p.get("timestamp") or p.get("time")
     t = datetime.fromisoformat(str(ts).replace("Z", "+00:00")) if ts else datetime.now(UTC)
-    candles = p.get("candles", {}) if isinstance(p.get("candles", {}), dict) else {}
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=UTC)
+
     bid = float(p.get("bid", p.get("close", 0.0)))
     ask = float(p.get("ask", bid))
     symbol = str(p.get("symbol", default_symbol))
+
+    # MT4 writes closed M1 bars under bars_m1; fall back to legacy shapes
+    raw_m1 = p.get("bars_m1", p.get("candles", {}).get("M1", p.get("m1", [])))
+    m1_bars = [Candle.from_dict({**r, "closed": True}, "M1") for r in (raw_m1 or []) if isinstance(r, dict)]
+
     return MarketSnapshot(
         symbol,
         bid,
         ask,
         t,
-        [Candle.from_dict(r, "M1") for r in candles.get("M1", p.get("m1", [])) if isinstance(r, dict)],
-        [Candle.from_dict(r, "M5") for r in candles.get("M5", p.get("m5", [])) if isinstance(r, dict)],
-        [Candle.from_dict(r, "M15") for r in candles.get("M15", p.get("m15", [])) if isinstance(r, dict)],
+        m1_bars,
+        [],  # M5/M15 are aggregated internally from M1
+        [],
         heartbeat_at=t,
     )
 
 
 def read_status(bridge_dir: Path) -> AccountStatus | None:
-    p = _payload(read_json(bridge_dir / "status.json"))
-    return (
-        None
-        if p is None
-        else AccountStatus(
-            str(p.get("account_id", p.get("login", ""))),
-            float(p.get("balance", 0.0)),
-            float(p.get("equity", p.get("balance", 0.0))),
-            float(p.get("margin_free", p.get("free_margin", 0.0))),
-            str(p.get("currency", "USD")),
-            bool(p.get("trading_allowed", True)),
-            bool(p.get("connected", True)),
-        )
+    """Read account status from bridge_dir/status/latest.json."""
+    p = _payload(_read_latest_or_glob(bridge_dir / "status"))
+    if p is None:
+        return None
+
+    # MT4 field names: account_number, balance, equity, free_margin, trade_allowed
+    account_id = str(p.get("account_number") or p.get("account_id") or p.get("login", ""))
+    balance = float(p.get("balance", 0.0))
+    equity = float(p.get("equity", balance))
+    margin_free = float(p.get("free_margin") or p.get("margin_free", 0.0))
+    currency = str(p.get("currency", "USD"))
+    trading_allowed = bool(p.get("trade_allowed", p.get("trading_allowed", True)))
+    connected = bool(p.get("connected", True))
+    return AccountStatus(
+        account_id,
+        balance,
+        equity,
+        margin_free,
+        currency,
+        trading_allowed,
+        connected,
     )
 
 
 def read_positions(bridge_dir: Path) -> list[Position]:
-    p = _payload(read_json(bridge_dir / "positions.json"))
+    """Read positions from bridge_dir/status/latest.json (MT4 includes them in status)."""
+    p = _payload(_read_latest_or_glob(bridge_dir / "status"))
+    # Fall back to a dedicated positions.json if status lacks them
+    if p is None or "positions" not in p:
+        p2 = _payload(read_json(bridge_dir / "positions.json"))
+        if p2 is not None:
+            p = p2
     rows = [] if p is None else p.get("positions", [])
-    out = []
+    out: list[Position] = []
     for r in rows if isinstance(rows, list) else []:
         if not isinstance(r, dict):
             continue
         opened = r.get("opened_at") or r.get("open_time")
         opened_at = datetime.fromisoformat(str(opened).replace("Z", "+00:00")) if opened else datetime.now(UTC)
+        if opened_at.tzinfo is None:
+            opened_at = opened_at.replace(tzinfo=UTC)
         side = Side.SELL if str(r.get("side", "BUY")).upper() in {"SHORT", "SELL"} else Side.BUY
         lot_raw = r.get("lot", r.get("lots", 0.0))
         entry_raw = r.get("entry_price", r.get("open_price", 0.0))
@@ -89,21 +128,33 @@ def read_positions(bridge_dir: Path) -> list[Position]:
 
 
 def read_acks(bridge_dir: Path) -> list[Acknowledgement]:
-    p = _payload(read_json(bridge_dir / "acks.json"))
-    rows = [] if p is None else p.get("acks", [])
-    out = []
-    for r in rows if isinstance(rows, list) else []:
-        if isinstance(r, dict):
-            accepted = bool(r.get("accepted", False))
-            default = "ACK_ACCEPTED" if accepted else "ACK_REJECTED"
+    """Read ACKs from bridge_dir/acknowledgements/*.json (one file per ACK)."""
+    ack_dir = bridge_dir / "acknowledgements"
+    if not ack_dir.is_dir():
+        return []
+    out: list[Acknowledgement] = []
+    for ack_file in ack_dir.glob("*.json"):
+        if ack_file.name.startswith("."):
+            continue
+        data = read_json(ack_file)
+        if data is None:
+            continue
+        p = data.get("payload", data)
+        if not isinstance(p, dict):
+            continue
+        accepted = bool(p.get("accepted", False))
+        default = "ACK_ACCEPTED" if accepted else "ACK_REJECTED"
+        try:
             out.append(
                 Acknowledgement(
-                    str(r.get("command_id", "")),
+                    str(p.get("command_id", "")),
                     accepted,
-                    ReasonCode(r.get("reason", default)),
-                    str(r["broker_order_id"]) if r.get("broker_order_id") is not None else None,
-                    str(r.get("message", "")),
-                    payload=r,
+                    ReasonCode(p.get("reason", default)),
+                    str(p["broker_order_id"]) if p.get("broker_order_id") is not None else None,
+                    str(p.get("message", "")),
+                    payload=p,
                 )
             )
+        except (ValueError, KeyError):
+            continue
     return out
