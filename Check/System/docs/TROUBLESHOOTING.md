@@ -1,5 +1,17 @@
 # Troubleshooting
 
+## Compile errors: `cannot open include file CHECK_V3_*.mqh`
+
+MetaEditor cannot find the headers in that terminal's data folder.
+
+1. Double-click `DEPLOY_MT4.bat` (or run `.\scripts\deploy_mt4.ps1`).
+2. Confirm these files exist under the **same** terminal hash you compile:
+   - `...\MQL4\Experts\CHECK_SYSTEM_V3.mq4`
+   - `...\MQL4\Experts\CHECK_V3_Protocol.mqh` (+ Bridge / Market / Execution)
+   - `...\MQL4\Include\CHECK_V3_*.mqh`
+3. Open the EA from **File → Open Data Folder → MQL4\Experts**, not only from the git clone.
+4. Press **F7** again (must be 0 errors).
+
 ## EA does not initialize
 
 Check:
