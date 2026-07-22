@@ -13,6 +13,20 @@ There is no profit guarantee. Trading can lose money, including in live mode.
 - `tools/` - inspection, validation, replay, and audit utilities.
 - `runtime/` - local runtime state, history, audit, bridge data, and stop files.
 
+## Desktop dashboard
+
+Double-click `START_DASHBOARD.bat` (or run `.\scripts\start_dashboard.ps1`).
+
+The desktop panel can:
+
+- start **Paper** or **Live**
+- show engine status, bridge freshness, and last cycle decision
+- stream Activity from engine logs + `runtime/audit.jsonl`
+- **Stop** (writes `STOP_TRADING` and stops the process)
+- **Deploy MT4**
+
+No browser. Requires Python 3.12+ with Tcl/Tk (standard Windows installer).
+
 ## Paper mode
 
 ```powershell

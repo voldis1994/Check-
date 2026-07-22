@@ -21,6 +21,12 @@ Live operation requires explicit operator control. The system provides automatio
 .\scripts\start_paper.ps1
 ```
 
+Or use the desktop dashboard:
+
+```powershell
+.\START_DASHBOARD.bat
+```
+
 Paper mode is for exercising the Python engine and audit flow. It is not evidence of future live results.
 
 ## Live run
