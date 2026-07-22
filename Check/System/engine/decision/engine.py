@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 from engine.analysis.engine import run_analysis_engine, with_analysis_context
 from engine.analysis.context import with_spread_filter_passed
+from engine.analysis.structure import analyze_structure_window, derive_setup_type
 from engine.core.paths import SystemPaths
 from engine.decision.buy import BuyCandidate, calculate_buy_candidate
 from engine.decision.filters.news_filter import evaluate_news_filter
@@ -15,7 +16,7 @@ from engine.decision.wait_block import evaluate_block_decision, evaluate_wait_de
 from engine.journal.error_journal import log_error
 from engine.analysis.context import AnalysisContext
 from engine.normalizer.market_normalizer import NormalizedMarketBar
-from engine.protocol.constants import Decision, ErrorType, Side
+from engine.protocol.constants import Decision, ErrorType, Side, TIMEFRAME_M1
 from engine.protocol.models import UniverseRecord, SystemConfig
 from engine.state.instance_state import InstanceState
 MODULE_NAME = 'decision.engine'
@@ -41,16 +42,18 @@ def _build_direction_reason(side: str, scoring: ScoringResult, quality: SignalQu
         f'confirmations={quality.confirmation_count})'
     )
 
-def _structure_level_for_side(*, side: str, buy_candidate: BuyCandidate, sell_candidate: SellCandidate) -> float:
-    if side == Side.BUY.value and buy_candidate.valid:
-        return float(buy_candidate.entry_price)
-    if side == Side.SELL.value and sell_candidate.valid:
-        return float(sell_candidate.entry_price)
-    if buy_candidate.valid:
-        return float(buy_candidate.entry_price)
-    if sell_candidate.valid:
-        return float(sell_candidate.entry_price)
-    return 0.0
+def _setup_identity_for_side(
+    *,
+    side: str,
+    market_bars: tuple[NormalizedMarketBar, ...],
+    structure_lookback_bars: int,
+) -> tuple[float, str, str, str]:
+    """Return structure_level, structure_id, setup_origin_timestamp, setup_type."""
+    structure = analyze_structure_window(market_bars, structure_lookback_bars=structure_lookback_bars)
+    level = structure.structure_level_for_side(side)
+    origin = structure.origin_timestamp_for_side(side) or structure.setup_origin_timestamp
+    setup_type = derive_setup_type(side=side, structure=structure)
+    return (float(level), structure.structure_id, origin, setup_type)
 
 def _resolve_final_decision(*, scoring: ScoringResult, block_reason: str | None, buy_candidate: BuyCandidate, sell_candidate: SellCandidate, execution_possible: bool, signal_quality: SignalQualityResult) -> tuple[str, str]:
     block_result = evaluate_block_decision(block_reason=block_reason)
@@ -82,11 +85,16 @@ def run_decision_engine(*, universe: UniverseRecord, market_bars: tuple[Normaliz
         buy_candidate = calculate_buy_candidate(analysis=analysis, market_bars=market_bars, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=news_filter, instance_state=instance_state, weights=weights, stop_loss_buffer=effective_stop_loss_buffer, reward_ratio=risk_config.reward_ratio, structure_lookback_bars=analysis_config.structure_lookback_bars, block_ranging_chase_entries=analysis_config.block_ranging_chase_entries, ranging_extreme_threshold=analysis_config.ranging_extreme_threshold, ranging_recent_momentum_bars=analysis_config.ranging_recent_momentum_bars)
         sell_candidate = calculate_sell_candidate(analysis=analysis, market_bars=market_bars, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=news_filter, instance_state=instance_state, weights=weights, stop_loss_buffer=effective_stop_loss_buffer, reward_ratio=risk_config.reward_ratio, structure_lookback_bars=analysis_config.structure_lookback_bars, block_ranging_chase_entries=analysis_config.block_ranging_chase_entries, ranging_extreme_threshold=analysis_config.ranging_extreme_threshold, ranging_recent_momentum_bars=analysis_config.ranging_recent_momentum_bars)
         scoring = compare_candidates(buy_candidate=buy_candidate, sell_candidate=sell_candidate, context=analysis.context)
-        candle_time_utc = str(market_bars[-1].time_utc) if market_bars else ''
+        from engine.core.clock import format_utc_timestamp
+        candle_time_utc = format_utc_timestamp(market_bars[-1].time_utc) if market_bars else ''
         provisional_side = scoring.preferred_side if scoring.preferred_side in {Side.BUY.value, Side.SELL.value} else (Side.BUY.value if scoring.buy_score >= scoring.sell_score else Side.SELL.value)
-        structure_level = _structure_level_for_side(side=provisional_side, buy_candidate=buy_candidate, sell_candidate=sell_candidate)
+        structure_level, structure_id, setup_origin, setup_type = _setup_identity_for_side(
+            side=provisional_side,
+            market_bars=market_bars,
+            structure_lookback_bars=analysis_config.structure_lookback_bars,
+        )
         instance_state.expire_signal_fingerprints(current_bar_utc=candle_time_utc)
-        cooldown_remaining = instance_state.cooldown_bars_remaining(current_bar_utc=candle_time_utc)
+        cooldown_remaining = instance_state.peek_cooldown_bars_remaining()
         signal_quality = evaluate_signal_quality(
             buy_score=scoring.buy_score,
             sell_score=scoring.sell_score,
@@ -104,7 +112,14 @@ def run_decision_engine(*, universe: UniverseRecord, market_bars: tuple[Normaliz
             last_trade_close_time_utc=instance_state.last_trade_close_time_utc,
             last_trade_close_bar_utc=instance_state.last_trade_close_bar_utc,
             active_fingerprints=instance_state.active_signal_fingerprints,
+            setup_origin_timestamp=setup_origin,
+            structure_id=structure_id,
+            setup_type=setup_type,
+            digits=instance_state.instrument_digits or (market_bars[-1].digits if market_bars else 5),
+            timeframe=TIMEFRAME_M1,
         )
+        # Advance cooldown after the gate so N means "block next N bars".
+        instance_state.advance_cooldown_for_closed_bar(current_bar_utc=candle_time_utc)
         decision, reason = _resolve_final_decision(scoring=scoring, block_reason=block_reason, buy_candidate=buy_candidate, sell_candidate=sell_candidate, execution_possible=execution_possible, signal_quality=signal_quality)
         preferred_side = signal_quality.winning_side if signal_quality.passed else scoring.preferred_side
         return DecisionResult(decision_id=str(uuid4()), decision=decision, reason=reason, preferred_side=preferred_side, buy_candidate=buy_candidate, sell_candidate=sell_candidate, buy_score=scoring.buy_score, sell_score=scoring.sell_score, analysis_context=analysis.context, signal_quality=signal_quality)

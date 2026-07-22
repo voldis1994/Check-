@@ -1,86 +1,34 @@
 #!/usr/bin/env python3
-"""Replay market CSV bars through the decision engine (no MT4 commands).
+"""Replay market CSV through the decision engine with stateful simulation (no MT4).
 
 Usage:
   cd Check/System
   python tools/replay_signals.py --market path/to/market_EURUSD_100001.csv
-  python tools/replay_signals.py --market path/to/market.csv --config config/system.json
+  python tools/replay_signals.py --market path/to/market.csv --config config/system.json --output-dir /tmp/replay_out
 """
 from __future__ import annotations
 import argparse
+import json
 import sys
-from collections import Counter
 from pathlib import Path
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from engine.core.config import load_system_config
-from engine.core.instance import Instance
-from engine.core.paths import SystemPaths
-from engine.decision.engine import run_decision_engine
-from engine.normalizer.market_normalizer import normalize_market_csv
-from engine.protocol.constants import Decision, PROTOCOL_SCHEMA_VERSION
-from engine.protocol.models import UniverseRecord
-from engine.state.instance_state import InstanceState
+from engine.replay.execution_model import ReplayExecutionConfig
+from engine.replay.simulator import run_replay
+
 MODULE_NAME = 'tools.replay_signals'
 
-def _default_universe() -> UniverseRecord:
-    return UniverseRecord(schema_version=PROTOCOL_SCHEMA_VERSION, timestamp_utc='2026-07-07T06:00:00.000Z', session='LONDON', market_regime='trending', news_window_active=False, news_impact_level='low')
-
-def _extract_reason_code(reason: str, signal_quality_reason: str | None) -> str:
-    if signal_quality_reason:
-        return signal_quality_reason
-    if ':' in reason:
-        return reason.split(':', 1)[0].strip()
-    return reason.strip() or 'NONE'
-
-def replay_market_csv(*, market_path: Path, config_path: Path | None=None, account_id: str='replay', magic: int=100001, relative_spread: float=1.0, min_bars: int | None=None) -> dict[str, object]:
-    root = Path(__file__).resolve().parents[1]
-    system_config = load_system_config(config_path or root / 'config' / 'system.json', system_paths=SystemPaths(root))
-    raw_text = market_path.read_text(encoding='utf-8')
-    bars = normalize_market_csv(raw_text)
-    if not bars:
-        raise SystemExit(f'no bars in {market_path}')
-    lookback = max(3, int(system_config.analysis.lookback_bars))
-    structure_lookback = max(2, int(system_config.analysis.structure_lookback_bars))
-    required = max(3, min_bars or 3)
-    if len(bars) < required:
-        raise SystemExit(f'need at least {required} bars, found {len(bars)} in {market_path}')
-    # Prefer full lookback when available; otherwise start as soon as the CSV has enough bars.
-    preferred = max(structure_lookback, lookback)
-    start_index = preferred if len(bars) >= preferred else required
-    symbol = bars[0].symbol
-    instance = Instance(account_id=account_id, symbol=symbol, magic=magic)
-    instance_state = InstanceState(instance=instance)
-    instance_state.update_instrument(digits=bars[0].digits, point=bars[0].point, pip=bars[0].point * 10.0 if bars[0].digits >= 3 else bars[0].point)
-    universe = _default_universe()
-    decision_counts: Counter[str] = Counter()
-    reason_counts: Counter[str] = Counter()
-    evaluated = 0
-    for end in range(start_index, len(bars) + 1):
-        window = tuple(bars[:end])
-        result = run_decision_engine(universe=universe, market_bars=window, instance_state=instance_state, relative_spread=relative_spread, system_config=system_config, execution_possible=True)
-        evaluated += 1
-        decision_counts[result.decision] += 1
-        quality = result.signal_quality
-        reason_code = _extract_reason_code(result.reason, quality.reason_code if quality is not None else None)
-        reason_counts[reason_code] += 1
-    return {
-        'market_path': str(market_path),
-        'bars_total': len(bars),
-        'windows_evaluated': evaluated,
-        'decisions': dict(decision_counts),
-        'reason_codes': dict(reason_counts),
-        'buy': decision_counts.get(Decision.BUY.value, 0),
-        'sell': decision_counts.get(Decision.SELL.value, 0),
-        'wait': decision_counts.get(Decision.WAIT.value, 0),
-        'block': decision_counts.get(Decision.BLOCK.value, 0),
-    }
 
 def format_summary(summary: dict[str, object]) -> str:
     lines = [
-        f"replay market={summary['market_path']}",
-        f"bars={summary['bars_total']} windows={summary['windows_evaluated']}",
-        f"BUY={summary['buy']} SELL={summary['sell']} WAIT={summary['wait']} BLOCK={summary['block']}",
+        f"replay market={summary.get('market_path')}",
+        f"bars={summary.get('total_bars', summary.get('bars_total'))} evaluated={summary.get('evaluated_bars', summary.get('windows_evaluated'))}",
+        f"BUY={summary.get('BUY_signal_count', summary.get('buy'))} SELL={summary.get('SELL_signal_count', summary.get('sell'))} WAIT={summary.get('WAIT_count', summary.get('wait'))} BLOCK={summary.get('BLOCK_count', summary.get('block'))}",
+        f"WAIT%={summary.get('WAIT_percentage', 0):.1f} opened={summary.get('opened_trades', 0)} closed={summary.get('closed_trades', 0)}",
+        f"wins={summary.get('wins', 0)} losses={summary.get('losses', 0)} BE={summary.get('breakeven', 0)} unknown={summary.get('unknown_outcomes', 0)}",
+        f"net={summary.get('net_result', 0)} total_R={summary.get('total_R', 0)} expectancy={summary.get('expectancy', 0)}",
+        f"duplicates={summary.get('duplicate_signal_rejection_count', 0)} cooldowns={summary.get('cooldown_rejection_count', 0)}",
+        f"control_files_written={summary.get('control_files_written', 0)}",
         'reason codes:',
     ]
     reason_codes = summary.get('reason_codes')
@@ -89,19 +37,63 @@ def format_summary(summary: dict[str, object]) -> str:
             lines.append(f'  {code}: {count}')
     return '\n'.join(lines)
 
-def main(argv: list[str] | None=None) -> int:
-    parser = argparse.ArgumentParser(description='Replay market CSV through decision engine (no MT4 commands)')
+
+def _load_news_file(path: Path | None) -> tuple[dict[str, object], ...] | None:
+    if path is None:
+        return None
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    if isinstance(payload, list):
+        return tuple(item for item in payload if isinstance(item, dict))
+    events = payload.get('events') if isinstance(payload, dict) else None
+    if isinstance(events, list):
+        return tuple(item for item in events if isinstance(item, dict))
+    raise SystemExit(f'news file must be a JSON list or object with events[]: {path}')
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description='Replay market CSV with stateful simulation (no MT4 commands)')
     parser.add_argument('--market', required=True, help='Path to market_*.csv')
     parser.add_argument('--config', default=None, help='Optional system.json path')
     parser.add_argument('--account-id', default='replay')
     parser.add_argument('--magic', type=int, default=100001)
     parser.add_argument('--relative-spread', type=float, default=1.0)
+    parser.add_argument('--spread-price', type=float, default=0.00010)
+    parser.add_argument('--slippage-price', type=float, default=0.00002)
+    parser.add_argument('--commission', type=float, default=0.0)
+    parser.add_argument('--timezone', default='UTC')
+    parser.add_argument('--news-file', default=None, help='Optional news calendar JSON (omit = NEWS_DATA_UNAVAILABLE)')
+    parser.add_argument('--output-dir', default=None, help='Write summary JSON + trade ledger')
+    parser.add_argument('--signal-audit', action='store_true', help='Also write per-bar signal audit JSONL')
+    parser.add_argument('--json', action='store_true', help='Print full summary JSON')
     args = parser.parse_args(argv)
     market_path = Path(args.market).expanduser().resolve()
     config_path = Path(args.config).expanduser().resolve() if args.config else None
-    summary = replay_market_csv(market_path=market_path, config_path=config_path, account_id=args.account_id, magic=args.magic, relative_spread=args.relative_spread)
-    print(format_summary(summary), flush=True)
+    news_events = _load_news_file(Path(args.news_file).expanduser().resolve() if args.news_file else None)
+    output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else None
+    execution = ReplayExecutionConfig(
+        spread_price=args.spread_price,
+        slippage_price=args.slippage_price,
+        commission_per_trade=args.commission,
+        timezone_name=args.timezone,
+    )
+    summary = run_replay(
+        market_path=market_path,
+        config_path=config_path,
+        account_id=args.account_id,
+        magic=args.magic,
+        relative_spread=args.relative_spread,
+        execution=execution,
+        news_events=news_events,
+        write_signal_audit=bool(args.signal_audit),
+        output_dir=output_dir,
+    )
+    summary.pop('_simulator', None)
+    if args.json:
+        print(json.dumps(summary, indent=2, sort_keys=True), flush=True)
+    else:
+        print(format_summary(summary), flush=True)
     return 0
+
 
 if __name__ == '__main__':
     raise SystemExit(main())

@@ -173,13 +173,15 @@ def _register_trade_close_cooldown(
     signal_quality_config: SignalQualityConfig | None,
     close_bar_utc: str,
     close_time_utc: str,
-    was_loss: bool = False,
+    outcome: str | None = None,
+    was_loss: bool | None = None,
 ) -> None:
     if signal_quality_config is None:
         return
     instance_state.register_trade_close(
         close_bar_utc=close_bar_utc or close_time_utc,
         close_time_utc=close_time_utc,
+        outcome=outcome,
         was_loss=was_loss,
         cooldown_bars_after_trade=signal_quality_config.cooldown_bars_after_trade,
         cooldown_bars_after_loss=signal_quality_config.cooldown_bars_after_loss,
@@ -233,12 +235,13 @@ def _force_clear_broker_flat_position(
     )
     _archive_money_trailing_state(paths, instance, instance_state)
     instance_state.clear_close_pending()
+    from engine.protocol.constants import TradeOutcome
     _register_trade_close_cooldown(
         instance_state,
         signal_quality_config=signal_quality_config,
         close_bar_utc=market_bar_utc or timestamp_utc,
         close_time_utc=timestamp_utc,
-        was_loss=False,
+        outcome=TradeOutcome.UNKNOWN.value,
     )
     instance_state.clear_position()
     instance_state.clear_pending_execution()
@@ -336,12 +339,19 @@ def _try_reconcile_closed_trade(
     _archive_money_trailing_state(paths, instance, instance_state)
     instance_state.clear_close_pending()
     net_profit = float(closed.profit) + float(closed.commission) + float(closed.swap)
+    from engine.protocol.constants import TradeOutcome
+    if net_profit < 0.0:
+        outcome = TradeOutcome.LOSS.value
+    elif net_profit > 0.0:
+        outcome = TradeOutcome.WIN.value
+    else:
+        outcome = TradeOutcome.BREAKEVEN.value
     _register_trade_close_cooldown(
         instance_state,
         signal_quality_config=signal_quality_config,
         close_bar_utc=market_bar_utc or closed.close_time_utc or timestamp_utc,
         close_time_utc=closed.close_time_utc or timestamp_utc,
-        was_loss=net_profit < 0.0,
+        outcome=outcome,
     )
     instance_state.clear_position()
     return True
