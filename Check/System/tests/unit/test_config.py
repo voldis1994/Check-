@@ -20,7 +20,7 @@ def test_valid_system_test_config_loads() -> None:
     config = load_system_config(SYSTEM_TEST_CONFIG)
     assert config.version == "2.0.0"
     assert config.account.allowed_account_numbers == ["999"]
-    assert config.instrument.symbol == "EURUSD"
+    assert config.instrument.symbol == "AUTO"
     assert config.position_sizing.fixed_lot == 0.01
     assert config.trade_management.trailing_step_atr == 0.20
     assert config.trade_management.be_activation_r is None

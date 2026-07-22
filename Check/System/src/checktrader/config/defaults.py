@@ -13,7 +13,7 @@ def default_system_dict() -> dict[str, Any]:
             "trading_enabled": True,
             "cycle_interval_ms": 250,
             "timezone": "UTC",
-            "instance_id": "EURUSD_M1_PRIMARY",
+            "instance_id": "PRIMARY",
         },
         "account": {
             "allowed_account_numbers": [],
@@ -22,7 +22,7 @@ def default_system_dict() -> dict[str, Any]:
             "require_expert_enabled": True,
         },
         "instrument": {
-            "symbol": "EURUSD",
+            "symbol": "AUTO",
             "entry_timeframe": "M1",
             "setup_timeframe": "M5",
             "context_timeframe": "M15",

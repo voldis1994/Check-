@@ -16,7 +16,7 @@
     "require_expert_enabled": true
   },
   "instrument": {
-    "symbol": "EURUSD",
+    "symbol": "AUTO",
     "entry_timeframe": "M1",
     "setup_timeframe": "M5",
     "context_timeframe": "M15"
