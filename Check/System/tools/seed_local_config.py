@@ -1,10 +1,36 @@
-"""Seed config/local/system.json with this machine's System root + AUTO symbol."""
+"""Seed config/local/system.json — always force AUTO symbol + AUTO multi-account."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+
+
+def apply_auto_defaults(data: dict, root: Path) -> dict:
+    data.setdefault("paths", {})["root"] = str(root)
+    data.setdefault("instrument", {})["symbol"] = "AUTO"
+    # Empty list = trust every MT4 account (multi-account AUTO).
+    data.setdefault("account", {})["allowed_account_numbers"] = []
+    data["account"]["allowed_account_numbers"] = []
+    data.setdefault("position_sizing", {}).update(
+        {
+            "mode": "fixed_lot",
+            "fixed_lot": float(data.get("position_sizing", {}).get("fixed_lot", 0.01) or 0.01),
+            "allow_broker_lot_normalization": False,
+        }
+    )
+    data.setdefault("execution", {}).update(
+        {
+            "maximum_status_age_ms": 4000,
+            "maximum_market_age_ms": 3500,
+        }
+    )
+    data.setdefault("runtime", {})
+    if data["runtime"].get("instance_id") in {None, "", "EURUSD_M1_PRIMARY"}:
+        data["runtime"]["instance_id"] = "PRIMARY"
+    data["runtime"]["trading_enabled"] = True
+    return data
 
 
 def main() -> int:
@@ -24,23 +50,12 @@ def main() -> int:
         from checktrader.config.defaults import default_system_dict
 
         data = default_system_dict()
-    data.setdefault("paths", {})["root"] = str(root)
-    data.setdefault("instrument", {})["symbol"] = "AUTO"
-    data.setdefault("position_sizing", {}).update(
-        {
-            "mode": "fixed_lot",
-            "fixed_lot": 0.01,
-            "allow_broker_lot_normalization": False,
-        }
-    )
-    if "runtime" in data and "instance_id" in data["runtime"]:
-        # Keep existing instance_id unless still the old EURUSD default
-        if data["runtime"]["instance_id"] in {"EURUSD_M1_PRIMARY", ""}:
-            data["runtime"]["instance_id"] = "PRIMARY"
+    data = apply_auto_defaults(data, root)
     config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {config_path}")
     print(f"  paths.root={root}")
     print("  instrument.symbol=AUTO")
+    print("  account.allowed_account_numbers=[]  (AUTO multi-account)")
     return 0
 
 
