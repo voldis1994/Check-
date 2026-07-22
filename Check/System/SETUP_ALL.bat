@@ -89,11 +89,12 @@ echo ============================================
 echo  NAKAMIE SOLI:
 echo  1^) MetaEditor: atver CHECK_SYSTEM_V2.mq4 -^> F7 ^(0 errors^)
 echo  2^) Uzliec EA uz M1 chart ^(piem. NATURALGAS^)
-echo     BridgeRootPath = %ROOT%
+echo     BridgeRootPath = ^(TUKSS = AUTO^)
 echo     MagicNumber    = 19942026
 echo     Allow live trading + Allow DLL imports
 echo  3^) Palaid:  START_LIVE.bat
-echo     ^(simbols + konts nāk automātiski no MT4^)
+echo     ^(simbols + konts + bridge nāk automātiski no MT4^)
+echo  Ja Python raksta waiting for bridge: FIX_BRIDGE.bat
 echo ============================================
 echo.
 pause

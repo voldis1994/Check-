@@ -51,22 +51,18 @@ Then:
 
 ### Attach and configure
 
-1. Open an **EURUSD M1** chart (or your configured symbol on M1).
+1. Open your symbol on **M1** (e.g. NATURALGAS).
 2. Drag `CHECK_SYSTEM_V2` onto the chart.
-3. On the **Common** tab: enable **Allow live trading** and **Allow DLL imports** (required for absolute-path bridge IO via `kernel32.dll`).
+3. On the **Common** tab: enable **Allow live trading** and **Allow DLL imports** (required).
 4. Inputs:
-   - `BridgeRootPath` — absolute SYSTEM root (folder that contains `runtime/`), e.g. `C:\Check\System`
-   - `MagicNumber` — must match `config` / `position.magic_number` (example default `19942026`)
-5. Confirm Experts is enabled (toolbar AutoTrading / Expert Advisors).
+   - `BridgeRootPath` — **leave EMPTY** for AUTO (`Terminal\MQL4\Files\CHECK_SYSTEM`)
+     or set absolute `Check\System` folder if you prefer repo bridge
+   - `MagicNumber` — must match config (default `19942026`)
+5. Confirm AutoTrading is ON. Chart comment should show `CHECK V2 bridge=...`.
 
-### Verify
+Python auto-discovers the MT4 Files bridge under `%APPDATA%\MetaQuotes\Terminal\`.
 
-Within about one second of ticks you should see:
-
-- `runtime/bridge/market/market_*.json`
-- `runtime/bridge/status/status_*.json`
-
-Python (`python -m checktrader`) reads the latest JSON in those folders.
+If Python says `waiting for market/status bridge files`, run `FIX_BRIDGE.bat`.
 
 ## Linux / CI note
 
