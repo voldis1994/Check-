@@ -45,13 +45,31 @@ class Candle(Serializable):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], timeframe: str | None = None) -> Candle:
-        raw = d.get("time") or d.get("timestamp")
+        raw = (
+            d.get("time")
+            or d.get("timestamp")
+            or d.get("t")
+            or d.get("datetime")
+            or d.get("bar_time")
+            or d.get("Time")
+        )
         if isinstance(raw, datetime):
             t = raw
         elif isinstance(raw, (int, float)):
-            t = datetime.fromtimestamp(raw, UTC)
-        elif isinstance(raw, str):
-            t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            ts = float(raw)
+            if ts > 1_000_000_000_000:  # ms
+                ts /= 1000.0
+            t = datetime.fromtimestamp(ts, UTC)
+        elif isinstance(raw, str) and raw.strip():
+            cleaned = raw.strip()
+            if cleaned.endswith("Z"):
+                cleaned = cleaned[:-1] + "+00:00"
+            # Legacy MT4 TimeToString: 2026.07.22 16:00:00
+            if len(cleaned) >= 19 and cleaned[4] == "." and cleaned[7] == ".":
+                cleaned = f"{cleaned[0:4]}-{cleaned[5:7]}-{cleaned[8:10]}T{cleaned[11:19]}"
+                if len(cleaned) == 19:
+                    cleaned += "+00:00"
+            t = datetime.fromisoformat(cleaned)
         else:
             raise ValueError("candle time is required")
         if t.tzinfo is None:

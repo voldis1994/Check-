@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,8 @@ from typing import Any
 from checktrader.bridge.atomic_files import read_json
 from checktrader.domain.enums import ReasonCode, Side, StrategyType
 from checktrader.domain.models import AccountStatus, Acknowledgement, Candle, MarketSnapshot, Position
+
+logger = logging.getLogger(__name__)
 
 
 def _payload(data: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -30,13 +33,43 @@ def _read_latest_or_glob(subdir: Path) -> dict[str, Any] | None:
     return None
 
 
+def _raw_m1_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = payload.get("bars_m1")
+    if raw is None:
+        candles = payload.get("candles")
+        if isinstance(candles, dict):
+            raw = candles.get("M1")
+        elif isinstance(candles, list):
+            raw = candles
+    if raw is None:
+        raw = payload.get("m1", [])
+    if not isinstance(raw, list):
+        return []
+    return [row for row in raw if isinstance(row, dict)]
+
+
+def _parse_m1_bars(rows: list[dict[str, Any]]) -> list[Candle]:
+    out: list[Candle] = []
+    skipped = 0
+    for row in rows:
+        try:
+            out.append(Candle.from_dict({**row, "closed": True}, "M1"))
+        except (ValueError, KeyError, TypeError) as exc:
+            skipped += 1
+            if skipped <= 3:
+                logger.warning("skipping invalid M1 bar (%s): %s", exc, row)
+    if skipped:
+        logger.warning("skipped %s invalid M1 bars; kept %s", skipped, len(out))
+    return out
+
+
 def read_market(bridge_dir: Path, default_symbol: str) -> MarketSnapshot | None:
     """Read market snapshot from bridge_dir/market/latest.json (or glob fallback)."""
     p = _payload(_read_latest_or_glob(bridge_dir / "market"))
     if p is None:
         return None
 
-    ts = p.get("timestamp") or p.get("time")
+    ts = p.get("timestamp") or p.get("time") or p.get("generated_at_utc")
     t = datetime.fromisoformat(str(ts).replace("Z", "+00:00")) if ts else datetime.now(UTC)
     if t.tzinfo is None:
         t = t.replace(tzinfo=UTC)
@@ -44,10 +77,7 @@ def read_market(bridge_dir: Path, default_symbol: str) -> MarketSnapshot | None:
     bid = float(p.get("bid", p.get("close", 0.0)))
     ask = float(p.get("ask", bid))
     symbol = str(p.get("symbol", default_symbol))
-
-    # MT4 writes closed M1 bars under bars_m1; fall back to legacy shapes
-    raw_m1 = p.get("bars_m1", p.get("candles", {}).get("M1", p.get("m1", [])))
-    m1_bars = [Candle.from_dict({**r, "closed": True}, "M1") for r in (raw_m1 or []) if isinstance(r, dict)]
+    m1_bars = _parse_m1_bars(_raw_m1_rows(p))
 
     return MarketSnapshot(
         symbol,

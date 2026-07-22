@@ -73,8 +73,14 @@ def discover_bridge_dirs(configured: Path | None = None) -> list[Path]:
     found: dict[str, Path] = {}
 
     def add(path: Path) -> None:
-        if path.exists() and path.is_dir():
-            found[str(path.resolve())] = path.resolve()
+        if not path.exists() or not path.is_dir():
+            return
+        market_dir = path / "market"
+        if not market_dir.is_dir():
+            return
+        if not any(market_dir.glob("*.json")):
+            return
+        found[str(path.resolve())] = path.resolve()
 
     if configured is not None:
         add(configured)
