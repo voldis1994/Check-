@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.0.1
+
+- Desktop control panel: `START_DASHBOARD.bat` / `tools/dashboard.py` — start paper/live, activity feed, stop, deploy MT4 (no web UI).
+
 ## v3.0.0
 
 - Full rebuild from zero for CHECK SYSTEM v3 (not a partial port of v2).
