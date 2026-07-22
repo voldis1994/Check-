@@ -9,10 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from checktrader.app.bootstrap import AppContext, spawn_account_context
-from checktrader.app.cycle import run_cycle
+from checktrader.app.cycle import merge_market_history, run_cycle
 from checktrader.bridge.reader import read_market, read_positions, read_status
 from checktrader.domain.enums import ReasonCode
-from checktrader.domain.models import CycleAudit
+from checktrader.domain.models import CycleAudit, MarketSnapshot
+from checktrader.market_data.aggregation import aggregate_standard
+from checktrader.market_data.bars import closed_bars
+from checktrader.market_data.history import save_history
+from checktrader.regimes.shared import SharedRegimeHub
 
 logger = logging.getLogger(__name__)
 
@@ -160,38 +164,75 @@ class AccountSessionBook:
         return sorted(self._sessions)
 
 
-def run_once(context: AppContext, bridge_dir: Path | None = None) -> CycleAudit:
+def run_once(
+    context: AppContext,
+    bridge_dir: Path | None = None,
+    *,
+    shared_regime=None,
+) -> CycleAudit:
     is_live = context.config.runtime.mode == "live"
 
     if not is_live and bridge_dir is None:
-        return run_cycle(context)
+        return run_cycle(context, shared_regime=shared_regime)
 
     bridge = bridge_dir or context.config.paths.bridge_dir
     if bridge is None:
         if is_live:
-            return run_cycle(context, None)
-        return run_cycle(context)
+            return run_cycle(context, None, shared_regime=shared_regime)
+        return run_cycle(context, shared_regime=shared_regime)
 
     try:
         market = read_market(bridge, context.specs.symbol)
     except Exception:  # noqa: BLE001
         logger.exception("failed reading market from %s", bridge)
         if is_live:
-            return run_cycle(context, None)
-        return run_cycle(context)
+            return run_cycle(context, None, shared_regime=shared_regime)
+        return run_cycle(context, shared_regime=shared_regime)
 
     if market is None:
         if is_live:
             logger.warning("bridge dir %s found but market data missing", bridge)
-            return run_cycle(context, None)
-        return run_cycle(context)
+            return run_cycle(context, None, shared_regime=shared_regime)
+        return run_cycle(context, shared_regime=shared_regime)
 
     try:
         market.account = read_status(bridge)
         market.positions = read_positions(bridge)
     except Exception:  # noqa: BLE001
         logger.exception("failed reading status/positions from %s", bridge)
-    return run_cycle(context, market)
+    return run_cycle(context, market, shared_regime=shared_regime)
+
+
+def _load_bridge_market(context: AppContext, bridge: Path) -> MarketSnapshot | None:
+    try:
+        market = read_market(bridge, context.specs.symbol)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed reading market from %s", bridge)
+        return None
+    if market is None:
+        return None
+    try:
+        market.account = read_status(bridge)
+        market.positions = read_positions(bridge)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed reading status/positions from %s", bridge)
+    return market
+
+
+def _seed_history_from_peer(context: AppContext, peer_m1: list) -> bool:
+    """If peer has richer M1 for the same symbol, merge it so warm-up/regime match."""
+    if not peer_m1:
+        return False
+    local = closed_bars(context.history.get("M1"))
+    peer_closed = closed_bars(peer_m1)
+    if len(peer_closed) <= len(local):
+        return False
+    context.history.merge("M1", peer_m1)
+    m5_agg, m15_agg = aggregate_standard(context.history.get("M1"))
+    context.history.merge("M5", m5_agg)
+    context.history.merge("M15", m15_agg)
+    save_history(context.config.paths.history_file, context.history)
+    return True
 
 
 def run_loop(context: AppContext) -> None:
@@ -228,27 +269,74 @@ def run_loop(context: AppContext) -> None:
                     len(ordered),
                     ",".join(book.account_ids) or "-",
                 )
+
+                # Pass 1: ingest each bridge into its isolated history.
+                prepared: list[tuple[AccountSession, MarketSnapshot]] = []
                 for bridge in ordered:
-                    session: AccountSession | None = None
                     try:
                         session = book.get(bridge)
-                        audit = run_once(session.context, session.bridge_dir)
+                        market = _load_bridge_market(session.context, bridge)
+                        if market is None:
+                            if is_live:
+                                logger.warning("bridge dir %s found but market data missing", bridge)
+                            continue
+                        merge_market_history(session.context, market)
+                        prepared.append((session, market))
                     except Exception:  # noqa: BLE001
-                        logger.exception("cycle failed for bridge %s", bridge)
+                        logger.exception("ingest failed for bridge %s", bridge)
+
+                # Pass 2: one shared regime per symbol from the richest M15 series.
+                hub = SharedRegimeHub(context.config)
+                tf = context.config.instrument.timeframe_decision
+                for session, market in prepared:
+                    hub.consider(
+                        market.symbol or session.context.specs.symbol,
+                        m1=session.context.history.get("M1"),
+                        m15=session.context.history.get("M15"),
+                        timeframe=tf,
+                    )
+
+                # Seed thinner accounts so both do not sit in HISTORY_INSUFFICIENT alone.
+                for session, market in prepared:
+                    symbol = market.symbol or session.context.specs.symbol
+                    if _seed_history_from_peer(session.context, hub.best_m1(symbol)):
+                        market.m1 = session.context.history.get("M1")
+                        market.m5 = session.context.history.get("M5")
+                        market.m15 = session.context.history.get("M15")
+                        hub.consider(symbol, m1=market.m1, m15=market.m15, timeframe=tf)
+                        logger.info(
+                            "seeded history account=%s symbol=%s m1=%s m15=%s",
+                            session.account_id,
+                            symbol,
+                            len(closed_bars(market.m1)),
+                            len(closed_bars(market.m15)),
+                        )
+
+                hub.finalize()
+
+                # Pass 3: trade/manage each account with the shared market regime.
+                for session, market in prepared:
+                    try:
+                        symbol = market.symbol or session.context.specs.symbol
+                        shared = hub.get(symbol)
+                        audit = run_cycle(session.context, market, shared_regime=shared)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("cycle failed for account %s", session.account_id)
                         continue
-                    account_id = session.account_id if session is not None else "?"
                     if audit.reason_code in {ReasonCode.BRIDGE_UNAVAILABLE, ReasonCode.DATA_STALE}:
                         logger.warning(
                             "cycle skipped account=%s reason=%s",
-                            account_id,
+                            session.account_id,
                             audit.human_readable_reason,
                         )
                     else:
                         logger.info(
-                            "cycle ok account=%s symbol=%s reason=%s",
-                            account_id,
+                            "cycle ok account=%s symbol=%s regime=%s reason=%s source=%s",
+                            session.account_id,
                             audit.symbol,
+                            audit.market_regime,
                             audit.reason_code,
+                            (audit.metrics or {}).get("regime_source"),
                         )
         except Exception:  # noqa: BLE001
             logger.exception("cycle iteration failed")
