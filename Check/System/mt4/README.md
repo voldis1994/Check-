@@ -35,12 +35,19 @@ Writes are atomic: content goes to `*.tmp`, then `MoveFileExW` replace.
 
 ## MetaEditor compile steps
 
+`SETUP_ALL.bat` / `DEPLOY_MT4.bat` copy files into every:
+
+`%APPDATA%\MetaQuotes\Terminal\<id>\MQL4\Experts\` and `...\Include\`
+
+Also mirrors to `runtime/mt4_deploy/` for manual copy.
+
+Then:
+
 1. Open MetaTrader 4 → **File → Open Data Folder**.
-2. Copy `mt4/Experts/CHECK_SYSTEM_V2.mq4` into `MQL4/Experts/`.
-3. Copy all `mt4/Include/CHECK_*.mqh` into `MQL4/Include/`.
-4. In MetaEditor, open `CHECK_SYSTEM_V2.mq4`.
-5. Press **F7** (Compile). The Errors tab must show **0** errors.
-6. In the Terminal Navigator, refresh Experts if needed.
+2. Confirm `MQL4/Experts/CHECK_SYSTEM_V2.mq4` and `MQL4/Include/CHECK_*.mqh` exist.
+3. In MetaEditor, open `CHECK_SYSTEM_V2.mq4`.
+4. Press **F7** (Compile). The Errors tab must show **0** errors.
+5. In the Terminal Navigator, refresh Experts if needed.
 
 ### Attach and configure
 

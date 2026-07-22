@@ -7,21 +7,23 @@ Deterministic Python + MetaTrader 4 live trading bridge.
 ## What this is
 
 - One strategy: `TREND_PULLBACK_BREAK` (M15 context → M5 pullback → M1 break)
-- Protective management: BE net +0.20, then 3-pip grid, high-lock, exit pressure
+- Protective management: BE net +0.20, ATR trailing grid, high-lock, exit pressure
 - Atomic JSON file bridge under `runtime/bridge/`
 - Broker state is truth; MODIFY confirmation requires applied SL from ACK or status
+- Default `instrument.symbol = AUTO` follows the attached MT4 chart
 
-## Install
+## Windows one-click setup
 
-Requires Python 3.12+.
+Double-click from `Check\System`:
 
-```powershell
-cd Check\System
-python -m pip install --upgrade pip
-pip install -e ".[dev]"
-```
+| File | What it does |
+|------|----------------|
+| `SETUP_ALL.bat` | Python install, config seed (`AUTO` symbol), runtime dirs, **copies MQ4 into every MetaTrader Data Folder** |
+| `DEPLOY_MT4.bat` | Only deploy EA + includes to `%APPDATA%\MetaQuotes\Terminal\*\MQL4\` |
+| `START_LIVE.bat` | Validate config and start `python -m checktrader` |
+| `STOP.bat` | Create `runtime\STOP_TRADING` kill switch |
 
-Or run `scripts\install.ps1`.
+After `SETUP_ALL.bat`: set `allowed_account_numbers`, compile EA in MetaEditor (F7), attach to M1, set `BridgeRootPath` to this System folder.
 
 ## Config
 
@@ -88,9 +90,9 @@ python tools\replay.py --market path\to\market.json --status path\to\status.json
 - `docs/LIVE_OPERATION.md` — live start checklist
 - `docs/MT4_PROTOCOL.md` — bridge message contract
 - `docs/STRATEGY.md` — setup rules
-- `docs/TRAILING.md` — BE + pip grid confirmation
+- `docs/TRAILING.md` — BE + ATR grid confirmation
 - `docs/EXIT_PRESSURE.md` — pressure components
-- `docs/RISK.md` — sizing modes
+- `docs/RISK.md` — fixed-lot sizing only
 - `docs/TROUBLESHOOTING.md` — common failures
 
 ## Tests / CI
