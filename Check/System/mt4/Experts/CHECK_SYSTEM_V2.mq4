@@ -1,6 +1,6 @@
 #property copyright "Check System"
 #property link      "https://github.com/voldis1994/Check-"
-#property version   "2.0.0"
+#property version   "2.0.1"
 #property strict
 
 #include <CHECK_Protocol.mqh>
@@ -47,6 +47,9 @@ int OnInit()
       return(INIT_FAILED);
    }
 
+   // Keep market/status fresh even when the symbol has few ticks (e.g. NATURALGAS).
+   EventSetMillisecondTimer(CHECK_EXPORT_INTERVAL_MS);
+
    // Smoke-write so Python can discover this bridge immediately.
    CHECK_ExportMarketAndStatus();
 
@@ -64,7 +67,14 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
+   EventKillTimer();
    Comment("");
+}
+
+void OnTimer()
+{
+   CHECK_ExportMarketAndStatus();
+   CHECK_TryExecutePendingCommands();
 }
 
 void OnTick()

@@ -51,8 +51,8 @@ def default_system_dict() -> dict[str, Any]:
             "require_stop_loss": True,
         },
         "execution": {
-            "maximum_status_age_ms": 2000,
-            "maximum_market_age_ms": 1500,
+            "maximum_status_age_ms": 4000,
+            "maximum_market_age_ms": 3500,
             "ack_timeout_ms": 5000,
             "maximum_retries": 3,
             "retry_delay_ms": 750,
