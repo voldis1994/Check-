@@ -17,13 +17,13 @@ There is no profit guarantee. Trading can lose money, including in live mode.
 
 Double-click `START_DASHBOARD.bat` (or run `.\scripts\start_dashboard.ps1`).
 
-The desktop panel can:
+Dark pro console (CHECK SYSTEM brand) with:
 
-- start **Paper** or **Live**
-- show engine status, bridge freshness, and last cycle decision
-- stream Activity from engine logs + `runtime/audit.jsonl`
-- **Stop** (writes `STOP_TRADING` and stops the process)
-- **Deploy MT4**
+- sidebar account switcher (all MT4 bridges)
+- balance / equity / floating P/L / today actions
+- equity curve + bridge-health ring (real data only)
+- start **Paper** / **Live**, **Stop**, **Deploy MT4**
+- Live Trades + Activity pages (engine log + `runtime/audit.jsonl`)
 
 No browser. Requires Python 3.12+ with Tcl/Tk (standard Windows installer).
 
