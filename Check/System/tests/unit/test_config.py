@@ -26,14 +26,13 @@ def test_valid_system_test_config_loads() -> None:
     assert config.trade_management.be_activation_r is None
 
 
-def test_empty_allowed_accounts_fails_live(tmp_path: Path) -> None:
+def test_empty_allowed_accounts_is_auto(tmp_path: Path) -> None:
     payload = json.loads(SYSTEM_TEST_CONFIG.read_text(encoding="utf-8"))
     payload["account"]["allowed_account_numbers"] = []
-    path = tmp_path / "bad.json"
+    path = tmp_path / "auto_accounts.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ConfigurationError) as exc:
-        load_system_config(path, require_live_accounts=True)
-    assert exc.value.reason is ReasonCode.ACCOUNT_NOT_ALLOWED
+    config = load_system_config(path, require_live_accounts=True)
+    assert config.account.allowed_account_numbers == []
 
 
 def test_empty_allowed_accounts_ok_when_not_required() -> None:

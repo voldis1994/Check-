@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from checktrader.application.account_resolve import account_is_allowed
 from checktrader.application.symbol_resolve import resolve_trading_symbol
 from checktrader.config.models import SystemConfig
 from checktrader.domain.enums import ConfirmationSource, OrderAction, PositionState, RiskDecision, Side, StrategyResult
@@ -447,7 +448,7 @@ def run_cycle(
     state_path = Path(config.paths.root) / config.paths.state / "instance.json"
     identity = _identity_kwargs(config, status, market)
 
-    if status.account_number not in config.account.allowed_account_numbers:
+    if not account_is_allowed(config, status.account_number):
         state.last_reason = ReasonCode.ACCOUNT_NOT_ALLOWED.value
         save_instance_state(state_path, state, now_utc=now_utc)
         return CycleResult(ReasonCode.ACCOUNT_NOT_ALLOWED)

@@ -23,7 +23,7 @@ Double-click from `Check\System`:
 | `START_LIVE.bat` | Validate config and start `python -m checktrader` |
 | `STOP.bat` | Create `runtime\STOP_TRADING` kill switch |
 
-After `SETUP_ALL.bat`: set `allowed_account_numbers`, compile EA in MetaEditor (F7), attach to M1, set `BridgeRootPath` to this System folder.
+After `SETUP_ALL.bat`: compile EA in MetaEditor (F7), attach to M1, set `BridgeRootPath` to this System folder. Symbol and account come from MT4 automatically when left on AUTO / empty.
 
 ## Config
 
@@ -35,8 +35,8 @@ Copy-Item config\system.example.json config\local\system.json
 ```
 
 2. Edit `config/local/system.json`:
-   - Set `instrument.symbol` to `AUTO` (default) so the engine follows the MT4 chart symbol, or pin a concrete name
-   - Set `account.allowed_account_numbers` to your live MT4 account(s) (empty list fails live start)
+   - Leave `instrument.symbol` as `AUTO` (follows MT4 chart)
+   - Leave `account.allowed_account_numbers` empty (AUTO — trusts MT4 account), or pin specific accounts
    - Set `paths.root` to the SYSTEM root if needed
    - Align `position.magic_number` with the EA input
 

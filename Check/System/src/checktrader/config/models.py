@@ -14,6 +14,8 @@ class RuntimeConfig(BaseModel):
 
 
 class AccountConfig(BaseModel):
+    """Empty / AUTO allow-list → accept the account reported by the MT4 status snapshot."""
+
     allowed_account_numbers: list[str] = Field(default_factory=list)
     required_server: str = ""
     require_trade_allowed: bool = True

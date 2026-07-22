@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
 def _age_sec(path: Path) -> float:
-    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-    return (datetime.now(tz=timezone.utc) - mtime).total_seconds()
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+    return (datetime.now(tz=UTC) - mtime).total_seconds()
 
 
 def _latest(directory: Path) -> Path | None:

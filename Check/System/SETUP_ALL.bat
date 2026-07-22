@@ -71,8 +71,8 @@ REM Iestata paths.root + symbol=AUTO
 if errorlevel 1 goto :fail
 
 echo.
-echo       SVARIGI: atver config\local\system.json un ieraksti
-echo       account.allowed_account_numbers = ["TavsKontaNumurs"]
+echo       Account + symbol = AUTO (nem no MT4).
+echo       Vajadzibas gadijuma vari pinat kontus allowed_account_numbers.
 echo.
 
 REM ---------- MT4 deploy ----------
@@ -87,13 +87,13 @@ echo.
 echo [5/5] GATAVS
 echo ============================================
 echo  NAKAMIE SOLI:
-echo  1^) Notepad config\local\system.json  -^> allowed_account_numbers
-echo  2^) MetaEditor: atver CHECK_SYSTEM_V2.mq4 -^> F7 ^(0 errors^)
-echo  3^) Uzliec EA uz M1 chart ^(piem. NATURALGAS^)
+echo  1^) MetaEditor: atver CHECK_SYSTEM_V2.mq4 -^> F7 ^(0 errors^)
+echo  2^) Uzliec EA uz M1 chart ^(piem. NATURALGAS^)
 echo     BridgeRootPath = %ROOT%
 echo     MagicNumber    = 19942026
 echo     Allow live trading + Allow DLL imports
-echo  4^) Palaid:  START_LIVE.bat
+echo  3^) Palaid:  START_LIVE.bat
+echo     ^(simbols + konts nāk automātiski no MT4^)
 echo ============================================
 echo.
 pause
