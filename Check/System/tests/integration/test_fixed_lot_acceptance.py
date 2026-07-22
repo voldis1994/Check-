@@ -67,7 +67,11 @@ def test_03_sl_distance_does_not_change_lot() -> None:
 
 
 def test_04_atr_change_does_not_change_lot() -> None:
-    assert _approve(atr=0.0005).volume == _approve(atr=0.005).volume == 0.01  # type: ignore[attr-defined]
+    a = _approve(atr=0.002, stop_loss=1.09900)
+    b = _approve(atr=0.010, stop_loss=1.09900)
+    assert a.decision is RiskDecision.APPROVED  # type: ignore[attr-defined]
+    assert b.decision is RiskDecision.APPROVED  # type: ignore[attr-defined]
+    assert a.volume == b.volume == 0.01  # type: ignore[attr-defined]
 
 
 def test_05_loss_series_has_no_lot_api() -> None:

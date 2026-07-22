@@ -20,5 +20,5 @@ def build_dashboard_snapshot(state: InstanceRuntimeState) -> dict[str, Any]:
         "peak_net_profit": state.trailing.peak_net_profit,
         "last_reason": state.last_reason,
         "trailing": asdict(state.trailing),
-        "position_sizing_note": "fixed_lot only — lot never derived from equity/risk_percent",
+        "position_sizing_note": "fixed_lot only — lot never derived from equity percentage",
     }
