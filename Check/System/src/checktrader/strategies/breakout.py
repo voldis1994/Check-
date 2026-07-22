@@ -172,7 +172,8 @@ class BreakoutStrategy:
             entry = context.market.ask
             stop = lo - cfg.stop_buffer_atr * a
             tp = entry + (entry - stop) * cfg.take_profit_rr
-            if cfg.confirmation_mode == "breakout_and_retest":
+            # Prefer immediate OPEN — retest wait was the main pointless HOLD source.
+            if cfg.confirmation_mode == "breakout_and_retest" and (last_m5.close - hi) < 0.35 * a:
                 setup = Setup.create(
                     context.specs.symbol,
                     StrategyType.BREAKOUT,
@@ -212,7 +213,7 @@ class BreakoutStrategy:
             entry = context.market.bid
             stop = hi + cfg.stop_buffer_atr * a
             tp = entry - (stop - entry) * cfg.take_profit_rr
-            if cfg.confirmation_mode == "breakout_and_retest":
+            if cfg.confirmation_mode == "breakout_and_retest" and (lo - last_m5.close) < 0.35 * a:
                 setup = Setup.create(
                     context.specs.symbol,
                     StrategyType.BREAKOUT,
@@ -275,12 +276,15 @@ class BreakoutStrategy:
             return None
 
         prior = m1[-(cfg.m1_impulse_lookback + 1) : -1]
+        # Aggressive floors so an old strict system.json cannot neuter impulse entries.
+        lookback = min(cfg.m1_impulse_lookback, 20)
+        prior = m1[-(lookback + 1) : -1]
         last = m1[-1]
         hi = max(b.high for b in prior)
         lo = min(b.low for b in prior)
-        buffer = cfg.breakout_buffer_atr * a
+        buffer = min(cfg.breakout_buffer_atr, 0.05) * a
         body = abs(last.close - last.open)
-        if body < cfg.m1_impulse_min_body_atr * a:
+        if body < min(cfg.m1_impulse_min_body_atr, 0.05) * a:
             return None
 
         if last.close > hi + buffer and last.close > last.open:

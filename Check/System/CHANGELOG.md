@@ -13,6 +13,7 @@
 - Pro dark console dashboard: sidebar accounts, metric cards, equity curve, bridge-health ring, quick actions, live trades + activity pages (real broker/audit data only).
 - Shared market regime across multi-account: same symbol uses one regime from the richest M15 feed; thinner accounts get M1 history seeded so both are not stuck in different warm-up states.
 - Breakout M1 impulse: staircase NATURALGAS moves that never print a clean M5 box+retest can OPEN on M1 range-break; TRANSITION also allows trend continuation.
+- Loosen regime/strategy gates: soft TREND path (leave perpetual TRANSITION), breakout_only default, immediate M1 trend entries, wider range filters — stop pointless HOLD loops.
 
 ## v3.0.0
 
