@@ -1,5 +1,0 @@
-# SYSTEM — Python dependencies
-# Requires Python 3.11 or newer (see docs/SYSTEM_SPECIFICATION.md section 91.1)
-
-pytest>=8.3.0,<9.0.0
-psutil>=5.9.0,<7.0.0
