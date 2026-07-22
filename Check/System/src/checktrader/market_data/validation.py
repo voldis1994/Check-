@@ -39,3 +39,14 @@ def fresh_enough(last_bar: Candle | None, now: datetime, max_age_seconds: float)
         if (now - last_bar.time).total_seconds() > max_age_seconds
         else (True, ReasonCode.DATA_VALID)
     )
+
+
+def heartbeat_fresh(heartbeat_at: datetime | None, now: datetime, max_age_seconds: float) -> tuple[bool, ReasonCode]:
+    """Prefer bridge export heartbeat over bar open time (closed M1 is already ~60s old)."""
+    if heartbeat_at is None:
+        return False, ReasonCode.MARKET_DATA_MISSING
+    age = (now - heartbeat_at).total_seconds()
+    if age > max_age_seconds:
+        return False, ReasonCode.MARKET_DATA_STALE
+    return True, ReasonCode.DATA_VALID
+

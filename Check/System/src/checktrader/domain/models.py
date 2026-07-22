@@ -261,6 +261,7 @@ class MarketSnapshot(Serializable):
     account: AccountStatus | None = None
     positions: list[Position] = field(default_factory=list)
     heartbeat_at: datetime | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def mid(self) -> float:

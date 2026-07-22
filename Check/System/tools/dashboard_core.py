@@ -250,9 +250,13 @@ def format_audit_line(entry: dict[str, Any]) -> str:
     strategy = entry.get("selected_strategy") or "-"
     symbol = entry.get("symbol") or "-"
     account = entry.get("account_number") or "-"
+    metrics = entry.get("metrics") or {}
+    counts = ""
+    if isinstance(metrics, dict) and ("m1_count" in metrics or "m15_count" in metrics):
+        counts = f"  m1={metrics.get('m1_count', '-')} m15={metrics.get('m15_count', '-')}"
     return (
         f"{stamp}  {symbol}  acct={account}  decision={decision}  "
-        f"reason={reason}  regime={regime}  strategy={strategy}"
+        f"reason={reason}  regime={regime}  strategy={strategy}{counts}"
     )
 
 
