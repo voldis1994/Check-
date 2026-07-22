@@ -94,6 +94,22 @@ def read_market(bridge_dir: Path, default_symbol: str) -> MarketSnapshot | None:
     ask = float(p.get("ask", bid))
     symbol = str(p.get("symbol", default_symbol))
     m1_bars = _parse_m1_bars(_raw_m1_rows(p))
+    meta: dict[str, Any] = {}
+    for key in (
+        "digits",
+        "point",
+        "tick_size",
+        "tick_value",
+        "stop_level",
+        "freeze_level",
+        "min_lot",
+        "max_lot",
+        "lot_step",
+        "account_number",
+        "magic_number",
+    ):
+        if key in p and p[key] is not None:
+            meta[key] = p[key]
 
     return MarketSnapshot(
         symbol,
@@ -104,6 +120,7 @@ def read_market(bridge_dir: Path, default_symbol: str) -> MarketSnapshot | None:
         [],  # M5/M15 are aggregated internally from M1
         [],
         heartbeat_at=t,
+        meta=meta,
     )
 
 

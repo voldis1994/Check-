@@ -12,7 +12,7 @@ from checktrader.management.manager import manage_position
 from checktrader.market_data.aggregation import aggregate_standard
 from checktrader.market_data.bars import last_closed
 from checktrader.market_data.history import save_history
-from checktrader.market_data.validation import fresh_enough, sequential_bars
+from checktrader.market_data.validation import heartbeat_fresh, sequential_bars
 from checktrader.risk.limits import record_trade_open
 from checktrader.risk.validator import validate_order
 from checktrader.setups.expiry import expire_setups
@@ -58,6 +58,29 @@ def _ack_to_exec_result(ack: Acknowledgement) -> dict[str, object]:
     }
 
 
+def _apply_broker_specs(context: AppContext, market: MarketSnapshot) -> None:
+    meta = market.meta or {}
+    specs = context.specs
+    if "digits" in meta:
+        specs.digits = int(meta["digits"])
+    if "point" in meta:
+        specs.point = float(meta["point"])
+    if "tick_size" in meta:
+        specs.tick_size = float(meta["tick_size"])
+    if "stop_level" in meta:
+        specs.stop_level_points = float(meta["stop_level"])
+    if "freeze_level" in meta:
+        specs.freeze_level_points = float(meta["freeze_level"])
+    if "min_lot" in meta:
+        specs.min_lot = float(meta["min_lot"])
+    if "max_lot" in meta:
+        specs.max_lot = float(meta["max_lot"])
+    if "lot_step" in meta:
+        specs.lot_step = float(meta["lot_step"])
+    if specs.point > 0 and specs.pip_size <= 0:
+        specs.pip_size = specs.point * 10
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Main cycle entry point
 # ──────────────────────────────────────────────────────────────────────────────
@@ -86,11 +109,10 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
 
     # ── Step 2: data validation ─────────────────────────────────────────────
     if is_live:
-        last_m1 = last_closed(market.m1)
-        ok_fresh, reason_fresh = fresh_enough(
-            last_m1,
+        ok_fresh, reason_fresh = heartbeat_fresh(
+            market.heartbeat_at or market.timestamp,
             now,
-            context.config.limits.heartbeat_max_age_seconds,
+            max(context.config.limits.heartbeat_max_age_seconds, 90.0),
         )
         if not ok_fresh:
             audit.set_reason(ReasonCode.DATA_STALE, [reason_fresh.value])
@@ -119,11 +141,17 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
     market.m1 = context.history.get("M1")
     market.m5 = context.history.get("M5")
     market.m15 = context.history.get("M15")
+    audit.metrics["m1_count"] = len(market.m1)
+    audit.metrics["m15_count"] = len(market.m15)
 
     if market.symbol and market.symbol.upper() not in {"", "AUTO"}:
         audit.symbol = market.symbol
         if context.specs.symbol.upper() in {"AUTO", ""}:
             context.specs.symbol = market.symbol
+        _apply_broker_specs(context, market)
+
+    # Persist M1 progress even when higher-TF validation fails later.
+    save_history(context.config.paths.history_file, context.history)
 
     # ── Step 5/6: indicators + regime update ───────────────────────────────
     ok_seq, reason_seq = sequential_bars(market.m15, context.config.instrument.timeframe_decision)
@@ -137,6 +165,35 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
     regime = context.detector.update(market.m15)
     audit.market_regime = regime.regime
     audit.reasons.append(regime.reason)
+    if regime.reason == ReasonCode.HISTORY_INSUFFICIENT:
+        need = context.config.regimes.trend.ema200_period
+        have = len(market.m15)
+        audit.set_reason(
+            ReasonCode.HISTORY_INSUFFICIENT,
+            [f"m15={have}/{need} warming up — waiting for enough closed M15 bars"],
+        )
+        audit.decision = Decision.HOLD
+        ind = regime.indicators
+        audit.indicator_snapshot = {
+            "time": ind.time.isoformat(),
+            "ema_fast": ind.ema_fast,
+            "ema_slow": ind.ema_slow,
+            "ema200": ind.ema200,
+            "atr": ind.atr,
+            "adx": ind.adx,
+            "plus_di": ind.plus_di,
+            "minus_di": ind.minus_di,
+        }
+        if market.account:
+            audit.account_number = market.account.account_id
+        context.state_store.save(context.state)
+        context.metrics.inc("cycles")
+        context.metrics.save(context.config.paths.metrics_file)
+        audit.reasons.append(ReasonCode.CYCLE_COMPLETED)
+        audit.completed_at = datetime.now(UTC)
+        context.audit.write(audit)
+        return audit
+
     # Capture indicator snapshot for the audit
     ind = regime.indicators
     audit.indicator_snapshot = {

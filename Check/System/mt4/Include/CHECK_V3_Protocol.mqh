@@ -103,7 +103,10 @@ string CheckV3UtcIso()
 
 string CheckV3TimeIso(datetime value)
 {
-   string s = TimeToString(value, TIME_DATE | TIME_SECONDS);
+   // Bar open times from iTime() are broker/server time. Convert to GMT so the
+   // trailing Z is honest (otherwise live freshness / session math drifts).
+   datetime gmt = value - (TimeCurrent() - TimeGMT());
+   string s = TimeToString(gmt, TIME_DATE | TIME_SECONDS);
    StringReplace(s, ".", "-");
    StringReplace(s, " ", "T");
    return s + "Z";

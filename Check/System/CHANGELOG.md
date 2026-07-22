@@ -6,6 +6,7 @@
 - Harden bridge market reader: skip invalid M1 bars (missing time) instead of crashing; ignore empty local bridge folders without market JSON.
 - Fix MT4 bridge writes: FileOpen now uses paths relative to `MQL4\\Files` + FILE_ANSI so `latest.json` actually updates (stale bridge root cause).
 - Fix `BARS_NOT_SEQUENTIAL` on real markets: allow session gaps (multiples of TF); use one freshest sticky bridge so two MT4 terminals do not corrupt shared history.
+- Harden live path for NATURALGAS: partial M15 aggregation, heartbeat freshness (not M1 open age), broker GMT bar times, AUTO specs from bridge, clear `HISTORY_INSUFFICIENT m15=N/200` warm-up.
 
 ## v3.0.0
 

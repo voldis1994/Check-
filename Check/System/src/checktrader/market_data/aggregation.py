@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
+from math import ceil
 
 from checktrader.domain.models import Candle
 from checktrader.market_data.bars import closed_bars
@@ -21,15 +22,21 @@ def bucket_start(ts: datetime, minutes: int) -> datetime:
 
 
 def aggregate_m1(candles: list[Candle], target_timeframe: str) -> list[Candle]:
+    """
+    Build higher-TF candles from M1.
+
+    Real broker feeds (e.g. NATURALGAS) often miss minutes inside a bucket.
+    Require at least half the expected M1 bars; do not demand perfect 60s spacing.
+    """
     minutes = timeframe_minutes(target_timeframe)
+    min_bars = max(1, ceil(minutes / 2))
     buckets: dict[datetime, list[Candle]] = {}
     for bar in sorted(closed_bars(candles), key=lambda b: b.time):
         buckets.setdefault(bucket_start(bar.time, minutes), []).append(bar)
-    out = []
-    expected = timedelta(minutes=1)
+    out: list[Candle] = []
     for start, group0 in sorted(buckets.items()):
         group = sorted(group0, key=lambda b: b.time)
-        if len(group) != minutes or any(group[i].time - group[i - 1].time != expected for i in range(1, len(group))):
+        if len(group) < min_bars:
             continue
         out.append(
             Candle(

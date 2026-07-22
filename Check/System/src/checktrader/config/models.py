@@ -240,7 +240,7 @@ class LimitsConfig(StrictModel):
     # Cooldown after a bridge/execution error (seconds)
     cooldown_error_seconds: float = Field(30.0, ge=0.0)
     max_cycles_without_market: int = Field(12, ge=0)
-    heartbeat_max_age_seconds: float = Field(20.0, ge=0.0)
+    heartbeat_max_age_seconds: float = Field(90.0, ge=0.0)
     history_max_bars_m1: int = Field(5000, ge=1)
     history_max_bars_m5: int = Field(1500, ge=1)
     history_max_bars_m15: int = Field(1000, ge=1)

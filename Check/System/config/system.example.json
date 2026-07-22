@@ -168,7 +168,7 @@
     "cooldown_m1_bars": 5,
     "cooldown_error_seconds": 30.0,
     "max_cycles_without_market": 12,
-    "heartbeat_max_age_seconds": 20.0,
+    "heartbeat_max_age_seconds": 90.0,
     "history_max_bars_m1": 5000,
     "history_max_bars_m5": 1500,
     "history_max_bars_m15": 1000

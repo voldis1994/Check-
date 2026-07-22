@@ -18,8 +18,11 @@ def test_example_config_loads() -> None:
     assert cfg.position_sizing.fixed_lot == 0.01
 
 
-def test_live_requires_both_flags() -> None:
+def test_live_observe_allowed_without_trading_enabled() -> None:
+    from checktrader.config.validation import validate_live_ready
+
     cfg = load_config()
     live = cfg.model_copy(update={"runtime": cfg.runtime.model_copy(update={"mode": "live", "trading_enabled": False})})
+    validate_runtime_safety(live)  # soak / observe OK
     with pytest.raises(ConfigurationError):
-        validate_runtime_safety(live)
+        validate_live_ready(live)  # armed live still requires trading_enabled
