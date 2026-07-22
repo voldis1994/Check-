@@ -2,6 +2,14 @@
 
 All notable changes to CHECK SYSTEM are documented here.
 
+## 2.0.1 — 2026-07-22
+
+- **Multi-account AUTO:** one `START_LIVE` trades every discovered MT4 bridge; per-account state under `runtime/state/accounts/`
+- `START_LIVE.bat` re-seeds config every run (`symbol=AUTO`, empty allow-list = all accounts)
+- `UPDATE_AND_START.bat` — git pull main then start
+- `tools/show_bridges.py` lists all active accounts before trading
+- Empty BridgeRootPath + OnTimer EA export; sticky thrash removed from live path
+
 ## 2.0.0 — 2026-07-22
 
 Full production release: clean Python + MT4 bridge under `src/checktrader/`.
