@@ -3,6 +3,7 @@
 ## v3.0.1
 
 - Desktop control panel: `START_DASHBOARD.bat` / `tools/dashboard.py` — start paper/live, activity feed, stop, deploy MT4 (no web UI).
+- Harden bridge market reader: skip invalid M1 bars (missing time) instead of crashing; ignore empty local bridge folders without market JSON.
 
 ## v3.0.0
 

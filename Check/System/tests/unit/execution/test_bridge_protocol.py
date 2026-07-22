@@ -93,11 +93,67 @@ def test_reader_parses_m5_and_m15(tmp_path: Path) -> None:
     assert isinstance(snap.m15, list)
 
 
-def test_reader_returns_none_for_missing_file(tmp_path: Path) -> None:
-    market_dir = tmp_path / "bridge" / "market"
+def test_reader_skips_invalid_bars_without_time(tmp_path: Path) -> None:
+    bridge_dir = tmp_path / "bridge"
+    market_dir = bridge_dir / "market"
     market_dir.mkdir(parents=True)
-    snap = read_market(tmp_path / "bridge", "EURUSD")
-    assert snap is None
+    payload = {
+        "symbol": "EURUSD",
+        "bid": 1.1,
+        "ask": 1.1001,
+        "generated_at_utc": "2026-07-22T16:00:00Z",
+        "bars_m1": [
+            {"open": 1.1, "high": 1.2, "low": 1.0, "close": 1.15},  # missing time
+            {
+                "time": "2026-07-22T16:00:00Z",
+                "open": 1.1,
+                "high": 1.2,
+                "low": 1.0,
+                "close": 1.15,
+                "tick_volume": 10,
+            },
+            {"t": "2026.07.22 16:01:00", "open": 1.15, "high": 1.16, "low": 1.14, "close": 1.155},
+        ],
+    }
+    (market_dir / "latest.json").write_text(json.dumps(payload))
+    snap = read_market(bridge_dir, "EURUSD")
+    assert snap is not None
+    assert len(snap.m1) == 2
+    assert snap.m1[0].time.year == 2026
+
+
+def test_reader_handles_candles_list_shape(tmp_path: Path) -> None:
+    bridge_dir = tmp_path / "bridge"
+    market_dir = bridge_dir / "market"
+    market_dir.mkdir(parents=True)
+    payload = {
+        "symbol": "EURUSD",
+        "bid": 1.1,
+        "ask": 1.1001,
+        "candles": [
+            {"timestamp": 1_784_640_000, "open": 1.0, "high": 1.1, "low": 0.9, "close": 1.05, "volume": 1},
+        ],
+    }
+    (market_dir / "latest.json").write_text(json.dumps(payload))
+    snap = read_market(bridge_dir, "EURUSD")
+    assert snap is not None
+    assert len(snap.m1) == 1
+
+
+def test_discover_bridges_ignores_empty_market_dir(tmp_path: Path) -> None:
+    from checktrader.app.live_loop import discover_bridges
+
+    empty = tmp_path / "runtime" / "bridge"
+    (empty / "market").mkdir(parents=True)
+    (empty / "status").mkdir(parents=True)
+    ready = tmp_path / "ready" / "bridge"
+    (ready / "market").mkdir(parents=True)
+    (ready / "market" / "latest.json").write_text("{}")
+
+    found = discover_bridges(empty, [], include_appdata_metaquotes=False)
+    assert found == []
+    found_ready = discover_bridges(ready, [], include_appdata_metaquotes=False)
+    assert found_ready == [ready.resolve()]
 
 
 def test_reader_parses_status(tmp_path: Path) -> None:

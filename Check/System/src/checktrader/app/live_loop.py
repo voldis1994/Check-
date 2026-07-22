@@ -26,10 +26,10 @@ def discover_bridges(
     configured: Path | None, roots: Iterable[Path], *, include_appdata_metaquotes: bool = True
 ) -> list[Path]:
     """
-    Discover bridge directories.
+    Discover usable bridge directories.
 
-    Each valid bridge dir is the folder that contains market/, status/,
-    commands/, and acknowledgements/ — i.e. .../CHECK_SYSTEM/runtime/bridge.
+    A bridge is usable when it contains market/*.json (MT4 is exporting).
+    Empty template folders like repo runtime/bridge are ignored.
     """
     candidates: list[Path] = []
     if configured is not None:
@@ -51,7 +51,17 @@ def discover_bridges(
                 if base.is_dir():
                     candidates.append(base / "runtime" / "bridge")
 
-    return list({str(p.resolve()): p for p in candidates if p.exists()}.values())
+    ready: dict[str, Path] = {}
+    for path in candidates:
+        if not path.exists() or not path.is_dir():
+            continue
+        market_dir = path / "market"
+        if not market_dir.is_dir():
+            continue
+        if not any(market_dir.glob("*.json")):
+            continue
+        ready[str(path.resolve())] = path.resolve()
+    return list(ready.values())
 
 
 def run_once(context: AppContext, bridge_dir: Path | None = None) -> CycleAudit:
@@ -68,15 +78,25 @@ def run_once(context: AppContext, bridge_dir: Path | None = None) -> CycleAudit:
             return run_cycle(context, None)
         return run_cycle(context)
 
-    market = read_market(bridge, context.specs.symbol)
+    try:
+        market = read_market(bridge, context.specs.symbol)
+    except Exception:  # noqa: BLE001 - bridge I/O must not kill the loop
+        logger.exception("failed reading market from %s", bridge)
+        if is_live:
+            return run_cycle(context, None)
+        return run_cycle(context)
+
     if market is None:
         if is_live:
             logger.warning("bridge dir %s found but market data missing", bridge)
             return run_cycle(context, None)
         return run_cycle(context)
 
-    market.account = read_status(bridge)
-    market.positions = read_positions(bridge)
+    try:
+        market.account = read_status(bridge)
+        market.positions = read_positions(bridge)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed reading status/positions from %s", bridge)
     return run_cycle(context, market)
 
 
@@ -101,15 +121,22 @@ def run_loop(context: AppContext) -> None:
             time.sleep(context.config.runtime.cycle_interval_seconds)
             continue
 
-        if not is_live and not bridges:
-            # Paper mode without any bridge — run a plain paper cycle
-            run_once(context)
-        else:
-            for bridge in bridges or (
-                [] if context.config.paths.bridge_dir is None else [context.config.paths.bridge_dir]
-            ):
-                audit = run_once(context, bridge)
-                if audit.reason_code in {ReasonCode.BRIDGE_UNAVAILABLE, ReasonCode.DATA_STALE}:
-                    logger.warning("cycle skipped: %s", audit.human_readable_reason)
+        try:
+            if not is_live and not bridges:
+                # Paper mode without any bridge — run a plain paper cycle
+                run_once(context)
+            else:
+                for bridge in bridges or (
+                    [] if context.config.paths.bridge_dir is None else [context.config.paths.bridge_dir]
+                ):
+                    try:
+                        audit = run_once(context, bridge)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("cycle failed for bridge %s", bridge)
+                        continue
+                    if audit.reason_code in {ReasonCode.BRIDGE_UNAVAILABLE, ReasonCode.DATA_STALE}:
+                        logger.warning("cycle skipped: %s", audit.human_readable_reason)
+        except Exception:  # noqa: BLE001
+            logger.exception("cycle iteration failed")
 
         time.sleep(context.config.runtime.cycle_interval_seconds)
