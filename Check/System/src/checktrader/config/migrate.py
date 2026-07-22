@@ -1,7 +1,7 @@
 """Keep local system.json trading profile in sync with shipped defaults.
 
-Users should never hand-edit regimes/strategies after a pull. Live/runtime
-settings (mode, trading_enabled, paths, account, instrument) are preserved.
+Users should never hand-edit trading gates after a pull. Live/runtime/account_id
+and paths are preserved; regimes/strategies/risk/limits/spread + equity gates refresh.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 # Sections owned by the repo release profile (always refreshed from example).
-SHIPPED_TRADING_KEYS: tuple[str, ...] = ("regimes", "strategies")
+SHIPPED_TRADING_KEYS: tuple[str, ...] = ("regimes", "strategies", "risk", "limits", "spread")
 
 
 def example_config_path() -> Path:
@@ -26,20 +26,30 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def apply_shipped_trading_profile(data: dict[str, Any], *, example: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return a copy of data with regimes/strategies replaced by shipped example."""
+    """Replace trading-gate sections; keep runtime/paths/account_id."""
     src = example if example is not None else _load_json(example_config_path())
     out = dict(data)
     for key in SHIPPED_TRADING_KEYS:
         if key in src:
             out[key] = src[key]
+    # Soft-patch account equity gates without wiping account_id/currency.
+    if isinstance(src.get("account"), dict):
+        acc = dict(out.get("account") or {})
+        if not acc.get("account_id"):
+            acc["account_id"] = src["account"].get("account_id", "PAPER")
+        if not acc.get("currency"):
+            acc["currency"] = src["account"].get("currency", "USD")
+        acc["min_equity"] = float(src["account"].get("min_equity", 0.0))
+        acc["max_drawdown_percent"] = float(src["account"].get("max_drawdown_percent", 100.0))
+        out["account"] = acc
     return out
 
 
 def sync_system_json(path: Path | str, *, example_path: Path | str | None = None) -> bool:
     """
-    Rewrite regimes/strategies on disk from system.example.json.
+    Rewrite trading-gate sections on disk from system.example.json.
 
-    Preserves runtime, account, paths, instrument, risk, management, execution, etc.
+    Preserves runtime, paths, instrument, account_id, etc.
     Returns True when the file content changed (or was created).
     """
     target = Path(path)
@@ -51,7 +61,7 @@ def sync_system_json(path: Path | str, *, example_path: Path | str | None = None
     if target.exists():
         current = _load_json(target)
         merged = apply_shipped_trading_profile(current, example=example_data)
-        changed = any(current.get(k) != merged.get(k) for k in SHIPPED_TRADING_KEYS)
+        changed = merged != current
     else:
         merged = dict(example_data)
         changed = True

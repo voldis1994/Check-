@@ -25,8 +25,8 @@
   "account": {
     "account_id": "PAPER",
     "currency": "USD",
-    "min_equity": 100.0,
-    "max_drawdown_percent": 25.0
+    "min_equity": 0.0,
+    "max_drawdown_percent": 100.0
   },
   "position": {
     "max_open_positions": 1,
@@ -124,14 +124,18 @@
       "m1_impulse_enabled": true,
       "m1_impulse_lookback": 15,
       "m1_impulse_min_body_atr": 0.05
-    }
+    },
+    "force_entry_when_idle": true,
+    "force_stop_atr": 0.50,
+    "force_tp_rr": 1.20
   },
   "risk": {
-    "daily_loss_limit_r": 3.0,
-    "min_reward_risk": 1.5,
-    "max_stop_atr": 2.0,
-    "min_stop_points": 10.0,
-    "max_stop_points": 10000.0
+    "daily_loss_limit_r": 0.0,
+    "min_reward_risk": 0.0,
+    "max_stop_atr": 3.0,
+    "min_stop_points": 1.0,
+    "max_stop_points": 10000.0,
+    "enforce_account_status": false
   },
   "management": {
     "breakeven_trigger_rr": 1.0,
@@ -153,8 +157,8 @@
     "max_retries": 1
   },
   "spread": {
-    "max_points": 30.0,
-    "max_atr_fraction": 0.15
+    "max_points": 500.0,
+    "max_atr_fraction": 1.0
   },
   "paths": {
     "runtime_dir": "runtime",
@@ -167,10 +171,10 @@
     "appdata_metaquotes_discovery": true
   },
   "limits": {
-    "max_daily_trades": 6,
-    "max_consecutive_losses": 3,
-    "cooldown_m1_bars": 5,
-    "cooldown_error_seconds": 30.0,
+    "max_daily_trades": 0,
+    "max_consecutive_losses": 0,
+    "cooldown_m1_bars": 0,
+    "cooldown_error_seconds": 5.0,
     "max_cycles_without_market": 12,
     "heartbeat_max_age_seconds": 90.0,
     "history_max_bars_m1": 5000,

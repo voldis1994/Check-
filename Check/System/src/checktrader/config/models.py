@@ -36,8 +36,8 @@ class InstrumentConfig(StrictModel):
 class AccountConfig(StrictModel):
     account_id: str = "PAPER"
     currency: str = "USD"
-    min_equity: PositiveFloat = 100.0
-    max_drawdown_percent: float = Field(25.0, ge=0.0, le=100.0)
+    min_equity: float = Field(0.0, ge=0.0)
+    max_drawdown_percent: float = Field(100.0, ge=0.0, le=100.0)
 
 
 class PositionConfig(StrictModel):
@@ -155,19 +155,22 @@ class StrategiesConfig(StrictModel):
     trend_continuation: TrendContinuationConfig = Field(default_factory=TrendContinuationConfig)
     range_reversion: RangeReversionConfig = Field(default_factory=RangeReversionConfig)
     breakout: BreakoutConfig = Field(default_factory=BreakoutConfig)
+    # If strategies would idle-HOLD, still open on M1 momentum (no pointless HOLD loops)
+    force_entry_when_idle: bool = True
+    force_stop_atr: float = Field(0.50, gt=0.0)
+    force_tp_rr: float = Field(1.20, gt=0.0)
 
 
 class RiskConfig(StrictModel):
-    # Maximum aggregate daily loss in R-multiples before trading halts
-    daily_loss_limit_r: float = Field(3.0, ge=0.0)
-    # Minimum reward:risk ratio for any trade
-    min_reward_risk: float = Field(1.5, gt=0.0)
-    # Maximum stop size in ATR; global safety net (strategies also cap internally)
-    max_stop_atr: float = Field(2.0, gt=0.0)
-    # Absolute minimum stop in points (covers instruments with zero stop_level)
-    min_stop_points: float = Field(10.0, gt=0.0)
-    # Absolute maximum stop in points (safety ceiling)
+    # 0 = disabled (no daily R loss halt)
+    daily_loss_limit_r: float = Field(0.0, ge=0.0)
+    # 0 = disabled (no minimum RR gate)
+    min_reward_risk: float = Field(0.0, ge=0.0)
+    max_stop_atr: float = Field(3.0, gt=0.0)
+    min_stop_points: float = Field(1.0, gt=0.0)
     max_stop_points: float = Field(10000.0, gt=0.0)
+    # When false (default): ignore broker connected/trade_allowed/min_equity for entries
+    enforce_account_status: bool = False
 
 
 class ManagementConfig(StrictModel):
@@ -192,8 +195,8 @@ class ExecutionConfig(StrictModel):
 
 
 class SpreadConfig(StrictModel):
-    max_points: float = Field(30.0, ge=0.0)
-    max_atr_fraction: float = Field(0.15, ge=0.0)
+    max_points: float = Field(500.0, ge=0.0)
+    max_atr_fraction: float = Field(1.0, ge=0.0)
 
 
 class PathsConfig(StrictModel):
@@ -208,14 +211,13 @@ class PathsConfig(StrictModel):
 
 
 class LimitsConfig(StrictModel):
-    # Max trades per calendar day
-    max_daily_trades: int = Field(6, ge=0)
-    # Halt after this many consecutive losses
-    max_consecutive_losses: int = Field(3, ge=0)
-    # Cooldown period after a loss, expressed as M1 bar count (1 bar = 1 minute)
-    cooldown_m1_bars: int = Field(5, ge=0)
-    # Cooldown after a bridge/execution error (seconds)
-    cooldown_error_seconds: float = Field(30.0, ge=0.0)
+    # 0 = unlimited (disabled)
+    max_daily_trades: int = Field(0, ge=0)
+    # 0 = disabled
+    max_consecutive_losses: int = Field(0, ge=0)
+    # 0 = no cooldown after losses
+    cooldown_m1_bars: int = Field(0, ge=0)
+    cooldown_error_seconds: float = Field(5.0, ge=0.0)
     max_cycles_without_market: int = Field(12, ge=0)
     heartbeat_max_age_seconds: float = Field(90.0, ge=0.0)
     history_max_bars_m1: int = Field(5000, ge=1)
