@@ -22,6 +22,21 @@ def calculate_recent_price_delta(*, market_bars: tuple[NormalizedMarketBar, ...]
         return 0.0
     return window[-1].close - window[0].close
 
+def evaluate_counter_momentum_filter(*, market_bars: tuple[NormalizedMarketBar, ...], side: str, recent_bars: int) -> str | None:
+    """Block entries against the active micro-move in every regime.
+
+    This is the core buy-on-sell / sell-on-buy guard: do not BUY while the last
+    bars are falling, and do not SELL while the last bars are rising.
+    """
+    if recent_bars <= 0 or not market_bars:
+        return None
+    recent_delta = calculate_recent_price_delta(market_bars=market_bars, recent_bars=recent_bars)
+    if side == 'buy' and recent_delta < 0:
+        return build_reason(REASON_DATA_INVALID, 'counter-momentum: buy blocked while recent move is down', recent_delta=recent_delta)
+    if side == 'sell' and recent_delta > 0:
+        return build_reason(REASON_DATA_INVALID, 'counter-momentum: sell blocked while recent move is up', recent_delta=recent_delta)
+    return None
+
 def evaluate_ranging_entry_filter(*, regime: str, market_bars: tuple[NormalizedMarketBar, ...], side: str, structure_lookback_bars: int, block_ranging_chase_entries: bool, ranging_extreme_threshold: float, ranging_recent_momentum_bars: int) -> str | None:
     """Block wrong-way ranging entries without freezing the whole session.
 

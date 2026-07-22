@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, MutableMapping
@@ -67,11 +68,14 @@ def _write_config(root: Path, *, analysis_overrides: dict[str, Any] | None=None)
     config_path.write_text(json.dumps(payload), encoding='utf-8')
     return config_path
 
-def _startup_runtime(tmp_path: Path, *, analysis_overrides: dict[str, Any] | None=None) -> tuple[LiveRuntime, Instance]:
+def _startup_runtime(tmp_path: Path, *, analysis_overrides: dict[str, Any] | None=None, market_fixture: str | None=None) -> tuple[LiveRuntime, Instance]:
     from engine.core.lifecycle import startup
     config_path = _write_config(tmp_path, analysis_overrides=analysis_overrides)
     instance = _instance()
-    _install_integration_fixtures(SystemPaths(tmp_path), instance)
+    paths = SystemPaths(tmp_path)
+    _install_integration_fixtures(paths, instance)
+    if market_fixture is not None:
+        shutil.copyfile(FIXTURES_DIR / market_fixture, paths.account_dir(instance.account_id) / instance.market_filename())
     runtime = startup(root_path=tmp_path, config_path=config_path)
     return (runtime, instance)
 
@@ -109,7 +113,7 @@ def test_buy_and_sell_candidates_are_calculated(tmp_path: Path) -> None:
 
 def test_wait_decision_includes_reason(tmp_path: Path) -> None:
     equal_score_weights = {'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}
-    runtime, instance = _startup_runtime(tmp_path, analysis_overrides={'weights': equal_score_weights})
+    runtime, instance = _startup_runtime(tmp_path, analysis_overrides={'weights': equal_score_weights}, market_fixture='market_EURUSD_100001_flat.csv')
     result = run_instance_decision_pipeline(runtime, instance, use_global_universe=False)
     assert result.completed
     assert result.decision_result is not None
@@ -149,7 +153,7 @@ def test_decision_journal_contains_all_decisions(tmp_path: Path) -> None:
     assert first.decision_result is not None
     assert first.decision_result.buy_candidate is not None
     assert first.decision_result.sell_candidate is not None
-    equal_score_runtime, equal_instance = _startup_runtime(tmp_path / 'equal_scores', analysis_overrides={'weights': {'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}})
+    equal_score_runtime, equal_instance = _startup_runtime(tmp_path / 'equal_scores', analysis_overrides={'weights': {'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}}, market_fixture='market_EURUSD_100001_flat.csv')
     second = run_instance_decision_pipeline(equal_score_runtime, equal_instance, use_global_universe=False, timestamp_utc='2026-07-07T06:02:00.000Z')
     assert second.completed
     assert second.decision_result is not None

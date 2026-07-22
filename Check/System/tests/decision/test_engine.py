@@ -24,6 +24,9 @@ def _universe() -> UniverseRecord:
 def _bullish_bars() -> tuple[NormalizedMarketBar, ...]:
     return (_bar(0, 1.1, 1.102, 1.099, 1.1015), _bar(1, 1.1015, 1.103, 1.1005, 1.1022), _bar(2, 1.1022, 1.104, 1.101, 1.1031))
 
+def _flat_bars() -> tuple[NormalizedMarketBar, ...]:
+    return (_bar(0, 1.1, 1.101, 1.099, 1.1), _bar(1, 1.1, 1.101, 1.099, 1.1), _bar(2, 1.1, 1.101, 1.099, 1.1))
+
 def _buy_invalid_sell_valid_bars() -> tuple[NormalizedMarketBar, ...]:
     return (_bar(0, 1.103, 1.104, 1.102, 1.103), _bar(1, 1.103, 1.104, 1.102, 1.102))
 
@@ -81,7 +84,7 @@ def test_block_reason_produces_block_decision() -> None:
 
 def test_equal_scores_can_produce_wait_decision() -> None:
     weights = {'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}
-    result = run_decision_engine(**_engine_kwargs(market_bars=_bullish_bars(), weights=weights))
+    result = run_decision_engine(**_engine_kwargs(market_bars=_flat_bars(), weights=weights))
     assert result.buy_candidate.valid
     assert result.sell_candidate.valid
     assert result.buy_score == result.sell_score
@@ -118,7 +121,7 @@ def test_spread_filter_passed_propagates_through_all_decision_paths() -> None:
     accepted = run_decision_engine(**_engine_kwargs(market_bars=_bullish_bars(), relative_spread=1.0))
     buy_path = run_decision_engine(**_engine_kwargs(market_bars=_sell_invalid_buy_valid_bars(), stop_loss_buffer=0.0))
     sell_path = run_decision_engine(**_engine_kwargs(market_bars=_buy_invalid_sell_valid_bars(), stop_loss_buffer=0.0))
-    wait_path = run_decision_engine(**_engine_kwargs(market_bars=_bullish_bars(), weights={'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}))
+    wait_path = run_decision_engine(**_engine_kwargs(market_bars=_flat_bars(), weights={'momentum': 0.0, 'trend': 0.0, 'structure': 0.0, 'pressure': 0.0, 'behavior': 0.0, 'impact': 0.0, 'context': 1.0}))
     block_path = run_decision_engine(**_engine_kwargs(market_bars=_bullish_bars()), block_reason=build_reason(REASON_SPREAD_ABNORMAL, 'relative spread above threshold'))
     rejected = run_decision_engine(**_engine_kwargs(market_bars=_bullish_bars(), relative_spread=2.0, spread_threshold=1.5))
     assert accepted.decision in {Decision.BUY.value, Decision.SELL.value, Decision.WAIT.value}

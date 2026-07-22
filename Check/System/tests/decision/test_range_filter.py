@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from engine.analysis.engine import run_analysis_engine
 from engine.decision.buy import calculate_buy_candidate
 from engine.decision.filters.news_filter import evaluate_news_filter
-from engine.decision.filters.range_filter import evaluate_ranging_entry_filter
+from engine.decision.filters.range_filter import evaluate_counter_momentum_filter, evaluate_ranging_entry_filter
 from engine.decision.filters.spread_filter import evaluate_spread_filter
 from engine.decision.filters.volatility_filter import evaluate_volatility_filter
 from engine.decision.sell import calculate_sell_candidate
@@ -63,7 +63,56 @@ def _bottom_dip_buy() -> tuple[NormalizedMarketBar, ...]:
     # Near range bottom with recent down move — mean-reversion BUY must stay allowed.
     return _range_bottom_after_down_leg()
 
-def test_ranging_filter_blocks_buy_near_range_top() -> None:
+def test_counter_momentum_blocks_sell_while_recent_move_is_up() -> None:
+    bars = (
+        _bar(0, 1.1000, 1.1005, 1.0995, 1.1000),
+        _bar(1, 1.1000, 1.1010, 1.0998, 1.1008),
+        _bar(2, 1.1008, 1.1018, 1.1005, 1.1015),
+        _bar(3, 1.1015, 1.1025, 1.1012, 1.1022),
+        _bar(4, 1.1022, 1.1030, 1.1020, 1.1028),
+    )
+    reason = evaluate_counter_momentum_filter(market_bars=bars, side='sell', recent_bars=3)
+    assert reason is not None
+    assert 'sell blocked while recent move is up' in reason
+
+def test_counter_momentum_blocks_buy_while_recent_move_is_down() -> None:
+    bars = (
+        _bar(0, 1.1030, 1.1035, 1.1028, 1.1030),
+        _bar(1, 1.1030, 1.1032, 1.1018, 1.1020),
+        _bar(2, 1.1020, 1.1022, 1.1008, 1.1010),
+        _bar(3, 1.1010, 1.1012, 1.0998, 1.1000),
+        _bar(4, 1.1000, 1.1002, 1.0994, 1.0996),
+    )
+    reason = evaluate_counter_momentum_filter(market_bars=bars, side='buy', recent_bars=3)
+    assert reason is not None
+    assert 'buy blocked while recent move is down' in reason
+
+def test_counter_momentum_allows_sell_with_down_move() -> None:
+    bars = (
+        _bar(0, 1.1030, 1.1035, 1.1028, 1.1030),
+        _bar(1, 1.1030, 1.1032, 1.1018, 1.1020),
+        _bar(2, 1.1020, 1.1022, 1.1008, 1.1010),
+        _bar(3, 1.1010, 1.1012, 1.0998, 1.1000),
+        _bar(4, 1.1000, 1.1002, 1.0994, 1.0996),
+    )
+    reason = evaluate_counter_momentum_filter(market_bars=bars, side='sell', recent_bars=3)
+    assert reason is None
+
+def test_sell_candidate_is_invalid_when_selling_into_up_move() -> None:
+    bars = (
+        _bar(0, 1.1000, 1.1005, 1.0995, 1.1000),
+        _bar(1, 1.1000, 1.1010, 1.0998, 1.1008),
+        _bar(2, 1.1008, 1.1018, 1.1005, 1.1015),
+        _bar(3, 1.1015, 1.1025, 1.1012, 1.1022),
+        _bar(4, 1.1022, 1.1030, 1.1020, 1.1028),
+    )
+    analysis = run_analysis_engine(_universe(regime='trending'), bars)
+    spread_filter, volatility_filter, news_filter = _passing_filters()
+    candidate = calculate_sell_candidate(analysis=analysis, market_bars=bars, spread_filter=spread_filter, volatility_filter=volatility_filter, news_filter=news_filter, instance_state=_instance_state(), weights={'momentum': 1.0, 'trend': 1.0, 'structure': 1.0, 'pressure': 1.0, 'behavior': 1.0, 'impact': 1.0, 'context': 1.0}, stop_loss_buffer=0.0002, reward_ratio=2.0, structure_lookback_bars=5, block_ranging_chase_entries=False, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
+    assert not candidate.valid
+    assert candidate.invalid_reason is not None
+    assert 'counter-momentum' in candidate.invalid_reason
+
     bars = _range_top_after_up_leg()
     reason = evaluate_ranging_entry_filter(regime='ranging', market_bars=bars, side='buy', structure_lookback_bars=5, block_ranging_chase_entries=True, ranging_extreme_threshold=0.65, ranging_recent_momentum_bars=3)
     assert reason is not None

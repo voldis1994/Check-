@@ -3,7 +3,7 @@ from typing import Literal, Mapping
 from engine.analysis.engine import AnalysisEngineResult
 from engine.analysis.momentum import analyze_momentum_and_trend
 from engine.decision.filters.news_filter import NewsFilterResult
-from engine.decision.filters.range_filter import evaluate_ranging_entry_filter
+from engine.decision.filters.range_filter import evaluate_counter_momentum_filter, evaluate_ranging_entry_filter
 from engine.decision.filters.spread_filter import SpreadFilterResult
 from engine.decision.filters.volatility_filter import VolatilityFilterResult
 from engine.reason import build_reason
@@ -69,6 +69,9 @@ def evaluate_filter_chain(*, analysis: AnalysisEngineResult, spread_filter: Spre
         return news_filter.reason or build_reason(REASON_DATA_INVALID, f'news filter rejected {side} setup')
     if not market_bars:
         return build_reason(REASON_DATA_INVALID, f'market bars required for {side} setup')
+    counter_reason = evaluate_counter_momentum_filter(market_bars=market_bars, side=side, recent_bars=ranging_recent_momentum_bars)
+    if counter_reason is not None:
+        return counter_reason
     ranging_reason = evaluate_ranging_entry_filter(regime=analysis.context.regime, market_bars=market_bars, side=side, structure_lookback_bars=structure_lookback_bars, block_ranging_chase_entries=block_ranging_chase_entries, ranging_extreme_threshold=ranging_extreme_threshold, ranging_recent_momentum_bars=ranging_recent_momentum_bars)
     if ranging_reason is not None:
         return ranging_reason
