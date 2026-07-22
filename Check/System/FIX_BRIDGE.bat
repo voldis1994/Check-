@@ -24,14 +24,14 @@ echo      BridgeRootPath = ^(LEAVE EMPTY for AUTO^)
 echo.
 echo 4^) Toolbar: AutoTrading button must be GREEN / ON
 echo.
-echo 5^) Prefer ONE live MT4 terminal while START_LIVE runs
-echo    ^(two accounts caused account flipping / DATA_STALE^)
+echo 5^) Vairaki konti = OK: uzliec EA uz KATRA konta M1 chart
+echo    Viens START_LIVE.bat tirdza VISUS atrastos MT4 tiltus
 echo.
 echo 6^) Experts tab must show:
 echo    CHECK_SYSTEM_V2 initialized ... bridge=...\MQL4\Files\CHECK_SYSTEM
 echo.
 echo 7^) Then run START_LIVE.bat again
-echo    NO_SIGNAL = OK ^(waiting for setup^)
-echo    DATA_STALE flipping accounts = fix step 5
+echo    Logs: viena rinda per account katra cikla
+echo    NO_SIGNAL = OK ^(gaida setup^)
 echo ============================================
 pause

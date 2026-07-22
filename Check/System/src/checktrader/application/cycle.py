@@ -159,10 +159,10 @@ def _try_retry(
     now_utc: str,
     broker_pos: BrokerPosition | None,
     symbol: str,
+    state_path: Path,
 ) -> CycleResult:
     pending = state.pending
     assert pending is not None
-    state_path = Path(config.paths.root) / config.paths.state / "instance.json"
     magic = config.position.magic_number
     identity = _identity_kwargs(config, status, market)
     commands_dir = bridge_root / "commands"
@@ -268,13 +268,13 @@ def _handle_pending(
     now_utc: str,
     broker_pos: BrokerPosition | None,
     symbol: str,
+    state_path: Path,
 ) -> CycleResult | None:
     pending = state.pending
     if pending is None:
         return None
 
     magic = config.position.magic_number
-    state_path = Path(config.paths.root) / config.paths.state / "instance.json"
     ack_dir = bridge_root / "acknowledgements"
     tol = price_tolerance(
         point=market.specs.point, digits=market.specs.digits, points=config.execution.price_tolerance_points
@@ -348,6 +348,7 @@ def _handle_pending(
                 now_utc=now_utc,
                 broker_pos=broker_pos,
                 symbol=symbol,
+                state_path=state_path,
             )
 
         if pending.action is OrderAction.CLOSE and state.position.state is PositionState.CLOSE_PENDING:
@@ -431,6 +432,7 @@ def _handle_pending(
         now_utc=now_utc,
         broker_pos=broker_pos,
         symbol=symbol,
+        state_path=state_path,
     )
 
 
@@ -443,9 +445,11 @@ def run_cycle(
     bridge_root: Path,
     now_utc: str,
     kill_switch: bool = False,
+    state_path: Path | None = None,
 ) -> CycleResult:
     magic = config.position.magic_number
-    state_path = Path(config.paths.root) / config.paths.state / "instance.json"
+    if state_path is None:
+        state_path = Path(config.paths.root) / config.paths.state / "instance.json"
     identity = _identity_kwargs(config, status, market)
 
     if not account_is_allowed(config, status.account_number):
@@ -486,6 +490,7 @@ def run_cycle(
         now_utc=now_utc,
         broker_pos=broker_pos,
         symbol=symbol,
+        state_path=state_path,
     )
     if pending_result is not None:
         return pending_result

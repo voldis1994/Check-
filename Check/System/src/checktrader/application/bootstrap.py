@@ -17,6 +17,7 @@ def ensure_runtime_dirs(root: Path) -> None:
         "runtime/bridge/acknowledgements",
         "runtime/bridge/archive",
         "runtime/state",
+        "runtime/state/accounts",
         "runtime/logs",
     ):
         (root / rel).mkdir(parents=True, exist_ok=True)

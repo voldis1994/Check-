@@ -31,10 +31,11 @@ echo Redeploying EA files...
 call "%~dp0scripts\deploy_mt4.bat"
 echo.
 echo IMPORTANT:
-echo  - EA BridgeRootPath = EMPTY ^(AUTO^)
+echo  - EA uz KATRA konta M1 chart
+echo  - BridgeRootPath = EMPTY ^(AUTO^)
 echo  - Allow DLL imports = ON
 echo  - AutoTrading = ON
-echo  - Chart comment must show: CHECK V2 bridge=...
+echo  - Multi-account: VIENS START_LIVE tirdza VISUS kontus
 echo.
 echo Starting checktrader...
 %PY% -m checktrader --config config\local\system.json

@@ -77,6 +77,14 @@ def _pending_from_dict(raw: dict[str, Any] | None) -> PendingCommandState | None
     )
 
 
+def account_state_path(root: Path, state_rel: str, account_number: str) -> Path:
+    """Per-account runtime state: runtime/state/accounts/<account>.json."""
+    safe = "".join(ch for ch in str(account_number) if ch.isalnum() or ch in "-_")
+    if not safe:
+        safe = "unknown"
+    return Path(root) / state_rel / "accounts" / f"{safe}.json"
+
+
 def save_instance_state(path: Path, state: InstanceRuntimeState, *, now_utc: str) -> None:
     state.revision += 1
     state.saved_at_utc = now_utc
