@@ -22,6 +22,7 @@ Requires Python **3.12+**. MT4 EA: `mt4/Experts/CHECK_SYSTEM_V2.mq4`.
 - Strategy: `TREND_PULLBACK_BREAK` (M15 → M5 → M1)
 - Protective management: BE net +0.20, ATR trailing grid, high-lock, exit pressure
 - Atomic protocol **2.0.0** under `runtime/bridge/`
+- Windows one-click: `SETUP_ALL.bat`, `DEPLOY_MT4.bat`, `START_LIVE.bat`, `STOP.bat`
 - Windows scripts: `install`, `start_live`, `stop`, `health`, `run_tests`
 
 ### Safety

@@ -17,9 +17,11 @@ Defaults: fixed lot `0.01`, `instrument.symbol = AUTO` (follows MT4 chart), ATR/
 
 ```powershell
 cd Check\System
+# Double-click SETUP_ALL.bat   OR:
 py -3.12 -m pip install -e ".[dev]"
 copy config\system.example.json config\local\system.json
 # edit allowed_account_numbers, paths.root, magic
+# Double-click DEPLOY_MT4.bat then START_LIVE.bat
 py -3.12 -m checktrader --config config\local\system.json
 ```
 
