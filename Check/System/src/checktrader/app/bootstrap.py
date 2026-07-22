@@ -81,3 +81,59 @@ def bootstrap(
         AuditWriter(config.paths.audit_file),
         Metrics(),
     )
+
+
+def spawn_account_context(base: AppContext, *, account_id: str, bridge_dir: Path) -> AppContext:
+    """
+    Isolated context for one MT4 account.
+
+    Keeps shared audit stream, but separate history/state/dedupe/execution bridge
+    so two terminals never corrupt each other's bars or positions.
+    """
+    acc_dir = base.config.paths.runtime_dir / "accounts" / account_id
+    acc_dir.mkdir(parents=True, exist_ok=True)
+    history_file = acc_dir / "history.json"
+    state_file = acc_dir / "state.json"
+    dedupe_file = acc_dir / "dedupe.json"
+    metrics_file = acc_dir / "metrics.json"
+
+    config = base.config.model_copy(
+        deep=True,
+        update={
+            "paths": base.config.paths.model_copy(
+                update={
+                    "history_file": history_file,
+                    "state_file": state_file,
+                    "metrics_file": metrics_file,
+                    "bridge_dir": bridge_dir,
+                }
+            ),
+            "account": base.config.account.model_copy(update={"account_id": account_id}),
+            "runtime": base.config.runtime.model_copy(
+                update={"instance_id": f"{base.config.runtime.instance_id}-{account_id}"}
+            ),
+        },
+    )
+
+    history = load_history(
+        history_file,
+        {
+            "M1": config.limits.history_max_bars_m1,
+            "M5": config.limits.history_max_bars_m5,
+            "M15": config.limits.history_max_bars_m15,
+        },
+    )
+    state_store = StateStore(state_file)
+    state = state_store.load(config.runtime.instance_id)
+    return AppContext(
+        config,
+        symbol_specs(config),
+        state,
+        history,
+        state_store,
+        RegimeDetector(config),
+        StrategyRouter(),
+        ExecutionCoordinator(config, bridge_dir, dedupe_file),
+        base.audit,
+        Metrics(),
+    )

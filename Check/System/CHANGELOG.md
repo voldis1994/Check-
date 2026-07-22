@@ -7,6 +7,7 @@
 - Fix MT4 bridge writes: FileOpen now uses paths relative to `MQL4\\Files` + FILE_ANSI so `latest.json` actually updates (stale bridge root cause).
 - Fix `BARS_NOT_SEQUENTIAL` on real markets: allow session gaps (multiples of TF); use one freshest sticky bridge so two MT4 terminals do not corrupt shared history.
 - Harden live path for NATURALGAS: partial M15 aggregation, heartbeat freshness (not M1 open age), broker GMT bar times, AUTO specs from bridge, clear `HISTORY_INSUFFICIENT m15=N/200` warm-up.
+- Multi-account: every discovered MT4 bridge runs each cycle with isolated history/state/dedupe under `runtime/accounts/<id>/` (no more sticky single-account).
 
 ## v3.0.0
 

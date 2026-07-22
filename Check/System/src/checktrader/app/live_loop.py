@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
-from checktrader.app.bootstrap import AppContext
+from checktrader.app.bootstrap import AppContext, spawn_account_context
 from checktrader.app.cycle import run_cycle
 from checktrader.bridge.reader import read_market, read_positions, read_status
 from checktrader.domain.enums import ReasonCode
@@ -15,6 +17,7 @@ from checktrader.domain.models import CycleAudit
 logger = logging.getLogger(__name__)
 
 _STOP_FILE = "STOP_TRADING"
+_SAFE_ACCOUNT = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _stop_requested(runtime_dir: Path) -> bool:
@@ -35,7 +38,6 @@ def discover_bridges(
     if configured is not None:
         candidates.append(configured)
 
-    # Caller-supplied discovery roots
     patterns = ("**/Files/CHECK_SYSTEM", "**/Files/CHECK_SYSTEM_V3")
     for root in roots:
         for pattern in patterns:
@@ -43,7 +45,6 @@ def discover_bridges(
                 if base.is_dir():
                     candidates.append(base / "runtime" / "bridge")
 
-    # APPDATA MetaQuotes Terminal discovery (Windows path convention)
     if include_appdata_metaquotes and os.environ.get("APPDATA"):
         base_mq = Path(os.environ["APPDATA"]) / "MetaQuotes" / "Terminal"
         for pattern in ("**/MQL4/Files/CHECK_SYSTEM", "**/MQL4/Files/CHECK_SYSTEM_V3"):
@@ -75,12 +76,7 @@ def _market_mtime(bridge: Path) -> float:
 
 
 def select_bridge(bridges: list[Path], sticky: Path | None = None, *, max_sticky_age_s: float = 90.0) -> Path | None:
-    """
-    Prefer one freshest bridge.
-
-    Mixing multiple MT4 bridges into one shared history causes BARS_NOT_SEQUENTIAL.
-    Keep a sticky bridge while its market/latest.json stays fresh.
-    """
+    """Return freshest bridge (kept for helpers/tests). Multi-account loop uses all bridges."""
     if not bridges:
         return None
     now = time.time()
@@ -93,23 +89,92 @@ def select_bridge(bridges: list[Path], sticky: Path | None = None, *, max_sticky
     return ranked[0]
 
 
+def safe_account_id(raw: str) -> str:
+    cleaned = _SAFE_ACCOUNT.sub("_", raw.strip())
+    return cleaned or "unknown"
+
+
+def resolve_account_id(bridge: Path) -> str:
+    """Prefer broker account from status/market; fall back to terminal folder id."""
+    try:
+        status = read_status(bridge)
+    except Exception:  # noqa: BLE001
+        status = None
+    if status is not None and status.account_id:
+        return safe_account_id(status.account_id)
+
+    try:
+        market = read_market(bridge, "AUTO")
+    except Exception:  # noqa: BLE001
+        market = None
+    if market is not None:
+        meta_acct = str((market.meta or {}).get("account_number") or "")
+        if meta_acct:
+            return safe_account_id(meta_acct)
+
+    # .../Terminal/<HASH>/MQL4/Files/CHECK_SYSTEM/runtime/bridge
+    parts = bridge.resolve().parts
+    for i, part in enumerate(parts):
+        if part == "Terminal" and i + 1 < len(parts):
+            return safe_account_id(f"term-{parts[i + 1][:12]}")
+    return safe_account_id(bridge.name)
+
+
+@dataclass(slots=True)
+class AccountSession:
+    account_id: str
+    bridge_dir: Path
+    context: AppContext
+
+
+class AccountSessionBook:
+    """One isolated engine context per MT4 account/bridge."""
+
+    def __init__(self, base: AppContext) -> None:
+        self.base = base
+        self._sessions: dict[str, AccountSession] = {}
+
+    def get(self, bridge: Path) -> AccountSession:
+        account_id = resolve_account_id(bridge)
+        existing = self._sessions.get(account_id)
+        if existing is not None:
+            if existing.bridge_dir.resolve() != bridge.resolve():
+                logger.info(
+                    "account %s bridge moved %s -> %s",
+                    account_id,
+                    existing.bridge_dir,
+                    bridge,
+                )
+                existing.bridge_dir = bridge
+                existing.context.execution.bridge_dir = bridge
+            return existing
+
+        ctx = spawn_account_context(self.base, account_id=account_id, bridge_dir=bridge)
+        session = AccountSession(account_id=account_id, bridge_dir=bridge, context=ctx)
+        self._sessions[account_id] = session
+        logger.info("multi-account session ready account=%s bridge=%s", account_id, bridge)
+        return session
+
+    @property
+    def account_ids(self) -> list[str]:
+        return sorted(self._sessions)
+
+
 def run_once(context: AppContext, bridge_dir: Path | None = None) -> CycleAudit:
     is_live = context.config.runtime.mode == "live"
 
     if not is_live and bridge_dir is None:
-        # Pure paper mode, no bridge — run synthetic cycle
         return run_cycle(context)
 
     bridge = bridge_dir or context.config.paths.bridge_dir
     if bridge is None:
         if is_live:
-            # Live mode with no bridge is an error; cycle.py will record BRIDGE_UNAVAILABLE
             return run_cycle(context, None)
         return run_cycle(context)
 
     try:
         market = read_market(bridge, context.specs.symbol)
-    except Exception:  # noqa: BLE001 - bridge I/O must not kill the loop
+    except Exception:  # noqa: BLE001
         logger.exception("failed reading market from %s", bridge)
         if is_live:
             return run_cycle(context, None)
@@ -130,9 +195,10 @@ def run_once(context: AppContext, bridge_dir: Path | None = None) -> CycleAudit:
 
 
 def run_loop(context: AppContext) -> None:
+    """Run forever: every discovered MT4 account/bridge gets its own cycle each tick."""
     runtime_dir = context.config.paths.runtime_dir
     is_live = context.config.runtime.mode == "live"
-    sticky_bridge: Path | None = None
+    book = AccountSessionBook(context)
 
     while True:
         if _stop_requested(runtime_dir):
@@ -147,33 +213,43 @@ def run_loop(context: AppContext) -> None:
 
         if is_live and not bridges:
             logger.info("Live mode: no bridge directories found — waiting for MT4 to connect")
-            # Do NOT fall back to paper trading in live mode
             time.sleep(context.config.runtime.cycle_interval_seconds)
             continue
 
         try:
             if not is_live and not bridges:
-                # Paper mode without any bridge — run a plain paper cycle
                 run_once(context)
             else:
-                chosen = select_bridge(bridges, sticky_bridge)
-                if chosen is None and context.config.paths.bridge_dir is not None:
-                    chosen = context.config.paths.bridge_dir
-                if chosen is None:
-                    time.sleep(context.config.runtime.cycle_interval_seconds)
-                    continue
-                if sticky_bridge is None or sticky_bridge.resolve() != chosen.resolve():
-                    if sticky_bridge is not None:
-                        logger.info("switching bridge %s -> %s (clearing history)", sticky_bridge, chosen)
-                        context.history.clear()
-                    sticky_bridge = chosen
-                try:
-                    audit = run_once(context, chosen)
-                except Exception:  # noqa: BLE001
-                    logger.exception("cycle failed for bridge %s", chosen)
-                else:
+                ordered = sorted(bridges, key=_market_mtime, reverse=True)
+                if not ordered and context.config.paths.bridge_dir is not None:
+                    ordered = [context.config.paths.bridge_dir]
+                logger.info(
+                    "cycle tick bridges=%s accounts_known=%s",
+                    len(ordered),
+                    ",".join(book.account_ids) or "-",
+                )
+                for bridge in ordered:
+                    session: AccountSession | None = None
+                    try:
+                        session = book.get(bridge)
+                        audit = run_once(session.context, session.bridge_dir)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("cycle failed for bridge %s", bridge)
+                        continue
+                    account_id = session.account_id if session is not None else "?"
                     if audit.reason_code in {ReasonCode.BRIDGE_UNAVAILABLE, ReasonCode.DATA_STALE}:
-                        logger.warning("cycle skipped: %s", audit.human_readable_reason)
+                        logger.warning(
+                            "cycle skipped account=%s reason=%s",
+                            account_id,
+                            audit.human_readable_reason,
+                        )
+                    else:
+                        logger.info(
+                            "cycle ok account=%s symbol=%s reason=%s",
+                            account_id,
+                            audit.symbol,
+                            audit.reason_code,
+                        )
         except Exception:  # noqa: BLE001
             logger.exception("cycle iteration failed")
 

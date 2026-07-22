@@ -280,20 +280,29 @@ class DashboardApp:
         running = self.engine.running
         pid = self.engine.pid
         engine_mode = self.engine.mode or health.mode
-        market_age = health.bridges[0].market_age_s if health.bridges else None
-        stale = market_age is not None and market_age > 30
+        ages = [b.market_age_s for b in health.bridges if b.market_age_s is not None]
+        stale = bool(ages) and all(a > 30 for a in ages)
+        partial_stale = bool(ages) and any(a > 30 for a in ages) and not stale
+        n_accounts = len(health.bridges)
 
         if running and stale:
-            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — BRIDGE STALE")
+            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — ALL BRIDGES STALE")
             self.state_banner.configure(
-                text="RUNNING — BRIDGE STALE (EA nav raksta svaigus failus)",
+                text="RUNNING — ALL BRIDGES STALE (pārbaudi abus MT4 EA)",
+                bg=COLORS["warn_bg"],
+                fg=COLORS["warn"],
+            )
+        elif running and partial_stale:
+            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — {n_accounts} accounts")
+            self.state_banner.configure(
+                text=f"RUNNING — {engine_mode.upper()} · {n_accounts} accounts (daži STALE)",
                 bg=COLORS["warn_bg"],
                 fg=COLORS["warn"],
             )
         elif running:
-            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode})")
+            self.status_vars["engine"].set(f"RUNNING pid={pid} ({engine_mode}) — {n_accounts} accounts")
             self.state_banner.configure(
-                text=f"RUNNING — {engine_mode.upper()}",
+                text=f"RUNNING — {engine_mode.upper()} · {n_accounts} accounts",
                 bg=COLORS["go_bg"] if engine_mode == "paper" else COLORS["warn_bg"],
                 fg=COLORS["go"] if engine_mode == "paper" else COLORS["warn"],
             )
@@ -319,13 +328,21 @@ class DashboardApp:
         self.status_vars["stop"].set("PRESENT" if health.stop_present else "absent")
 
         if health.bridges:
-            bridge = health.bridges[0]
-            short = str(bridge.path)
-            if len(short) > 48:
-                short = "…" + short[-47:]
-            self.status_vars["bridge"].set(f"{len(health.bridges)} found · {short}")
-            self.status_vars["market"].set(f"{format_age(bridge.market_age_s)} ({bridge.market_file or '-'})")
-            self.status_vars["status"].set(f"{format_age(bridge.status_age_s)} ({bridge.status_file or '-'})")
+            accounts = ", ".join(
+                f"{b.account_id}:{format_age(b.market_age_s)}" for b in health.bridges
+            )
+            self.status_vars["bridge"].set(f"{len(health.bridges)} accounts · {accounts}")
+            # Show freshest bridge detail in market/status rows
+            bridge = sorted(
+                health.bridges,
+                key=lambda b: b.market_age_s if b.market_age_s is not None else 1e9,
+            )[0]
+            self.status_vars["market"].set(
+                f"{format_age(bridge.market_age_s)} acct={bridge.account_id} ({bridge.market_file or '-'})"
+            )
+            self.status_vars["status"].set(
+                f"{format_age(bridge.status_age_s)} acct={bridge.account_id} ({bridge.status_file or '-'})"
+            )
             if stale and not self._stale_warned:
                 self._stale_warned = True
                 self._append_activity(
