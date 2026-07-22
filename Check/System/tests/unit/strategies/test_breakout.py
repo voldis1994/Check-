@@ -318,3 +318,9 @@ def test_m1_impulse_opens_on_range_break() -> None:
     assert result.signal is not None
     assert result.signal.side == Side.BUY
     assert (result.diagnostics or {}).get("mode") == "m1_impulse"
+    # SL must sit under the trigger candle, not the whole lookback range.
+    assert result.signal.stop_loss is not None
+    assert result.signal.entry_price - result.signal.stop_loss <= cfg.strategies.force_stop_atr * float(
+        (result.diagnostics or {}).get("atr") or 1.0
+    ) + 1e-9
+    assert result.signal.take_profit is None

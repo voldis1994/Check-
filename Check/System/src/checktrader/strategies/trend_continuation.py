@@ -12,6 +12,7 @@ from checktrader.market_data.indicators import atr, ema
 from checktrader.market_data.swings import last_swing_high, last_swing_low
 from checktrader.setups.state_machine import transition
 from checktrader.strategies.base import StrategyContext
+from checktrader.strategies.exits import hard_take_profit_price
 
 
 def _slope(vals: list[float | None], lookback: int) -> float | None:
@@ -187,10 +188,12 @@ class TrendContinuationStrategy:
                 transition(setup, SetupState.TRIGGERED)
                 context.setups.upsert(setup)
                 entry = context.market.ask if setup.side == Side.BUY else context.market.bid
-                tp = (
-                    entry + (entry - setup.stop_loss) * cfg.take_profit_rr
-                    if setup.side == Side.BUY
-                    else entry - (setup.stop_loss - entry) * cfg.take_profit_rr
+                tp = hard_take_profit_price(
+                    entry=entry,
+                    stop=setup.stop_loss,
+                    side=setup.side,
+                    rr=cfg.take_profit_rr,
+                    enabled=context.config.management.hard_take_profit,
                 )
                 reason = ReasonCode.TREND_BUY_SIGNAL if setup.side == Side.BUY else ReasonCode.TREND_SELL_SIGNAL
                 return StrategyResult(
@@ -333,7 +336,13 @@ class TrendContinuationStrategy:
             if stop >= trigger_price:
                 return StrategyResult(Decision.HOLD, ReasonCode.TREND_STRUCTURE_INVALID, diagnostics=arm_diag)
             rough_entry = trigger_price + cfg.entry_distance_atr * a
-            tp = rough_entry + (rough_entry - stop) * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=rough_entry,
+                stop=stop,
+                side=Side.BUY,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
         else:
             swing = last_swing_high(m5_bars, cfg.swing_lookback)
             raw_stop = (swing.price + cfg.stop_buffer_atr * a) if swing else (last_m5.high + cfg.stop_buffer_atr * a)
@@ -343,7 +352,13 @@ class TrendContinuationStrategy:
             if stop <= trigger_price:
                 return StrategyResult(Decision.HOLD, ReasonCode.TREND_STRUCTURE_INVALID, diagnostics=arm_diag)
             rough_entry = trigger_price - cfg.entry_distance_atr * a
-            tp = rough_entry - (stop - rough_entry) * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=rough_entry,
+                stop=stop,
+                side=Side.SELL,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
 
         expiry = last_m5.time + timedelta(minutes=cfg.expiry_m1_bars)
         setup = Setup.create(
@@ -404,7 +419,13 @@ class TrendContinuationStrategy:
             stop = min(last.low, ema20) - cfg.stop_buffer_atr * a
             if stop >= entry:
                 return None
-            tp = entry + (entry - stop) * cfg.take_profit_rr
+            tp = hard_take_profit_price(
+                entry=entry,
+                stop=stop,
+                side=Side.BUY,
+                rr=cfg.take_profit_rr,
+                enabled=context.config.management.hard_take_profit,
+            )
             return StrategyResult(
                 Decision.OPEN,
                 ReasonCode.TREND_BUY_SIGNAL,
@@ -426,7 +447,13 @@ class TrendContinuationStrategy:
         stop = max(last.high, ema20) + cfg.stop_buffer_atr * a
         if stop <= entry:
             return None
-        tp = entry - (stop - entry) * cfg.take_profit_rr
+        tp = hard_take_profit_price(
+            entry=entry,
+            stop=stop,
+            side=Side.SELL,
+            rr=cfg.take_profit_rr,
+            enabled=context.config.management.hard_take_profit,
+        )
         return StrategyResult(
             Decision.OPEN,
             ReasonCode.TREND_SELL_SIGNAL,

@@ -9,7 +9,7 @@ Risk management validates a strategy signal before a command is written. It does
 - `position.max_open_positions = 1`
 - `position.allow_hedging = false`
 - `position_sizing.method = "fixed_lot"`
-- `position_sizing.fixed_lot = 0.01`
+- `position_sizing.fixed_lot = 0.02`
 - `risk.min_stop_points = 50.0`
 - `risk.max_stop_points = 5000.0`
 - `risk.min_reward_risk = 1.20`

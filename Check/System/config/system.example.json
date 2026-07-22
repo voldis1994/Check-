@@ -31,11 +31,11 @@
   "position": {
     "max_open_positions": 1,
     "allow_hedging": false,
-    "default_lot": 0.01
+    "default_lot": 0.02
   },
   "position_sizing": {
     "method": "fixed_lot",
-    "fixed_lot": 0.01,
+    "fixed_lot": 0.02,
     "min_lot": 0.01,
     "max_lot": 100.0,
     "lot_step": 0.01
@@ -89,8 +89,8 @@
       "body_ratio_min": 0.25,
       "max_candle_atr": 4.0,
       "entry_distance_atr": 0.80,
-      "stop_buffer_atr": 0.15,
-      "stop_max_atr": 2.5,
+      "stop_buffer_atr": 0.08,
+      "stop_max_atr": 1.20,
       "take_profit_rr": 1.5,
       "expiry_m1_bars": 12,
       "immediate_m1_entry": true
@@ -101,7 +101,7 @@
       "adx_period": 14,
       "zone_pct": 0.30,
       "wick_pct": 0.20,
-      "stop_buffer_atr": 0.20,
+      "stop_buffer_atr": 0.08,
       "take_profit_rr": 1.5,
       "expiry_m1_bars": 6
     },
@@ -118,7 +118,7 @@
       "breakout_buffer_atr": 0.05,
       "retest_tol_atr": 0.20,
       "false_breakout_close_back_atr": 0.15,
-      "stop_buffer_atr": 0.20,
+      "stop_buffer_atr": 0.08,
       "take_profit_rr": 1.5,
       "expiry_m1_bars": 8,
       "m1_impulse_enabled": true,
@@ -126,25 +126,26 @@
       "m1_impulse_min_body_atr": 0.05
     },
     "force_entry_when_idle": true,
-    "force_stop_atr": 0.50,
+    "force_stop_atr": 0.18,
     "force_tp_rr": 1.20
   },
   "risk": {
     "daily_loss_limit_r": 0.0,
     "min_reward_risk": 0.0,
-    "max_stop_atr": 3.0,
+    "max_stop_atr": 1.50,
     "min_stop_points": 1.0,
     "max_stop_points": 10000.0,
     "enforce_account_status": false
   },
   "management": {
-    "breakeven_trigger_rr": 1.0,
+    "breakeven_trigger_rr": 0.40,
     "breakeven_offset_points": 2.0,
-    "trailing_start_rr": 1.5,
-    "trend_trailing_atr_multiplier": 1.0,
-    "breakout_trailing_atr_multiplier": 1.2,
-    "range_trailing_atr_multiplier": 0.8,
+    "trailing_start_rr": 0.35,
+    "trend_trailing_atr_multiplier": 0.70,
+    "breakout_trailing_atr_multiplier": 0.80,
+    "range_trailing_atr_multiplier": 0.55,
     "take_profit_rr": 2.0,
+    "hard_take_profit": false,
     "partial_close_enabled": false,
     "exit_on_regime_flip": true
   },
