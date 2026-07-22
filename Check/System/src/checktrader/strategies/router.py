@@ -17,7 +17,7 @@ class StrategyRouter:
     """
     Priority order:
       1. BREAKOUT — evaluated in any regime except UNKNOWN
-      2. TREND_CONTINUATION — only in TREND_UP / TREND_DOWN
+      2. TREND_CONTINUATION — TREND_UP / TREND_DOWN / TRANSITION
       3. RANGE_REVERSION — only in RANGE
 
     Special regime handling:
