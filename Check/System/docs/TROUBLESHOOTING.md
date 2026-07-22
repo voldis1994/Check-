@@ -14,6 +14,10 @@
 
 **Fix:** reattach EA, fix path, enable DLLs, wait for ticks; use `python tools/inspect_bridge.py`.
 
+If logs flip between two `account=` / `bridge=mt4-files:...` values every second, you have **two MT4 terminals** both writing bridges. `START_LIVE` now locks to one for the session — still prefer **one** live terminal, or pin `account.allowed_account_numbers` to the account you want.
+
+`NO_SIGNAL` with `action=NONE` means the stack is healthy and waiting for a TREND_PULLBACK_BREAK setup — not a bridge failure.
+
 ## Broker error 130 (invalid stops)
 
 SL/TP too close to market or wrong side of price; stop/freeze levels violated.

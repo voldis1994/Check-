@@ -29,6 +29,10 @@ def _snapshot_score(bridge: Path) -> tuple[int, float]:
     return count, newest
 
 
+def bridge_has_snapshots(bridge: Path) -> bool:
+    return _snapshot_score(bridge)[0] >= 2
+
+
 def discover_mt4_bridges() -> list[BridgeLocation]:
     """Find CHECK_SYSTEM bridge folders under MetaQuotes Terminal data dirs."""
     appdata = os.environ.get("APPDATA", "")
@@ -59,7 +63,6 @@ def resolve_bridge_directory(*, configured_bridge: Path) -> BridgeLocation:
     """
     configured_bridge.mkdir(parents=True, exist_ok=True)
     candidates = [BridgeLocation(configured_bridge, "config")] + discover_mt4_bridges()
-    # Ensure directories exist for writing commands into chosen location later
     best = BridgeLocation(configured_bridge, "config")
     best_score = _snapshot_score(configured_bridge)
     for loc in candidates[1:]:
@@ -75,6 +78,31 @@ def resolve_bridge_directory(*, configured_bridge: Path) -> BridgeLocation:
     return best
 
 
+def stick_or_resolve_bridge(
+    *,
+    configured_bridge: Path,
+    locked: BridgeLocation | None,
+    missing_cycles: int,
+    unlock_after_missing: int = 40,
+) -> tuple[BridgeLocation, int, bool]:
+    """
+    Keep one MT4 bridge for the process lifetime.
+
+    With two terminals writing NATURALGAS, mtime races used to flip accounts every
+    cycle (DATA_STALE / wrong account state). Stay locked while snapshots exist;
+    only rediscover after unlock_after_missing empty cycles.
+    """
+    if locked is not None:
+        if bridge_has_snapshots(locked.bridge_root):
+            return locked, 0, False
+        missing = missing_cycles + 1
+        if missing < unlock_after_missing:
+            return locked, missing, False
+
+    loc = resolve_bridge_directory(configured_bridge=configured_bridge)
+    return loc, 0, True
+
+
 def bridge_wait_hint(configured_bridge: Path) -> str:
     lines = [
         f"waiting for market/status under: {configured_bridge}",
@@ -84,6 +112,7 @@ def bridge_wait_hint(configured_bridge: Path) -> str:
         "  3) BridgeRootPath empty (AUTO) OR set to Check\\System folder",
         "  4) MetaEditor F7 compile succeeded (0 errors)",
         "  5) Experts tab must show: CHECK_SYSTEM_V2 initialized ... bridge=...",
+        "  6) Prefer ONE live MT4 terminal (or pin account.allowed_account_numbers)",
     ]
     discovered = discover_mt4_bridges()
     if discovered:

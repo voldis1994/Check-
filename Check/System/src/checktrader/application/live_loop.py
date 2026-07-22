@@ -7,7 +7,12 @@ from pathlib import Path
 
 from checktrader.application.bootstrap import bootstrap
 from checktrader.application.cycle import run_cycle
-from checktrader.execution.bridge_discover import bridge_wait_hint, resolve_bridge_directory
+from checktrader.execution.bridge_discover import (
+    BridgeLocation,
+    bridge_wait_hint,
+    discover_mt4_bridges,
+    stick_or_resolve_bridge,
+)
 from checktrader.execution.snapshot_select import select_latest_snapshot
 from checktrader.market_data.loader import parse_market_snapshot
 from checktrader.market_data.status import parse_status_snapshot
@@ -21,9 +26,27 @@ def run_trading_loop(*, config_path: Path, once: bool = False, require_live_acco
     configured_bridge = (root / config.paths.bridge).resolve()
     stop_file = root / "runtime" / "STOP_TRADING"
     wait_logs = 0
+    locked: BridgeLocation | None = None
+    missing_cycles = 0
     while True:
         now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
-        bridge_loc = resolve_bridge_directory(configured_bridge=configured_bridge)
+        bridge_loc, missing_cycles, relocked = stick_or_resolve_bridge(
+            configured_bridge=configured_bridge,
+            locked=locked,
+            missing_cycles=missing_cycles,
+        )
+        if relocked:
+            locked = bridge_loc
+            others = [b for b in discover_mt4_bridges() if b.bridge_root != bridge_loc.bridge_root]
+            if others:
+                logger.warning(
+                    "locked bridge source=%s path=%s (ignoring %s other MT4 bridge(s) this session)",
+                    bridge_loc.source,
+                    bridge_loc.bridge_root,
+                    len(others),
+                )
+            else:
+                logger.info("locked bridge source=%s path=%s", bridge_loc.source, bridge_loc.bridge_root)
         bridge = bridge_loc.bridge_root
         market_choice = select_latest_snapshot(bridge / "market")
         status_choice = select_latest_snapshot(bridge / "status")

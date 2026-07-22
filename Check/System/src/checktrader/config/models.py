@@ -91,8 +91,8 @@ class StrategyConfig(BaseModel):
 
 
 class ExecutionConfig(BaseModel):
-    maximum_status_age_ms: int = 2000
-    maximum_market_age_ms: int = 1500
+    maximum_status_age_ms: int = 4000
+    maximum_market_age_ms: int = 3500
     ack_timeout_ms: int = 5000
     maximum_retries: int = 3
     retry_delay_ms: int = 750
