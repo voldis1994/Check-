@@ -172,6 +172,10 @@ class BreakoutConfig(StrictModel):
     stop_buffer_atr: float = Field(0.20, ge=0.0)
     take_profit_rr: float = Field(2.0, gt=0.0)
     expiry_m1_bars: int = Field(8, ge=1)
+    # M1 impulse: catch staircase / momentum breaks that never form a clean M5 box retest
+    m1_impulse_enabled: bool = True
+    m1_impulse_lookback: int = Field(30, ge=5)
+    m1_impulse_min_body_atr: float = Field(0.12, ge=0.0)
 
 
 class StrategiesConfig(StrictModel):

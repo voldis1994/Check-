@@ -282,7 +282,7 @@ def test_false_breakout_cancels_armed() -> None:
 
 
 def test_insufficient_m5_bars_returns_not_ready() -> None:
-    """Fewer than box_min_m5_bars + 1 bars → BREAKOUT_FILTERS_NOT_READY."""
+    """Fewer than box_min_m5_bars + 1 bars → BREAKOUT_FILTERS_NOT_READY (no M1 impulse)."""
     m5_bars = [_candle(i, 1.1, 1.11, 1.09, 1.10) for i in range(3)]  # way too few
     m15_bars = _m15_trend_bars(30, 1.09)
     bar_time = m15_bars[-1].time
@@ -291,3 +291,30 @@ def test_insufficient_m5_bars_returns_not_ready() -> None:
     result = _STRATEGY.evaluate(ctx)
     assert result.decision == Decision.HOLD
     assert result.reason in {ReasonCode.BREAKOUT_FILTERS_NOT_READY, ReasonCode.BREAKOUT_BOX_PENDING}
+
+
+def test_m1_impulse_opens_on_range_break() -> None:
+    """Staircase M1 close beyond prior lookback high → immediate BUY (no retest)."""
+    cfg = load_config()
+    lookback = cfg.strategies.breakout.m1_impulse_lookback
+    base = 2.90
+    m1: list[Candle] = []
+    for i in range(lookback):
+        t = datetime(2026, 7, 22, 16, 0, tzinfo=UTC) + timedelta(minutes=i)
+        m1.append(Candle(t, base, base + 0.002, base - 0.001, base + 0.0005, 1.0, "M1", True))
+    prior_hi = max(b.high for b in m1)
+    break_close = prior_hi + 0.01
+    t = datetime(2026, 7, 22, 16, 0, tzinfo=UTC) + timedelta(minutes=lookback)
+    m1.append(Candle(t, prior_hi, break_close + 0.002, prior_hi - 0.001, break_close, 1.0, "M1", True))
+
+    # Enough M15 for ATR; sparse M5 so classic box path falls through to impulse
+    m15_bars = _m15_trend_bars(40, 2.88, drift=0.0005)
+    m5_bars = [_candle(i, 2.90, 2.902, 2.898, 2.901) for i in range(3)]
+    snap = _range_regime(m1[-1].time)
+    ctx = _make_context(m5_bars, m15_bars, snap, break_close, m1_bars=m1)
+    result = _STRATEGY.evaluate(ctx)
+    assert result.decision == Decision.OPEN
+    assert result.reason == ReasonCode.BREAKOUT_BUY_SIGNAL
+    assert result.signal is not None
+    assert result.signal.side == Side.BUY
+    assert (result.diagnostics or {}).get("mode") == "m1_impulse"

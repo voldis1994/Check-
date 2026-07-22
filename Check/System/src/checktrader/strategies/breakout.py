@@ -1,4 +1,4 @@
-"""Section 10: Breakout (box excludes trigger candle, M1 retest trigger)."""
+"""Section 10: Breakout (M5 box + retest, plus M1 impulse range-break)."""
 
 from __future__ import annotations
 
@@ -22,20 +22,12 @@ class BreakoutStrategy:
     """
     Section 10: Breakout.
 
-    Box is defined from M5 bars BEFORE the last M5 bar (trigger candle excluded).
-    Need >= box_min_m5_bars bars (after excluding last).
+    Primary path — M5 consolidation box (trigger candle excluded) + optional retest.
 
-    Box width checked against M15 ATR.
-    Both box sides require >= min_touches_per_side touches with touch_tol_atr tolerance.
-
-    Default confirmation_mode=breakout_and_retest:
-      - BUY: M5 close above box high + buffer → ARMED setup, wait for retest close ≤ hi + tol
-      - SELL: mirror image
-      - Retest candle must STILL close beyond boundary (not closed back inside)
-      - False breakout: price closes back inside the box → cancel ARMED
-
-    Confirmed breakout → OPEN.
-    On confirmed OPEN, cancel any RANGE_REVERSION ARMED setups (handled by router).
+    Fallback — M1 impulse break: last closed M1 closes beyond the prior N-bar
+    high/low with a real body. This catches staircase NATURALGAS moves that never
+    print a clean M5 box break + retest (common cause of NO_BREAKOUT_TRIGGER).
+    M1 impulse always enters immediately (no retest wait).
     """
 
     def evaluate(self, context: StrategyContext) -> StrategyResult:
@@ -43,33 +35,23 @@ class BreakoutStrategy:
         if not cfg.enabled:
             return StrategyResult(Decision.SKIP, ReasonCode.NO_STRATEGY_FOR_REGIME)
 
-        # ATR from M15 bars (reference for width measurement)
         m15_bars = closed_bars(context.m15)
-        if len(m15_bars) < cfg.atr_period:
-            return StrategyResult(Decision.HOLD, ReasonCode.BREAKOUT_FILTERS_NOT_READY)
-        av15 = atr(m15_bars, cfg.atr_period)
-        a_raw = av15[-1]
-        if a_raw is None:
-            return StrategyResult(Decision.HOLD, ReasonCode.BREAKOUT_FILTERS_NOT_READY)
-        a = float(a_raw)
+        a: float | None = None
+        if len(m15_bars) >= cfg.atr_period:
+            av15 = atr(m15_bars, cfg.atr_period)
+            a_raw = av15[-1]
+            if a_raw is not None:
+                a = float(a_raw)
 
-        # Box from M5 bars BEFORE the last bar (exclude trigger/current candle)
         m5_bars = closed_bars(context.m5)
-
-        # Last M15 bar for false-breakout and retest checks
-        last_m15 = m15_bars[-1]  # noqa: F841
-
-        tol = cfg.retest_tol_atr * a
+        tol = (cfg.retest_tol_atr * a) if a is not None else 0.0
 
         # ── Phase 1: manage existing ARMED breakout setups ──────────────────────
-        # This must happen BEFORE any early-exit on insufficient box bars so that
-        # false-breakout cancellation and retest triggering always run for live setups.
-        if m5_bars:
+        if m5_bars and a is not None:
             last_m5_for_mgmt = m5_bars[-1]
             for setup in context.setups.active(symbol=context.specs.symbol, strategy=StrategyType.BREAKOUT):
                 fb_threshold = cfg.false_breakout_close_back_atr * a
 
-                # False breakout: M5 or M15 close returns inside box
                 if setup.side == Side.BUY and last_m5_for_mgmt.close < setup.trigger_level - fb_threshold:
                     transition(setup, SetupState.CANCELLED)
                     context.setups.upsert(setup)
@@ -89,10 +71,8 @@ class BreakoutStrategy:
                         diagnostics={"trigger": setup.trigger_level, "close": last_m5_for_mgmt.close},
                     )
 
-                # Retest: M5 (or M1) price returns near the broken level AND still closes beyond it
                 if setup.side == Side.BUY:
                     retesting = last_m5_for_mgmt.low <= setup.trigger_level + tol
-                    # Retest bar must still close above broken level (not closed back inside)
                     still_beyond = last_m5_for_mgmt.close > setup.trigger_level
                     if retesting and still_beyond:
                         transition(setup, SetupState.TRIGGERED)
@@ -135,7 +115,6 @@ class BreakoutStrategy:
                             setup,
                             {"retest_level": setup.trigger_level},
                         )
-                # Still waiting for retest
                 return StrategyResult(
                     Decision.HOLD,
                     ReasonCode.BREAKOUT_RETEST_PENDING,
@@ -143,25 +122,26 @@ class BreakoutStrategy:
                     diagnostics={"trigger": setup.trigger_level},
                 )
 
-        # ── Phase 2: no active setup — check if enough M5 bars for a box ────────
-        # Need at least box_min_m5_bars + 1 (the +1 is the trigger candle being excluded)
-        if len(m5_bars) < cfg.box_min_m5_bars + 1:
-            return StrategyResult(Decision.HOLD, ReasonCode.BREAKOUT_FILTERS_NOT_READY)
+        # ── Phase 2: M5 box break (classic) ─────────────────────────────────────
+        if a is None:
+            impulse = self._m1_impulse(context, atr_value=None)
+            return impulse or StrategyResult(Decision.HOLD, ReasonCode.BREAKOUT_FILTERS_NOT_READY)
 
-        # Exclude the last M5 bar (trigger candle)
+        if len(m5_bars) < cfg.box_min_m5_bars + 1:
+            impulse = self._m1_impulse(context, atr_value=a)
+            return impulse or StrategyResult(Decision.HOLD, ReasonCode.BREAKOUT_FILTERS_NOT_READY)
+
         box_source = m5_bars[:-1]
         box = box_source[-cfg.box_max_m5_bars :]
         hi = max(b.high for b in box)
         lo = min(b.low for b in box)
         width = hi - lo
         width_atr = width / a if a > 0 else 0.0
-
-        # Last M5 bar (the trigger candle) for breakout direction check
         last_m5 = m5_bars[-1]
 
-        # Box validity check
         if width_atr < cfg.width_min_atr or width_atr > cfg.width_max_atr:
-            return StrategyResult(
+            impulse = self._m1_impulse(context, atr_value=a)
+            return impulse or StrategyResult(
                 Decision.HOLD,
                 ReasonCode.BREAKOUT_BOX_PENDING,
                 diagnostics={"box_width_atr": width_atr, "reason": "width_out_of_range"},
@@ -171,7 +151,8 @@ class BreakoutStrategy:
         hi_touches = _count_touches(box, hi, touch_tol)
         lo_touches = _count_touches(box, lo, touch_tol)
         if hi_touches < cfg.min_touches_per_side or lo_touches < cfg.min_touches_per_side:
-            return StrategyResult(
+            impulse = self._m1_impulse(context, atr_value=a)
+            return impulse or StrategyResult(
                 Decision.HOLD,
                 ReasonCode.BREAKOUT_BOX_PENDING,
                 diagnostics={
@@ -187,7 +168,6 @@ class BreakoutStrategy:
             minutes=timeframe_minutes(context.config.instrument.timeframe_execution) * cfg.expiry_m1_bars
         )
 
-        # Use the TRIGGER candle (last_m5) for breakout direction check
         if last_m5.close > hi + buffer:
             entry = context.market.ask
             stop = lo - cfg.stop_buffer_atr * a
@@ -199,7 +179,7 @@ class BreakoutStrategy:
                     Side.BUY,
                     SetupState.ARMED,
                     last_m5.time,
-                    hi,  # trigger_level = box high (retest level)
+                    hi,
                     stop,
                     take_profit=tp,
                     expires_at_bar=expiry,
@@ -213,7 +193,6 @@ class BreakoutStrategy:
                     setup=setup,
                     diagnostics={"box_high": hi, "box_low": lo, "box_width_atr": width_atr},
                 )
-            # breakout_only mode
             return StrategyResult(
                 Decision.OPEN,
                 ReasonCode.BREAKOUT_BUY_SIGNAL,
@@ -240,7 +219,7 @@ class BreakoutStrategy:
                     Side.SELL,
                     SetupState.ARMED,
                     last_m5.time,
-                    lo,  # trigger_level = box low (retest level)
+                    lo,
                     stop,
                     take_profit=tp,
                     expires_at_bar=expiry,
@@ -269,8 +248,94 @@ class BreakoutStrategy:
                 diagnostics={"box_high": hi, "box_low": lo, "box_width_atr": width_atr},
             )
 
-        return StrategyResult(
+        impulse = self._m1_impulse(context, atr_value=a)
+        return impulse or StrategyResult(
             Decision.HOLD,
             ReasonCode.NO_BREAKOUT_TRIGGER,
             diagnostics={"box_width_atr": width_atr, "last_m5_close": last_m5.close, "box_hi": hi, "box_lo": lo},
         )
+
+    def _m1_impulse(self, context: StrategyContext, *, atr_value: float | None) -> StrategyResult | None:
+        """Immediate OPEN when last M1 closes beyond the prior lookback range."""
+        cfg = context.config.strategies.breakout
+        if not cfg.m1_impulse_enabled:
+            return None
+
+        m1 = closed_bars(context.m1)
+        need = cfg.m1_impulse_lookback + 1
+        if len(m1) < need:
+            return None
+
+        a = atr_value
+        if a is None or a <= 0:
+            window = m1[-(cfg.atr_period + 1) :]
+            spans = [b.high - b.low for b in window]
+            a = sum(spans) / max(len(spans), 1)
+        if a <= 0:
+            return None
+
+        prior = m1[-(cfg.m1_impulse_lookback + 1) : -1]
+        last = m1[-1]
+        hi = max(b.high for b in prior)
+        lo = min(b.low for b in prior)
+        buffer = cfg.breakout_buffer_atr * a
+        body = abs(last.close - last.open)
+        if body < cfg.m1_impulse_min_body_atr * a:
+            return None
+
+        if last.close > hi + buffer and last.close > last.open:
+            entry = context.market.ask
+            stop = min(lo, last.low) - cfg.stop_buffer_atr * a
+            risk = entry - stop
+            if risk <= 0:
+                return None
+            tp = entry + risk * cfg.take_profit_rr
+            return StrategyResult(
+                Decision.OPEN,
+                ReasonCode.BREAKOUT_BUY_SIGNAL,
+                StrategySignal(
+                    StrategyType.BREAKOUT,
+                    Side.BUY,
+                    context.specs.symbol,
+                    entry,
+                    stop,
+                    tp,
+                    ReasonCode.BREAKOUT_BUY_SIGNAL,
+                ),
+                diagnostics={
+                    "mode": "m1_impulse",
+                    "lookback": cfg.m1_impulse_lookback,
+                    "prior_high": hi,
+                    "m1_close": last.close,
+                    "atr": a,
+                },
+            )
+
+        if last.close < lo - buffer and last.close < last.open:
+            entry = context.market.bid
+            stop = max(hi, last.high) + cfg.stop_buffer_atr * a
+            risk = stop - entry
+            if risk <= 0:
+                return None
+            tp = entry - risk * cfg.take_profit_rr
+            return StrategyResult(
+                Decision.OPEN,
+                ReasonCode.BREAKOUT_SELL_SIGNAL,
+                StrategySignal(
+                    StrategyType.BREAKOUT,
+                    Side.SELL,
+                    context.specs.symbol,
+                    entry,
+                    stop,
+                    tp,
+                    ReasonCode.BREAKOUT_SELL_SIGNAL,
+                ),
+                diagnostics={
+                    "mode": "m1_impulse",
+                    "lookback": cfg.m1_impulse_lookback,
+                    "prior_low": lo,
+                    "m1_close": last.close,
+                    "atr": a,
+                },
+            )
+        return None

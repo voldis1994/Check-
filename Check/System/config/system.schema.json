@@ -124,6 +124,23 @@
           "minimum": 1,
           "title": "Expiry M1 Bars",
           "type": "integer"
+        },
+        "m1_impulse_enabled": {
+          "default": true,
+          "title": "M1 Impulse Enabled",
+          "type": "boolean"
+        },
+        "m1_impulse_lookback": {
+          "default": 30,
+          "minimum": 5,
+          "title": "M1 Impulse Lookback",
+          "type": "integer"
+        },
+        "m1_impulse_min_body_atr": {
+          "default": 0.12,
+          "minimum": 0.0,
+          "title": "M1 Impulse Min Body Atr",
+          "type": "number"
         }
       },
       "title": "BreakoutConfig",
