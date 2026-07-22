@@ -44,4 +44,11 @@ def test_transition_with_m1_force_opens(specs: SymbolSpecs) -> None:
     router = StrategyRouter()
     result = router.evaluate(_ctx(MarketRegime.TRANSITION, specs, with_m1=True))
     assert result.decision is Decision.OPEN
-    assert result.reason in {ReasonCode.FORCE_MOMENTUM_BUY, ReasonCode.FORCE_MOMENTUM_SELL, ReasonCode.BREAKOUT_BUY_SIGNAL, ReasonCode.BREAKOUT_SELL_SIGNAL, ReasonCode.TREND_BUY_SIGNAL, ReasonCode.TREND_SELL_SIGNAL}
+    assert result.reason in {
+        ReasonCode.FORCE_MOMENTUM_BUY,
+        ReasonCode.FORCE_MOMENTUM_SELL,
+        ReasonCode.BREAKOUT_BUY_SIGNAL,
+        ReasonCode.BREAKOUT_SELL_SIGNAL,
+        ReasonCode.TREND_BUY_SIGNAL,
+        ReasonCode.TREND_SELL_SIGNAL,
+    }
