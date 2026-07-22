@@ -20,6 +20,7 @@ MONEY_TRAILING_STATE_MISSING = 'money_trailing_state_missing'
 REASON_BE_PLUS_NET_PROFIT = 'BE_PLUS_NET_PROFIT'
 REASON_PIP_TRAIL_STEP = 'PIP_TRAIL_STEP'
 REASON_MISSING_TICK = 'BE_PLUS_MISSING_TICK_DATA'
+REASON_TRAILING_ACK_SL_MISMATCH = 'TRAILING_ACK_SL_MISMATCH'
 
 
 def _validation_error(message: str, **context: object) -> ValidationError:
@@ -214,6 +215,101 @@ def next_pip_trail_target(*, side: str, confirmed_sl: float, trailing_step_pips:
     return None
 
 
+def count_pip_trail_jump_steps(
+    *,
+    side: str,
+    previous_confirmed_sl: float,
+    applied_sl: float,
+    trailing_step_pips: float,
+    pip: float,
+    digits: int,
+    price_tolerance: float,
+) -> int:
+    """Count discrete pip-grid steps jumped by a confirmed broker SL."""
+    if trailing_step_pips <= 0 or pip <= 0:
+        return 1
+    step = pip_step_price(trailing_step_pips=trailing_step_pips, pip=pip)
+    if step <= 0:
+        return 1
+    jump_steps = int(round(abs(float(applied_sl) - float(previous_confirmed_sl)) / step))
+    if jump_steps < 1:
+        return 0
+    if side == Side.BUY.value:
+        expected = round(float(previous_confirmed_sl) + jump_steps * step, digits)
+    elif side == Side.SELL.value:
+        expected = round(float(previous_confirmed_sl) - jump_steps * step, digits)
+    else:
+        return 0
+    if abs(expected - float(applied_sl)) > price_tolerance:
+        return 0
+    return jump_steps
+
+
+def snap_sl_to_reached_pip_grid(
+    *,
+    side: str,
+    grid_anchor_sl: float,
+    proposed_sl: float,
+    trailing_step_pips: float,
+    pip: float,
+    digits: int,
+    price_tolerance: float,
+) -> float | None:
+    """Snap an arbitrary SL down to the nearest already-reached protective grid level.
+
+    BUY never rounds up to an unreached higher level.
+    SELL never rounds down to an unreached lower level.
+    """
+    if trailing_step_pips <= 0 or pip <= 0:
+        return None
+    step = pip_step_price(trailing_step_pips=trailing_step_pips, pip=pip)
+    if step <= 0:
+        return None
+    if side == Side.BUY.value:
+        if proposed_sl <= grid_anchor_sl + price_tolerance:
+            return None
+        steps = int(math.floor((float(proposed_sl) - float(grid_anchor_sl)) / step + 1e-12))
+        if steps < 1:
+            return None
+        return round(float(grid_anchor_sl) + steps * step, digits)
+    if side == Side.SELL.value:
+        if proposed_sl >= grid_anchor_sl - price_tolerance:
+            return None
+        steps = int(math.floor((float(grid_anchor_sl) - float(proposed_sl)) / step + 1e-12))
+        if steps < 1:
+            return None
+        return round(float(grid_anchor_sl) - steps * step, digits)
+    return None
+
+
+def is_on_pip_grid(
+    *,
+    side: str,
+    grid_anchor_sl: float,
+    candidate_sl: float,
+    trailing_step_pips: float,
+    pip: float,
+    digits: int,
+    price_tolerance: float,
+) -> bool:
+    if trailing_step_pips <= 0 or pip <= 0:
+        return False
+    step = pip_step_price(trailing_step_pips=trailing_step_pips, pip=pip)
+    if step <= 0:
+        return False
+    ratio = abs(float(candidate_sl) - float(grid_anchor_sl)) / step
+    steps = int(round(ratio))
+    if steps < 0:
+        return False
+    if side == Side.BUY.value:
+        expected = round(float(grid_anchor_sl) + steps * step, digits)
+    elif side == Side.SELL.value:
+        expected = round(float(grid_anchor_sl) - steps * step, digits)
+    else:
+        return False
+    return abs(expected - float(candidate_sl)) <= price_tolerance
+
+
 def choose_protective_sl(*, side: str, current_sl: float, technical_sl: float | None, money_sl: float | None) -> float:
     candidates = [current_sl]
     if technical_sl is not None:
@@ -349,7 +445,7 @@ def confirm_protective_sl(
     digits: int = 5,
     side: str = Side.BUY.value,
 ) -> MoneyStepTrailingState:
-    """Confirm pending SL when broker matches requested level within tolerance."""
+    """Confirm pending SL when broker applied SL matches pending within tolerance."""
     pending = state.pending_protective_sl
     if pending is None:
         return state
@@ -358,24 +454,36 @@ def confirm_protective_sl(
     be_confirmed = state.be_plus_confirmed or (state.pending_trailing_reason == REASON_BE_PLUS_NET_PROFIT)
     pip_steps = state.pip_trail_confirmed_steps
     if state.pending_trailing_reason == REASON_PIP_TRAIL_STEP:
-        pip_steps += 1
+        previous = state.confirmed_protective_sl
+        if previous is not None and trailing_step_pips > 0 and pip > 0:
+            jump = count_pip_trail_jump_steps(
+                side=side,
+                previous_confirmed_sl=float(previous),
+                applied_sl=float(broker_sl),
+                trailing_step_pips=trailing_step_pips,
+                pip=pip,
+                digits=digits,
+                price_tolerance=price_tolerance,
+            )
+            pip_steps += max(1, jump) if jump >= 1 else 1
+        else:
+            pip_steps += 1
+    confirmed_level = float(broker_sl)
     next_target = None
     if be_confirmed and trailing_step_pips > 0 and pip > 0:
-        next_target = next_pip_trail_target(side=side, confirmed_sl=pending, trailing_step_pips=trailing_step_pips, pip=pip, digits=digits)
+        next_target = next_pip_trail_target(side=side, confirmed_sl=confirmed_level, trailing_step_pips=trailing_step_pips, pip=pip, digits=digits)
     locked = state.locked_profit_money
-    if be_confirmed and locked <= 0:
-        locked = state.locked_profit_money
     return MoneyStepTrailingState(
         peak_net_profit_money=state.peak_net_profit_money,
         money_trailing_step_index=max(state.money_trailing_step_index, 0),
         locked_profit_money=locked,
-        last_money_trailing_sl=pending,
+        last_money_trailing_sl=confirmed_level,
         be_plus_confirmed=be_confirmed,
-        confirmed_protective_sl=pending,
+        confirmed_protective_sl=confirmed_level,
         pending_protective_sl=None,
         pending_trailing_reason=None,
         pip_trail_confirmed_steps=pip_steps,
-        computed_be_plus_sl=state.computed_be_plus_sl,
+        computed_be_plus_sl=state.computed_be_plus_sl if state.computed_be_plus_sl is not None else (confirmed_level if state.pending_trailing_reason == REASON_BE_PLUS_NET_PROFIT else None),
         next_pip_trail_sl=next_target,
         last_trailing_modify_status='SUCCESS',
         last_trailing_broker_error=None,
@@ -405,6 +513,30 @@ def mark_protective_modify_rejected(
         last_trailing_modify_status=status,
         last_trailing_broker_error=error_code,
         trailing_reason_code=state.trailing_reason_code,
+    )
+
+
+def mark_protective_ack_sl_mismatch(
+    state: MoneyStepTrailingState,
+    *,
+    status: str = REASON_TRAILING_ACK_SL_MISMATCH,
+) -> MoneyStepTrailingState:
+    """SUCCESS ACK without usable applied broker SL — keep pending, do not confirm."""
+    return MoneyStepTrailingState(
+        peak_net_profit_money=state.peak_net_profit_money,
+        money_trailing_step_index=state.money_trailing_step_index,
+        locked_profit_money=state.locked_profit_money,
+        last_money_trailing_sl=state.last_money_trailing_sl,
+        be_plus_confirmed=state.be_plus_confirmed,
+        confirmed_protective_sl=state.confirmed_protective_sl,
+        pending_protective_sl=state.pending_protective_sl,
+        pending_trailing_reason=state.pending_trailing_reason,
+        pip_trail_confirmed_steps=state.pip_trail_confirmed_steps,
+        computed_be_plus_sl=state.computed_be_plus_sl,
+        next_pip_trail_sl=state.next_pip_trail_sl,
+        last_trailing_modify_status=status,
+        last_trailing_broker_error=None,
+        trailing_reason_code=REASON_TRAILING_ACK_SL_MISMATCH,
     )
 
 
@@ -557,6 +689,7 @@ def merge_technical_and_money_step_trailing(
     pip_sl: float | None = None
     reason_code = REASON_BE_PLUS_NET_PROFIT
     confirmed_base = new_state.confirmed_protective_sl
+    grid_anchor = new_state.computed_be_plus_sl if new_state.computed_be_plus_sl is not None else confirmed_base
     if new_state.be_plus_confirmed and confirmed_base is not None and trailing_step_pips > 0 and pip > 0:
         pip_sl = compute_discrete_pip_trail_sl(
             side=side,
@@ -589,10 +722,10 @@ def merge_technical_and_money_step_trailing(
         if pip_sl is not None:
             reason_code = REASON_PIP_TRAIL_STEP
 
-    # Prefer BE until confirmed; after that prefer pip trail over further money-only moves.
-    protective_candidate = money_sl
+    # Prefer BE until confirmed; after BE use pip grid only (no money-step fallback).
+    protective_candidate: float | None = None
     if new_state.be_plus_confirmed:
-        protective_candidate = pip_sl if pip_sl is not None else money_sl
+        protective_candidate = pip_sl
     elif money_eval.activated and money_sl is not None:
         protective_candidate = money_sl
         reason_code = REASON_BE_PLUS_NET_PROFIT
@@ -613,10 +746,60 @@ def merge_technical_and_money_step_trailing(
             trailing_reason_code=REASON_BE_PLUS_NET_PROFIT,
         )
 
-    final_sl = choose_protective_sl(side=side, current_sl=current_sl, technical_sl=technical_sl, money_sl=protective_candidate)
+    snapped_technical: float | None = None
+    if new_state.be_plus_confirmed and technical_sl is not None and grid_anchor is not None and trailing_step_pips > 0 and pip > 0:
+        snapped_technical = snap_sl_to_reached_pip_grid(
+            side=side,
+            grid_anchor_sl=float(grid_anchor),
+            proposed_sl=float(technical_sl),
+            trailing_step_pips=trailing_step_pips,
+            pip=pip,
+            digits=digits,
+            price_tolerance=price_tolerance,
+        )
+    elif not new_state.be_plus_confirmed:
+        snapped_technical = technical_sl
+
+    final_sl = choose_protective_sl(side=side, current_sl=current_sl, technical_sl=snapped_technical, money_sl=protective_candidate)
 
     # Retry pending target if not confirmed yet.
     effective_pending = pending_modify_sl if pending_modify_sl is not None else new_state.pending_protective_sl
+
+    # After BE, refuse off-grid final levels (should already be snapped / pip-only).
+    if new_state.be_plus_confirmed and grid_anchor is not None and trailing_step_pips > 0 and pip > 0:
+        if not is_on_pip_grid(
+            side=side,
+            grid_anchor_sl=float(grid_anchor),
+            candidate_sl=float(final_sl),
+            trailing_step_pips=trailing_step_pips,
+            pip=pip,
+            digits=digits,
+            price_tolerance=price_tolerance,
+        ) and abs(float(final_sl) - float(current_sl)) > price_tolerance:
+            # Keep confirmed SL; wait for next valid grid level.
+            return MoneyStepMergeResult(
+                management_result=TradeManagementResult(action=OrderAction.NONE.value, reason='money_step_trailing_wait_pip_grid'),
+                state=new_state,
+                skip_reason='money_step_trailing_wait_pip_grid',
+            )
+
+    pending_still_actionable = (
+        effective_pending is not None
+        and sl_improves(side=side, current_sl=current_sl, proposed_sl=float(effective_pending), tolerance=price_tolerance)
+    )
+    # After BE with no pip level and no snapped technical improvement → wait (unless pending retry).
+    if (
+        new_state.be_plus_confirmed
+        and protective_candidate is None
+        and not pending_still_actionable
+        and (snapped_technical is None or not sl_improves(side=side, current_sl=current_sl, proposed_sl=float(snapped_technical), tolerance=price_tolerance))
+    ):
+        return MoneyStepMergeResult(
+            management_result=TradeManagementResult(action=OrderAction.NONE.value, reason='money_step_trailing_wait_pip_step'),
+            state=new_state,
+            skip_reason='money_step_trailing_wait_pip_step',
+        )
+
     if effective_pending is not None and abs(effective_pending - final_sl) <= price_tolerance:
         # Still propose the same pending level for retry unless already matching broker current_sl.
         if not sl_improves(side=side, current_sl=current_sl, proposed_sl=final_sl, tolerance=price_tolerance):
@@ -626,7 +809,11 @@ def merge_technical_and_money_step_trailing(
                 skip_reason='money_step_trailing_identical_modify_pending',
             )
 
-    technical_wants_modify = technical_result.action == OrderAction.MODIFY.value
+    # If pending is the actionable target but final_sl collapsed to current, prefer pending.
+    if pending_still_actionable and not sl_improves(side=side, current_sl=current_sl, proposed_sl=final_sl, tolerance=price_tolerance):
+        final_sl = float(effective_pending)  # type: ignore[arg-type]
+
+    technical_wants_modify = snapped_technical is not None and sl_improves(side=side, current_sl=current_sl, proposed_sl=float(snapped_technical), tolerance=price_tolerance)
     protective_wants = protective_candidate is not None and sl_improves(side=side, current_sl=current_sl, proposed_sl=float(protective_candidate), tolerance=price_tolerance)
     should_consider_modify = technical_wants_modify or protective_wants or (
         effective_pending is not None and sl_improves(side=side, current_sl=current_sl, proposed_sl=float(effective_pending), tolerance=price_tolerance)
@@ -668,16 +855,16 @@ def merge_technical_and_money_step_trailing(
     elif not new_state.be_plus_confirmed and money_eval.activated:
         reason_code = REASON_BE_PLUS_NET_PROFIT
     elif technical_wants_modify:
-        reason_code = 'TECHNICAL_TRAILING'
+        reason_code = 'TECHNICAL_TRAILING' if not new_state.be_plus_confirmed else REASON_PIP_TRAIL_STEP
 
     reason_parts = []
-    if technical_wants_modify:
+    if technical_result.action == OrderAction.MODIFY.value and snapped_technical is not None:
         reason_parts.append(technical_result.reason)
     if reason_code == REASON_BE_PLUS_NET_PROFIT:
         reason_parts.append(f'{REASON_BE_PLUS_NET_PROFIT}: locked={params.initial_locked_profit_money:.2f}')
     elif reason_code == REASON_PIP_TRAIL_STEP:
         reason_parts.append(f'{REASON_PIP_TRAIL_STEP}: step_pips={trailing_step_pips}')
-    elif money_eval.activated:
+    elif money_eval.activated and not new_state.be_plus_confirmed:
         reason_parts.append(f'MONEY_STEP_TRAILING: locked={money_eval.locked_profit_money:.2f} steps={money_eval.completed_steps}')
 
     # Pending until ACK — do not mark confirmed here.

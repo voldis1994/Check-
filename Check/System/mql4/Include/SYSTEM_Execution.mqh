@@ -29,6 +29,16 @@ struct SYSTEM_AckResult
    datetime open_time;
    double volume;
    string side;
+   string action;
+   double requested_stop_loss;
+   bool has_requested_stop_loss;
+   double applied_stop_loss;
+   bool has_applied_stop_loss;
+   double requested_take_profit;
+   bool has_requested_take_profit;
+   double applied_take_profit;
+   bool has_applied_take_profit;
+   int broker_error_code;
 };
 
 void SYSTEM_ResetAckResult(SYSTEM_AckResult &result)
@@ -43,6 +53,16 @@ void SYSTEM_ResetAckResult(SYSTEM_AckResult &result)
    result.open_time = 0;
    result.volume = 0.0;
    result.side = "";
+   result.action = "";
+   result.requested_stop_loss = 0.0;
+   result.has_requested_stop_loss = false;
+   result.applied_stop_loss = 0.0;
+   result.has_applied_stop_loss = false;
+   result.requested_take_profit = 0.0;
+   result.has_requested_take_profit = false;
+   result.applied_take_profit = 0.0;
+   result.has_applied_take_profit = false;
+   result.broker_error_code = 0;
 }
 
 string SYSTEM_BuildAckFilePath(const string account_id, const string symbol, const int magic)
@@ -268,7 +288,17 @@ string SYSTEM_BuildAckJson(
    const bool has_fill_price,
    const datetime open_time,
    const double volume,
-   const string side
+   const string side,
+   const string action,
+   const double requested_stop_loss,
+   const bool has_requested_stop_loss,
+   const double applied_stop_loss,
+   const bool has_applied_stop_loss,
+   const double requested_take_profit,
+   const bool has_requested_take_profit,
+   const double applied_take_profit,
+   const bool has_applied_take_profit,
+   const int broker_error_code
 )
 {
    string timestamp_utc = SYSTEM_FormatTimeUtc(TimeCurrent());
@@ -284,6 +314,8 @@ string SYSTEM_BuildAckJson(
    json = json + "  \"status\": \"" + SYSTEM_EscapeJsonString(status) + "\",\n";
    json = json + "  \"symbol\": \"" + SYSTEM_EscapeJsonString(symbol) + "\",\n";
    json = json + "  \"timestamp_utc\": \"" + timestamp_utc + "\"";
+   if(StringLen(action) > 0)
+      json = json + ",\n  \"action\": \"" + SYSTEM_EscapeJsonString(action) + "\"";
    if(has_ticket)
       json = json + ",\n  \"ticket\": " + IntegerToString(ticket);
    if(has_fill_price)
@@ -294,8 +326,18 @@ string SYSTEM_BuildAckJson(
       json = json + ",\n  \"volume\": " + SYSTEM_FormatJsonNumber(volume, 2);
    if(StringLen(side) > 0)
       json = json + ",\n  \"side\": \"" + SYSTEM_EscapeJsonString(side) + "\"";
+   if(has_requested_stop_loss)
+      json = json + ",\n  \"requested_stop_loss\": " + SYSTEM_FormatJsonNumber(requested_stop_loss, digits);
+   if(has_applied_stop_loss)
+      json = json + ",\n  \"applied_stop_loss\": " + SYSTEM_FormatJsonNumber(applied_stop_loss, digits);
+   if(has_requested_take_profit)
+      json = json + ",\n  \"requested_take_profit\": " + SYSTEM_FormatJsonNumber(requested_take_profit, digits);
+   if(has_applied_take_profit)
+      json = json + ",\n  \"applied_take_profit\": " + SYSTEM_FormatJsonNumber(applied_take_profit, digits);
    if(error_code != 0)
       json = json + ",\n  \"error_code\": " + IntegerToString(error_code);
+   if(broker_error_code != 0)
+      json = json + ",\n  \"broker_error_code\": " + IntegerToString(broker_error_code);
    if(StringLen(error_message) > 0)
       json = json + ",\n  \"error_message\": \"" + SYSTEM_EscapeJsonString(error_message) + "\"";
    json = json + "\n}\n";
@@ -334,7 +376,17 @@ bool SYSTEM_WriteAck(
       result.has_fill_price,
       result.open_time,
       result.volume,
-      result.side
+      result.side,
+      result.action,
+      result.requested_stop_loss,
+      result.has_requested_stop_loss,
+      result.applied_stop_loss,
+      result.has_applied_stop_loss,
+      result.requested_take_profit,
+      result.has_requested_take_profit,
+      result.applied_take_profit,
+      result.has_applied_take_profit,
+      result.broker_error_code
    );
    return SYSTEM_AtomicWriteText(path, payload);
 }
@@ -405,6 +457,44 @@ void SYSTEM_SetSuccessAckWithFill(
    result.open_time = open_time;
    result.volume = volume;
    result.side = side;
+}
+
+void SYSTEM_SetSuccessAckWithModifyLevels(
+   SYSTEM_AckResult &result,
+   const int ticket,
+   const double requested_stop_loss,
+   const double applied_stop_loss,
+   const double requested_take_profit,
+   const double applied_take_profit
+)
+{
+   SYSTEM_SetSuccessAck(result, ticket);
+   result.action = "MODIFY";
+   result.requested_stop_loss = requested_stop_loss;
+   result.has_requested_stop_loss = true;
+   result.applied_stop_loss = applied_stop_loss;
+   result.has_applied_stop_loss = true;
+   result.requested_take_profit = requested_take_profit;
+   result.has_requested_take_profit = true;
+   result.applied_take_profit = applied_take_profit;
+   result.has_applied_take_profit = true;
+   result.broker_error_code = 0;
+}
+
+bool SYSTEM_SlImprovesProtection(
+   const int order_type,
+   const double previous_sl,
+   const double applied_sl,
+   const double tolerance
+)
+{
+   if(previous_sl <= 0.0 && applied_sl > 0.0)
+      return true;
+   if(order_type == OP_BUY)
+      return applied_sl > previous_sl + tolerance;
+   if(order_type == OP_SELL)
+      return applied_sl < previous_sl - tolerance;
+   return false;
 }
 
 bool SYSTEM_ExecuteOpen(
@@ -490,27 +580,38 @@ bool SYSTEM_ExecuteModify(
 {
    SYSTEM_ResetAckResult(result);
    error_message = "";
+   result.action = "MODIFY";
 
    if(!command.has_ticket || command.ticket <= 0)
    {
       SYSTEM_SetRejectedAck(result, "modify command requires ticket");
+      result.action = "MODIFY";
       error_message = result.error_message;
       return false;
    }
    if(!SYSTEM_SelectOrderByTicket(command.ticket, command.symbol, command.magic))
    {
       SYSTEM_SetRejectedAck(result, "modify ticket not found for instance");
+      result.action = "MODIFY";
       error_message = result.error_message;
       return false;
    }
 
-   double stop_loss = command.has_stop_loss ? command.stop_loss : OrderStopLoss();
-   double take_profit = command.has_take_profit ? command.take_profit : OrderTakeProfit();
+   int order_type = OrderType();
+   double previous_stop_loss = OrderStopLoss();
+   double previous_take_profit = OrderTakeProfit();
+   double requested_stop_loss = command.has_stop_loss ? command.stop_loss : previous_stop_loss;
+   double requested_take_profit = command.has_take_profit ? command.take_profit : previous_take_profit;
+   result.requested_stop_loss = requested_stop_loss;
+   result.has_requested_stop_loss = true;
+   result.requested_take_profit = requested_take_profit;
+   result.has_requested_take_profit = true;
+
    bool modified = OrderModify(
       command.ticket,
       OrderOpenPrice(),
-      stop_loss,
-      take_profit,
+      requested_stop_loss,
+      requested_take_profit,
       0,
       clrNONE
    );
@@ -518,11 +619,85 @@ bool SYSTEM_ExecuteModify(
    {
       int error_code = GetLastError();
       SYSTEM_SetFailedAck(result, "OrderModify failed", error_code);
+      result.action = "MODIFY";
+      result.requested_stop_loss = requested_stop_loss;
+      result.has_requested_stop_loss = true;
+      result.requested_take_profit = requested_take_profit;
+      result.has_requested_take_profit = true;
+      result.broker_error_code = error_code;
       error_message = result.error_message;
       return false;
    }
 
-   SYSTEM_SetSuccessAck(result, command.ticket);
+   if(!SYSTEM_SelectOrderByTicket(command.ticket, command.symbol, command.magic))
+   {
+      SYSTEM_SetFailedAck(result, "OrderModify succeeded but reselect failed", GetLastError());
+      result.action = "MODIFY";
+      result.requested_stop_loss = requested_stop_loss;
+      result.has_requested_stop_loss = true;
+      result.requested_take_profit = requested_take_profit;
+      result.has_requested_take_profit = true;
+      result.broker_error_code = result.error_code;
+      error_message = result.error_message;
+      return false;
+   }
+
+   double applied_stop_loss = OrderStopLoss();
+   double applied_take_profit = OrderTakeProfit();
+   int digits = (int)MarketInfo(command.symbol, MODE_DIGITS);
+   if(digits <= 0)
+      digits = 5;
+   double point = MarketInfo(command.symbol, MODE_POINT);
+   if(point <= 0.0)
+      point = MathPow(10.0, -digits);
+   double tolerance = MathMax(point, MathPow(10.0, -digits));
+
+   if(!SYSTEM_SlImprovesProtection(order_type, previous_stop_loss, applied_stop_loss, tolerance))
+   {
+      SYSTEM_SetFailedAck(result, "applied stop loss does not improve protection", 0);
+      result.action = "MODIFY";
+      result.ticket = command.ticket;
+      result.has_ticket = true;
+      result.requested_stop_loss = requested_stop_loss;
+      result.has_requested_stop_loss = true;
+      result.applied_stop_loss = applied_stop_loss;
+      result.has_applied_stop_loss = true;
+      result.requested_take_profit = requested_take_profit;
+      result.has_requested_take_profit = true;
+      result.applied_take_profit = applied_take_profit;
+      result.has_applied_take_profit = true;
+      result.broker_error_code = 0;
+      error_message = result.error_message;
+      return false;
+   }
+
+   if(MathAbs(applied_stop_loss - requested_stop_loss) > tolerance)
+   {
+      SYSTEM_SetFailedAck(result, "applied stop loss outside requested tolerance", 0);
+      result.action = "MODIFY";
+      result.ticket = command.ticket;
+      result.has_ticket = true;
+      result.requested_stop_loss = requested_stop_loss;
+      result.has_requested_stop_loss = true;
+      result.applied_stop_loss = applied_stop_loss;
+      result.has_applied_stop_loss = true;
+      result.requested_take_profit = requested_take_profit;
+      result.has_requested_take_profit = true;
+      result.applied_take_profit = applied_take_profit;
+      result.has_applied_take_profit = true;
+      result.broker_error_code = 0;
+      error_message = result.error_message;
+      return false;
+   }
+
+   SYSTEM_SetSuccessAckWithModifyLevels(
+      result,
+      command.ticket,
+      requested_stop_loss,
+      applied_stop_loss,
+      requested_take_profit,
+      applied_take_profit
+   );
    return true;
 }
 

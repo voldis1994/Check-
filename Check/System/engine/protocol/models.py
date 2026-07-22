@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 from engine.protocol.identity import validate_account_id as _shared_validate_account_id, validate_magic as _shared_validate_magic, validate_symbol as _shared_validate_symbol
-from engine.protocol.constants import AckStatus, ErrorType, LogLevel, MarketRegime, NewsImpactLevel, Side, SYSTEM_NAME, TIMEFRAME_M1, TradeEvent, is_supported_config_schema_version, is_supported_protocol_schema_version, is_supported_state_schema_version, is_universe_forbidden_field, is_valid_ack_status, is_valid_decision, is_valid_order_action, is_valid_risk_result
+from engine.protocol.constants import AckStatus, ErrorType, LogLevel, MarketRegime, NewsImpactLevel, OrderAction, Side, SYSTEM_NAME, TIMEFRAME_M1, TradeEvent, is_supported_config_schema_version, is_supported_protocol_schema_version, is_supported_state_schema_version, is_universe_forbidden_field, is_valid_ack_status, is_valid_decision, is_valid_order_action, is_valid_risk_result
 from engine.protocol.errors import ValidationError
 
 def _require_non_empty_string(value: str, field_name: str) -> str:
@@ -732,6 +732,12 @@ class AckRecord:
     open_time_utc: str | None = None
     volume: float | None = None
     side: str | None = None
+    action: str | None = None
+    requested_stop_loss: float | None = None
+    applied_stop_loss: float | None = None
+    requested_take_profit: float | None = None
+    applied_take_profit: float | None = None
+    broker_error_code: int | None = None
 
     def __post_init__(self) -> None:
         schema_version = _require_non_empty_string(self.schema_version, 'schema_version')
@@ -764,6 +770,21 @@ class AckRecord:
             if side not in {Side.BUY.value, Side.SELL.value}:
                 raise ValidationError('side is invalid', module='protocol.models', context={'value': side})
             object.__setattr__(self, 'side', side)
+        if self.action is not None:
+            action = _require_non_empty_string(self.action, 'action')
+            if action not in {OrderAction.OPEN.value, OrderAction.MODIFY.value, OrderAction.CLOSE.value, OrderAction.NONE.value}:
+                raise ValidationError('action is invalid', module='protocol.models', context={'value': action})
+            object.__setattr__(self, 'action', action)
+        if self.requested_stop_loss is not None:
+            object.__setattr__(self, 'requested_stop_loss', _require_number(self.requested_stop_loss, 'requested_stop_loss'))
+        if self.applied_stop_loss is not None:
+            object.__setattr__(self, 'applied_stop_loss', _require_number(self.applied_stop_loss, 'applied_stop_loss'))
+        if self.requested_take_profit is not None:
+            object.__setattr__(self, 'requested_take_profit', _require_number(self.requested_take_profit, 'requested_take_profit'))
+        if self.applied_take_profit is not None:
+            object.__setattr__(self, 'applied_take_profit', _require_number(self.applied_take_profit, 'applied_take_profit'))
+        if self.broker_error_code is not None:
+            object.__setattr__(self, 'broker_error_code', _require_int(self.broker_error_code, 'broker_error_code'))
 
     @property
     def instance_key(self) -> InstanceKey:
@@ -785,6 +806,18 @@ class AckRecord:
             data['volume'] = self.volume
         if self.side is not None:
             data['side'] = self.side
+        if self.action is not None:
+            data['action'] = self.action
+        if self.requested_stop_loss is not None:
+            data['requested_stop_loss'] = self.requested_stop_loss
+        if self.applied_stop_loss is not None:
+            data['applied_stop_loss'] = self.applied_stop_loss
+        if self.requested_take_profit is not None:
+            data['requested_take_profit'] = self.requested_take_profit
+        if self.applied_take_profit is not None:
+            data['applied_take_profit'] = self.applied_take_profit
+        if self.broker_error_code is not None:
+            data['broker_error_code'] = self.broker_error_code
         return data
 
 @dataclass(frozen=True)

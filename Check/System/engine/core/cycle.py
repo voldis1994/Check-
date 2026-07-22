@@ -206,10 +206,14 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
     pending_modify_sl = state.pending_protective_sl
     if pending_modify_sl is None and state.pending_execution_command_id is not None and state.last_money_trailing_sl is not None:
         pending_modify_sl = state.last_money_trailing_sl
-    # Broker status reconciliation: confirm pending if broker SL already matches.
+    # Broker status reconciliation: confirm pending only from matching open ticket SL.
     from engine.risk.money_step_trailing import confirm_protective_sl
     if (
         status_position is not None
+        and state.open_ticket is not None
+        and status_position.ticket == state.open_ticket
+        and status_position.symbol == instance_memory.instance.symbol
+        and status_position.magic == instance_memory.instance.magic
         and status_position.stop_loss is not None
         and money_state.pending_protective_sl is not None
         and abs(float(status_position.stop_loss) - float(money_state.pending_protective_sl)) <= price_tolerance
@@ -259,6 +263,7 @@ def run_instance_trade_management_phase(*, instance_memory: InstanceMemory, mark
         confirmed_protective_sl=merge.state.confirmed_protective_sl,
         pending_protective_sl=merge.state.pending_protective_sl,
         pending_trailing_reason=merge.state.pending_trailing_reason,
+        pending_trailing_step_pips=runtime.config.trade_management.trailing_step_pips if merge.state.pending_protective_sl is not None else None,
         pip_trail_confirmed_steps=merge.state.pip_trail_confirmed_steps,
         computed_be_plus_sl=merge.state.computed_be_plus_sl,
         next_pip_trail_sl=merge.state.next_pip_trail_sl,
@@ -596,7 +601,7 @@ def run_instance_cycle(runtime: LiveRuntime, instance: Instance, *, use_global_u
             return _abort_cycle_timeout(runtime=runtime, instance=instance, timeout_guard=timeout_guard, instance_memory=instance_memory)
         trade_intended = True
         execution_started = time.monotonic()
-        management_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=_management_only_decision(), risk_engine_result=_blocked_risk(), runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='management execution io'), position_last_bar_utc=market_data_utc, signal_quality_config=runtime.config.signal_quality)
+        management_execution = run_execution_engine(paths=runtime.paths, instance=instance, instance_state=instance_memory.instance_state, decision_result=_management_only_decision(), risk_engine_result=_blocked_risk(), runtime=runtime.config.runtime, management_result=management_result, timestamp_utc=resolved_timestamp, retry_alert_context=RetryAlertContext(logger=runtime.system_logger, instance=instance, operation='management execution io'), position_last_bar_utc=market_data_utc, signal_quality_config=runtime.config.signal_quality, trailing_step_pips=runtime.config.trade_management.trailing_step_pips)
         ack_latency_ms = int((time.monotonic() - execution_started) * 1000)
         execution_result = management_execution
         control_published = bool(management_execution.control_published)

@@ -19,7 +19,7 @@ CONTROL_JSON_MODIFY = '{\n  "schema_version": "1.0.0",\n  "timestamp_utc": "2026
 CONTROL_JSON_CLOSE = '{\n  "schema_version": "1.0.0",\n  "timestamp_utc": "2026-07-07T06:00:00.000Z",\n  "command_id": "cmd-close-1",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "action": "CLOSE",\n  "ticket": 555,\n  "reason": "close position",\n  "decision_id": "dec-close"\n}'
 
 def test_system_execution_public_functions_are_defined(execution_source: str) -> None:
-    expected = {'SYSTEM_ResetAckResult', 'SYSTEM_BuildAckFilePath', 'SYSTEM_IsSupportedAckStatus', 'SYSTEM_BuildAckJson', 'SYSTEM_WriteAck', 'SYSTEM_SelectOrderByTicket', 'SYSTEM_IsSupportedTradeSide', 'SYSTEM_TradeCommandForSide', 'SYSTEM_SetRejectedAck', 'SYSTEM_SetFailedAck', 'SYSTEM_SetSuccessAck', 'SYSTEM_ExecuteOpen', 'SYSTEM_ExecuteModify', 'SYSTEM_ExecuteClose', 'SYSTEM_ExecuteControlCommand', 'SYSTEM_TryExecutePendingControl', 'SYSTEM_ExecutionPerformsAnalysis', 'SYSTEM_ProcessedCommandGvName', 'SYSTEM_IsCommandProcessed', 'SYSTEM_MarkCommandProcessed', 'SYSTEM_LoadProcessedCommandId', 'SYSTEM_SetSuccessAckWithFill'}
+    expected = {'SYSTEM_ResetAckResult', 'SYSTEM_BuildAckFilePath', 'SYSTEM_IsSupportedAckStatus', 'SYSTEM_BuildAckJson', 'SYSTEM_WriteAck', 'SYSTEM_SelectOrderByTicket', 'SYSTEM_IsSupportedTradeSide', 'SYSTEM_TradeCommandForSide', 'SYSTEM_SetRejectedAck', 'SYSTEM_SetFailedAck', 'SYSTEM_SetSuccessAck', 'SYSTEM_ExecuteOpen', 'SYSTEM_ExecuteModify', 'SYSTEM_ExecuteClose', 'SYSTEM_ExecuteControlCommand', 'SYSTEM_TryExecutePendingControl', 'SYSTEM_ExecutionPerformsAnalysis', 'SYSTEM_ProcessedCommandGvName', 'SYSTEM_IsCommandProcessed', 'SYSTEM_MarkCommandProcessed', 'SYSTEM_LoadProcessedCommandId', 'SYSTEM_SetSuccessAckWithFill', 'SYSTEM_SetSuccessAckWithModifyLevels', 'SYSTEM_SlImprovesProtection'}
     assert expected.issubset(set(mql_source.public_function_names(execution_source)))
 
 def test_system_build_ack_file_path_uses_instance_template() -> None:
@@ -57,6 +57,60 @@ def test_system_build_ack_json_function_includes_required_fields(execution_sourc
     assert 'open_time_utc' in body
     assert 'volume' in body
     assert 'side' in body
+    assert 'requested_stop_loss' in body
+    assert 'applied_stop_loss' in body
+    assert 'requested_take_profit' in body
+    assert 'applied_take_profit' in body
+    assert 'broker_error_code' in body
+    assert 'action' in body
+
+
+def test_system_execute_modify_function_rereads_applied_levels(execution_source: str) -> None:
+    body = mql_source.function_body(execution_source, 'SYSTEM_ExecuteModify')
+    assert 'OrderModify' in body
+    assert 'OrderStopLoss' in body
+    assert 'OrderTakeProfit' in body
+    assert 'SYSTEM_SetSuccessAckWithModifyLevels' in body
+    assert 'SYSTEM_SlImprovesProtection' in body
+
+
+def test_modify_success_ack_includes_applied_stop_loss() -> None:
+    command, _ = control_reference.parse_control_command(CONTROL_JSON_MODIFY)
+    assert command is not None
+    context = execution_reference.OrderExecutionContext(
+        symbol='EURUSD',
+        magic=100001,
+        known_tickets={555},
+        previous_stop_loss=1.08000,
+        applied_stop_loss=1.08100,
+        applied_take_profit=1.09200,
+        order_type=0,
+    )
+    result = execution_reference.execute_modify(command, context)
+    assert result.status == AckStatus.SUCCESS.value
+    assert result.ticket == 555
+    assert result.applied_stop_loss == pytest.approx(1.08100)
+    assert result.requested_stop_loss == pytest.approx(1.08100)
+    assert result.action == OrderAction.MODIFY.value
+    json_text = execution_reference.build_ack_json(
+        command_id=command.command_id,
+        account_id='12345',
+        symbol='EURUSD',
+        magic=100001,
+        status=result.status,
+        timestamp_utc='2026-07-07T06:00:00.000Z',
+        ticket=result.ticket,
+        action=result.action,
+        requested_stop_loss=result.requested_stop_loss,
+        applied_stop_loss=result.applied_stop_loss,
+        requested_take_profit=result.requested_take_profit,
+        applied_take_profit=result.applied_take_profit,
+        broker_error_code=0,
+    )
+    record = parse_ack(json_text)
+    assert record.applied_stop_loss == pytest.approx(1.08100)
+    assert record.requested_stop_loss == pytest.approx(1.08100)
+    assert record.action == OrderAction.MODIFY.value
 
 def test_system_build_ack_json_includes_error_fields_for_failed_status() -> None:
     json_text = execution_reference.build_ack_json(command_id='cmd-fail', account_id='12345', symbol='EURUSD', magic=100001, status=AckStatus.FAILED.value, timestamp_utc='2026-07-07T06:00:00.000Z', error_code=130, error_message='OrderSend failed')

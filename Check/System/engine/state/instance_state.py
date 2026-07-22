@@ -65,6 +65,7 @@ class InstanceState:
     confirmed_protective_sl: float | None = None
     pending_protective_sl: float | None = None
     pending_trailing_reason: str | None = None
+    pending_trailing_step_pips: float | None = None
     pip_trail_confirmed_steps: int = 0
     computed_be_plus_sl: float | None = None
     next_pip_trail_sl: float | None = None
@@ -212,6 +213,7 @@ class InstanceState:
             'confirmed_protective_sl': self.confirmed_protective_sl,
             'pending_protective_sl': self.pending_protective_sl,
             'pending_trailing_reason': self.pending_trailing_reason,
+            'pending_trailing_step_pips': self.pending_trailing_step_pips,
             'pip_trail_confirmed_steps': self.pip_trail_confirmed_steps,
             'computed_be_plus_sl': self.computed_be_plus_sl,
             'next_pip_trail_sl': self.next_pip_trail_sl,
@@ -233,6 +235,7 @@ class InstanceState:
         self.confirmed_protective_sl = None
         self.pending_protective_sl = None
         self.pending_trailing_reason = None
+        self.pending_trailing_step_pips = None
         self.pip_trail_confirmed_steps = 0
         self.computed_be_plus_sl = None
         self.next_pip_trail_sl = None
@@ -253,6 +256,7 @@ class InstanceState:
         confirmed_protective_sl: float | None = None,
         pending_protective_sl: float | None = None,
         pending_trailing_reason: str | None = None,
+        pending_trailing_step_pips: float | None = None,
         pip_trail_confirmed_steps: int | None = None,
         computed_be_plus_sl: float | None = None,
         next_pip_trail_sl: float | None = None,
@@ -279,6 +283,8 @@ class InstanceState:
             self.pending_protective_sl = pending_protective_sl
         if sync_pending or pending_trailing_reason is not None:
             self.pending_trailing_reason = pending_trailing_reason
+        if sync_pending or pending_trailing_step_pips is not None:
+            self.pending_trailing_step_pips = pending_trailing_step_pips
         if pip_trail_confirmed_steps is not None:
             self.pip_trail_confirmed_steps = pip_trail_confirmed_steps
         if computed_be_plus_sl is not None:
@@ -451,6 +457,8 @@ class InstanceState:
             data['pending_protective_sl'] = self.pending_protective_sl
         if self.pending_trailing_reason is not None:
             data['pending_trailing_reason'] = self.pending_trailing_reason
+        if self.pending_trailing_step_pips is not None:
+            data['pending_trailing_step_pips'] = self.pending_trailing_step_pips
         if self.pip_trail_confirmed_steps:
             data['pip_trail_confirmed_steps'] = self.pip_trail_confirmed_steps
         if self.computed_be_plus_sl is not None:
@@ -616,6 +624,9 @@ class InstanceState:
         pending_trailing_reason = payload.get('pending_trailing_reason')
         if pending_trailing_reason is not None:
             state.pending_trailing_reason = str(pending_trailing_reason)
+        pending_trailing_step_pips = payload.get('pending_trailing_step_pips')
+        if pending_trailing_step_pips is not None:
+            state.pending_trailing_step_pips = float(pending_trailing_step_pips)
         pip_trail_confirmed_steps = payload.get('pip_trail_confirmed_steps')
         if pip_trail_confirmed_steps is not None:
             state.pip_trail_confirmed_steps = int(pip_trail_confirmed_steps)

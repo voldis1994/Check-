@@ -478,10 +478,25 @@ def test_apply_ack_success_confirms_be_step() -> None:
     state.update_position(open_ticket=10, position_side=Side.BUY.value, position_volume=0.01, entry_price=1.1, stop_loss=1.098, take_profit=0.0)
     state.pending_protective_sl = 1.10020
     state.pending_trailing_reason = REASON_BE_PLUS_NET_PROFIT
+    state.pending_trailing_step_pips = 3.0
     state.locked_profit_money = 0.20
     cmd = OrderCommand(command_id='c1', action=OrderAction.MODIFY.value, side=Side.BUY.value, stop_loss=1.10020, take_profit=0.0, ticket=10, reason='BE', decision_id='d1')
-    ack = AckRecord(schema_version='1.0.0', timestamp_utc='2026-07-22T10:00:00.000Z', command_id='c1', account_id='1', symbol='EURUSD', magic=1, status=AckStatus.SUCCESS.value, ticket=10)
-    apply_ack_to_instance_state(state, cmd, ack)
+    ack = AckRecord(
+        schema_version='1.0.0',
+        timestamp_utc='2026-07-22T10:00:00.000Z',
+        command_id='c1',
+        account_id='1',
+        symbol='EURUSD',
+        magic=1,
+        status=AckStatus.SUCCESS.value,
+        ticket=10,
+        action=OrderAction.MODIFY.value,
+        requested_stop_loss=1.10020,
+        applied_stop_loss=1.10020,
+        requested_take_profit=0.0,
+        applied_take_profit=0.0,
+    )
+    apply_ack_to_instance_state(state, cmd, ack, trailing_step_pips=3.0)
     assert state.be_plus_confirmed is True
     assert state.confirmed_protective_sl == pytest.approx(1.10020)
     assert state.pending_protective_sl is None
@@ -496,8 +511,460 @@ def test_apply_ack_reject_keeps_pending() -> None:
     state.pending_protective_sl = 1.10020
     state.pending_trailing_reason = REASON_BE_PLUS_NET_PROFIT
     cmd = OrderCommand(command_id='c2', action=OrderAction.MODIFY.value, side=Side.BUY.value, stop_loss=1.10020, take_profit=0.0, ticket=10, reason='BE', decision_id='d2')
-    ack = AckRecord(schema_version='1.0.0', timestamp_utc='2026-07-22T10:00:00.000Z', command_id='c2', account_id='1', symbol='EURUSD', magic=1, status=AckStatus.REJECTED.value, ticket=10, error_code=130, error_message='invalid stops')
+    ack = AckRecord(schema_version='1.0.0', timestamp_utc='2026-07-22T10:00:00.000Z', command_id='c2', account_id='1', symbol='EURUSD', magic=1, status=AckStatus.REJECTED.value, ticket=10, error_code=130, error_message='invalid stops', action=OrderAction.MODIFY.value)
     apply_ack_to_instance_state(state, cmd, ack)
     assert state.be_plus_confirmed is False
     assert state.pending_protective_sl == pytest.approx(1.10020)
     assert state.last_trailing_broker_error == '130'
+
+
+def _ack_modify(*, command_id: str, ticket: int, applied_sl: float | None, account_id: str = '1', symbol: str = 'EURUSD', magic: int = 1, requested_sl: float | None = None) -> AckRecord:
+    kwargs: dict = {
+        'schema_version': '1.0.0',
+        'timestamp_utc': '2026-07-22T10:00:00.000Z',
+        'command_id': command_id,
+        'account_id': account_id,
+        'symbol': symbol,
+        'magic': magic,
+        'status': AckStatus.SUCCESS.value,
+        'ticket': ticket,
+        'action': OrderAction.MODIFY.value,
+        'requested_take_profit': 0.0,
+        'applied_take_profit': 0.0,
+    }
+    if requested_sl is not None:
+        kwargs['requested_stop_loss'] = requested_sl
+    if applied_sl is not None:
+        kwargs['applied_stop_loss'] = applied_sl
+        if requested_sl is None:
+            kwargs['requested_stop_loss'] = applied_sl
+    return AckRecord(**kwargs)
+
+
+def _be_pending_state(*, ticket: int = 10) -> tuple[InstanceState, OrderCommand]:
+    instance = Instance(account_id='1', symbol='EURUSD', magic=1)
+    state = InstanceState(instance=instance)
+    state.update_instrument(digits=5, point=0.00001, pip=0.00010)
+    state.update_position(open_ticket=ticket, position_side=Side.BUY.value, position_volume=0.01, entry_price=1.1, stop_loss=1.098, take_profit=0.0)
+    state.pending_protective_sl = 1.10020
+    state.pending_trailing_reason = REASON_BE_PLUS_NET_PROFIT
+    state.pending_trailing_step_pips = 3.0
+    state.locked_profit_money = 0.20
+    cmd = OrderCommand(command_id='c1', action=OrderAction.MODIFY.value, side=Side.BUY.value, stop_loss=1.10020, take_profit=0.0, ticket=ticket, reason='BE', decision_id='d1')
+    return state, cmd
+
+
+def test_success_ack_without_applied_sl_does_not_confirm_be() -> None:
+    state, cmd = _be_pending_state()
+    ack = _ack_modify(command_id='c1', ticket=10, applied_sl=None, requested_sl=1.10020)
+    apply_ack_to_instance_state(state, cmd, ack, trailing_step_pips=3.0)
+    assert state.be_plus_confirmed is False
+    assert state.pending_protective_sl == pytest.approx(1.10020)
+    assert state.trailing_reason_code == 'TRAILING_ACK_SL_MISMATCH'
+
+
+def test_success_ack_wrong_applied_sl_does_not_confirm_be() -> None:
+    state, cmd = _be_pending_state()
+    ack = _ack_modify(command_id='c1', ticket=10, applied_sl=1.10050, requested_sl=1.10020)
+    apply_ack_to_instance_state(state, cmd, ack, trailing_step_pips=3.0)
+    assert state.be_plus_confirmed is False
+    assert state.pending_protective_sl == pytest.approx(1.10020)
+
+
+def test_success_ack_wrong_ticket_does_not_confirm_be() -> None:
+    state, cmd = _be_pending_state(ticket=10)
+    ack = _ack_modify(command_id='c1', ticket=99, applied_sl=1.10020)
+    apply_ack_to_instance_state(state, cmd, ack, trailing_step_pips=3.0)
+    assert state.be_plus_confirmed is False
+    assert state.pending_protective_sl == pytest.approx(1.10020)
+
+
+def test_success_ack_wrong_command_id_does_not_confirm_be() -> None:
+    state, cmd = _be_pending_state()
+    ack = _ack_modify(command_id='other', ticket=10, applied_sl=1.10020)
+    apply_ack_to_instance_state(state, cmd, ack, trailing_step_pips=3.0)
+    assert state.be_plus_confirmed is False
+    assert state.pending_protective_sl == pytest.approx(1.10020)
+
+
+def test_success_ack_correct_applied_sl_confirms_be() -> None:
+    state, cmd = _be_pending_state()
+    ack = _ack_modify(command_id='c1', ticket=10, applied_sl=1.10020)
+    apply_ack_to_instance_state(state, cmd, ack, trailing_step_pips=3.0)
+    assert state.be_plus_confirmed is True
+    assert state.confirmed_protective_sl == pytest.approx(1.10020)
+
+
+def test_status_reconciliation_matching_ticket_confirms_pending() -> None:
+    state = MoneyStepTrailingState(
+        pending_protective_sl=1.10020,
+        pending_trailing_reason=REASON_BE_PLUS_NET_PROFIT,
+        locked_profit_money=0.20,
+    )
+    confirmed = confirm_protective_sl(
+        state,
+        broker_sl=1.10020,
+        price_tolerance=0.00001,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+        digits=5,
+        side=Side.BUY.value,
+    )
+    assert confirmed.be_plus_confirmed is True
+    assert confirmed.confirmed_protective_sl == pytest.approx(1.10020)
+
+
+def test_status_reconciliation_other_ticket_sl_does_not_confirm() -> None:
+    # Identity gate lives in cycle; here broker SL mismatch keeps pending.
+    state = MoneyStepTrailingState(
+        pending_protective_sl=1.10020,
+        pending_trailing_reason=REASON_BE_PLUS_NET_PROFIT,
+    )
+    unchanged = confirm_protective_sl(
+        state,
+        broker_sl=1.09950,
+        price_tolerance=0.00001,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+        digits=5,
+        side=Side.BUY.value,
+    )
+    assert unchanged.be_plus_confirmed is False
+    assert unchanged.pending_protective_sl == pytest.approx(1.10020)
+
+
+def test_config_trailing_step_2_5_not_hardcoded_3_0() -> None:
+    state, cmd = _be_pending_state()
+    state.pending_trailing_step_pips = 2.5
+    ack = _ack_modify(command_id='c1', ticket=10, applied_sl=1.10020)
+    apply_ack_to_instance_state(state, cmd, ack, trailing_step_pips=2.5)
+    assert state.be_plus_confirmed is True
+    assert state.next_pip_trail_sl == pytest.approx(1.10045)  # +2.5 pips = +0.00025
+
+
+def test_after_be_money_step_fallback_does_not_modify() -> None:
+    confirmed = MoneyStepTrailingState(
+        peak_net_profit_money=1.50,
+        money_trailing_step_index=4,
+        locked_profit_money=1.20,
+        be_plus_confirmed=True,
+        confirmed_protective_sl=1.10020,
+        last_money_trailing_sl=1.10020,
+        computed_be_plus_sl=1.10020,
+    )
+    # Price not far enough for a 3-pip step, but money-step would want a higher lock.
+    merge = merge_technical_and_money_step_trailing(
+        technical_result=_none_technical(),
+        params=_prod_params(),
+        state=confirmed,
+        side=Side.BUY.value,
+        open_price=1.10000,
+        current_sl=1.10020,
+        current_price=1.10040,
+        net_profit_money=1.50,
+        current_swap=0.0,
+        current_commission=0.0,
+        tick_value=1.0,
+        tick_size=0.00001,
+        volume=0.01,
+        digits=5,
+        point=0.00001,
+        stop_level=0,
+        freeze_level=0,
+        price_tolerance=0.00001,
+        modify_take_profit=0.0,
+        sensor_fresh=True,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+    )
+    assert merge.management_result.action == OrderAction.NONE.value
+    assert merge.state.confirmed_protective_sl == pytest.approx(1.10020)
+
+
+def test_after_be_sl_moves_only_on_3_pip_grid() -> None:
+    confirmed = MoneyStepTrailingState(
+        peak_net_profit_money=0.90,
+        locked_profit_money=0.20,
+        be_plus_confirmed=True,
+        confirmed_protective_sl=1.10020,
+        computed_be_plus_sl=1.10020,
+    )
+    merge = merge_technical_and_money_step_trailing(
+        technical_result=_none_technical(),
+        params=_prod_params(),
+        state=confirmed,
+        side=Side.BUY.value,
+        open_price=1.10000,
+        current_sl=1.10020,
+        current_price=1.10090,
+        net_profit_money=0.90,
+        current_swap=0.0,
+        current_commission=0.0,
+        tick_value=1.0,
+        tick_size=0.00001,
+        volume=0.01,
+        digits=5,
+        point=0.00001,
+        stop_level=0,
+        freeze_level=0,
+        price_tolerance=0.00001,
+        modify_take_profit=0.0,
+        sensor_fresh=True,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+    )
+    assert merge.management_result.stop_loss == pytest.approx(1.10080)
+    step = 0.00030
+    assert abs((merge.management_result.stop_loss - 1.10020) / step - round((merge.management_result.stop_loss - 1.10020) / step)) < 1e-9
+
+
+def test_technical_trailing_cannot_create_off_grid_mid_level() -> None:
+    confirmed = MoneyStepTrailingState(
+        peak_net_profit_money=0.90,
+        locked_profit_money=0.20,
+        be_plus_confirmed=True,
+        confirmed_protective_sl=1.10020,
+        computed_be_plus_sl=1.10020,
+    )
+    technical = TradeManagementResult(action=OrderAction.MODIFY.value, reason='TECH_TRAIL', stop_loss=1.10065, take_profit=0.0)
+    merge = merge_technical_and_money_step_trailing(
+        technical_result=technical,
+        params=_prod_params(),
+        state=confirmed,
+        side=Side.BUY.value,
+        open_price=1.10000,
+        current_sl=1.10020,
+        current_price=1.10090,
+        net_profit_money=0.90,
+        current_swap=0.0,
+        current_commission=0.0,
+        tick_value=1.0,
+        tick_size=0.00001,
+        volume=0.01,
+        digits=5,
+        point=0.00001,
+        stop_level=0,
+        freeze_level=0,
+        price_tolerance=0.00001,
+        modify_take_profit=0.0,
+        sensor_fresh=True,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+    )
+    # Technical 1.10065 snaps to reached 1.10050; pip trail may still propose 1.10080.
+    assert merge.management_result.action == OrderAction.MODIFY.value
+    assert merge.management_result.stop_loss == pytest.approx(1.10080)
+    assert merge.management_result.stop_loss != pytest.approx(1.10065)
+
+
+def test_nine_pip_jump_increments_confirmed_steps_by_three() -> None:
+    state = MoneyStepTrailingState(
+        be_plus_confirmed=True,
+        confirmed_protective_sl=1.10020,
+        computed_be_plus_sl=1.10020,
+        pending_protective_sl=1.10110,
+        pending_trailing_reason=REASON_PIP_TRAIL_STEP,
+        pip_trail_confirmed_steps=0,
+    )
+    confirmed = confirm_protective_sl(
+        state,
+        broker_sl=1.10110,
+        price_tolerance=0.00001,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+        digits=5,
+        side=Side.BUY.value,
+    )
+    assert confirmed.pip_trail_confirmed_steps == 3
+    assert confirmed.confirmed_protective_sl == pytest.approx(1.10110)
+
+
+def test_rejected_ack_keeps_pending_sl() -> None:
+    state, cmd = _be_pending_state()
+    ack = AckRecord(
+        schema_version='1.0.0',
+        timestamp_utc='2026-07-22T10:00:00.000Z',
+        command_id='c1',
+        account_id='1',
+        symbol='EURUSD',
+        magic=1,
+        status=AckStatus.REJECTED.value,
+        ticket=10,
+        error_code=130,
+        error_message='invalid',
+        action=OrderAction.MODIFY.value,
+    )
+    apply_ack_to_instance_state(state, cmd, ack)
+    assert state.pending_protective_sl == pytest.approx(1.10020)
+    assert state.be_plus_confirmed is False
+
+
+def test_after_reject_status_reconciliation_can_confirm() -> None:
+    state = MoneyStepTrailingState(
+        pending_protective_sl=1.10020,
+        pending_trailing_reason=REASON_BE_PLUS_NET_PROFIT,
+        last_trailing_modify_status=AckStatus.REJECTED.value,
+        last_trailing_broker_error='130',
+        locked_profit_money=0.20,
+    )
+    confirmed = confirm_protective_sl(
+        state,
+        broker_sl=1.10020,
+        price_tolerance=0.00001,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+        digits=5,
+        side=Side.BUY.value,
+    )
+    assert confirmed.be_plus_confirmed is True
+    assert confirmed.pending_protective_sl is None
+
+
+def test_buy_full_path_uses_ack_applied_stop_loss() -> None:
+    params = _prod_params()
+    merge = merge_technical_and_money_step_trailing(
+        technical_result=_none_technical(),
+        params=params,
+        state=MoneyStepTrailingState(),
+        side=Side.BUY.value,
+        open_price=1.10000,
+        current_sl=1.09800,
+        current_price=1.10100,
+        net_profit_money=0.55,
+        current_swap=0.0,
+        current_commission=0.0,
+        tick_value=1.0,
+        tick_size=0.00001,
+        volume=0.01,
+        digits=5,
+        point=0.00001,
+        stop_level=0,
+        freeze_level=0,
+        price_tolerance=0.00001,
+        modify_take_profit=0.0,
+        sensor_fresh=True,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+    )
+    be_sl = float(merge.management_result.stop_loss)
+    instance = Instance(account_id='1', symbol='EURUSD', magic=1)
+    istate = InstanceState(instance=instance)
+    istate.update_instrument(digits=5, point=0.00001, pip=0.00010)
+    istate.update_position(open_ticket=10, position_side=Side.BUY.value, position_volume=0.01, entry_price=1.1, stop_loss=1.098, take_profit=0.0)
+    istate.pending_protective_sl = be_sl
+    istate.pending_trailing_reason = REASON_BE_PLUS_NET_PROFIT
+    istate.pending_trailing_step_pips = 3.0
+    cmd = OrderCommand(command_id='buy1', action=OrderAction.MODIFY.value, side=Side.BUY.value, stop_loss=be_sl, take_profit=0.0, ticket=10, reason='BE', decision_id='d')
+    # Broker applies with tiny float-safe equal value via applied_stop_loss, not requested alone.
+    ack = _ack_modify(command_id='buy1', ticket=10, applied_sl=be_sl, requested_sl=be_sl)
+    apply_ack_to_instance_state(istate, cmd, ack, trailing_step_pips=3.0)
+    assert istate.be_plus_confirmed is True
+    assert istate.confirmed_protective_sl == pytest.approx(be_sl)
+    levels = [be_sl]
+    money = MoneyStepTrailingState(
+        be_plus_confirmed=True,
+        confirmed_protective_sl=be_sl,
+        computed_be_plus_sl=be_sl,
+        locked_profit_money=0.20,
+        peak_net_profit_money=0.90,
+    )
+    for bid in (1.10060, 1.10090, 1.10120):
+        merge = merge_technical_and_money_step_trailing(
+            technical_result=_none_technical(),
+            params=params,
+            state=money,
+            side=Side.BUY.value,
+            open_price=1.10000,
+            current_sl=float(money.confirmed_protective_sl or 0),
+            current_price=bid,
+            net_profit_money=0.90,
+            current_swap=0.0,
+            current_commission=0.0,
+            tick_value=1.0,
+            tick_size=0.00001,
+            volume=0.01,
+            digits=5,
+            point=0.00001,
+            stop_level=0,
+            freeze_level=0,
+            price_tolerance=0.00001,
+            modify_take_profit=0.0,
+            sensor_fresh=True,
+            trailing_step_pips=3.0,
+            pip=0.00010,
+        )
+        new_sl = float(merge.management_result.stop_loss)
+        levels.append(new_sl)
+        money = confirm_protective_sl(merge.state, broker_sl=new_sl, price_tolerance=0.00001, trailing_step_pips=3.0, pip=0.00010, digits=5, side=Side.BUY.value)
+    assert levels == [pytest.approx(1.10020), pytest.approx(1.10050), pytest.approx(1.10080), pytest.approx(1.10110)]
+
+
+def test_sell_full_path_uses_ack_applied_stop_loss() -> None:
+    params = _prod_params()
+    merge = merge_technical_and_money_step_trailing(
+        technical_result=_none_technical(),
+        params=params,
+        state=MoneyStepTrailingState(),
+        side=Side.SELL.value,
+        open_price=1.10000,
+        current_sl=1.10200,
+        current_price=1.09900,
+        net_profit_money=0.55,
+        current_swap=0.0,
+        current_commission=0.0,
+        tick_value=1.0,
+        tick_size=0.00001,
+        volume=0.01,
+        digits=5,
+        point=0.00001,
+        stop_level=0,
+        freeze_level=0,
+        price_tolerance=0.00001,
+        modify_take_profit=0.0,
+        sensor_fresh=True,
+        trailing_step_pips=3.0,
+        pip=0.00010,
+    )
+    be_sl = float(merge.management_result.stop_loss)
+    instance = Instance(account_id='1', symbol='EURUSD', magic=1)
+    istate = InstanceState(instance=instance)
+    istate.update_instrument(digits=5, point=0.00001, pip=0.00010)
+    istate.update_position(open_ticket=11, position_side=Side.SELL.value, position_volume=0.01, entry_price=1.1, stop_loss=1.102, take_profit=0.0)
+    istate.pending_protective_sl = be_sl
+    istate.pending_trailing_reason = REASON_BE_PLUS_NET_PROFIT
+    cmd = OrderCommand(command_id='sell1', action=OrderAction.MODIFY.value, side=Side.SELL.value, stop_loss=be_sl, take_profit=0.0, ticket=11, reason='BE', decision_id='d')
+    apply_ack_to_instance_state(istate, cmd, _ack_modify(command_id='sell1', ticket=11, applied_sl=be_sl), trailing_step_pips=3.0)
+    assert istate.be_plus_confirmed is True
+    assert istate.confirmed_protective_sl == pytest.approx(1.09980)
+    money = MoneyStepTrailingState(be_plus_confirmed=True, confirmed_protective_sl=be_sl, computed_be_plus_sl=be_sl, locked_profit_money=0.20, peak_net_profit_money=0.90)
+    levels = [be_sl]
+    for ask in (1.09940, 1.09910, 1.09880):
+        merge = merge_technical_and_money_step_trailing(
+            technical_result=_none_technical(),
+            params=params,
+            state=money,
+            side=Side.SELL.value,
+            open_price=1.10000,
+            current_sl=float(money.confirmed_protective_sl or 0),
+            current_price=ask,
+            net_profit_money=0.90,
+            current_swap=0.0,
+            current_commission=0.0,
+            tick_value=1.0,
+            tick_size=0.00001,
+            volume=0.01,
+            digits=5,
+            point=0.00001,
+            stop_level=0,
+            freeze_level=0,
+            price_tolerance=0.00001,
+            modify_take_profit=0.0,
+            sensor_fresh=True,
+            trailing_step_pips=3.0,
+            pip=0.00010,
+        )
+        new_sl = float(merge.management_result.stop_loss)
+        levels.append(new_sl)
+        money = confirm_protective_sl(merge.state, broker_sl=new_sl, price_tolerance=0.00001, trailing_step_pips=3.0, pip=0.00010, digits=5, side=Side.SELL.value)
+    assert levels == [pytest.approx(1.09980), pytest.approx(1.09950), pytest.approx(1.09920), pytest.approx(1.09890)]
+

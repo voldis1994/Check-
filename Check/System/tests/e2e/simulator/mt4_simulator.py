@@ -167,6 +167,18 @@ class MT4Simulator:
                 kwargs['fill_price'] = 1.10315
             else:
                 kwargs['fill_price'] = 1.10290
+        if control.action == OrderAction.MODIFY.value:
+            kwargs['action'] = OrderAction.MODIFY.value
+            if control.stop_loss is not None:
+                kwargs['requested_stop_loss'] = control.stop_loss
+                if status == AckStatus.SUCCESS.value:
+                    kwargs['applied_stop_loss'] = control.stop_loss
+            if control.take_profit is not None:
+                kwargs['requested_take_profit'] = control.take_profit
+                if status == AckStatus.SUCCESS.value:
+                    kwargs['applied_take_profit'] = control.take_profit
+            if error_code is not None:
+                kwargs['broker_error_code'] = error_code
         return AckRecord(**kwargs)
 
     def write_ack(self, instance: Instance, ack_record: AckRecord) -> Path:
@@ -199,7 +211,12 @@ class MT4Simulator:
             instance = kwargs['instance']
 
             def sim_wait(*, ack_available, **wait_kwargs: object):
-                simulator.fulfill_control(instance, ticket=simulator.next_ticket())
+                control = simulator.read_control(instance)
+                if control is not None and control.action in {OrderAction.MODIFY.value, OrderAction.CLOSE.value} and control.ticket is not None:
+                    ticket = int(control.ticket)
+                else:
+                    ticket = simulator.next_ticket()
+                simulator.fulfill_control(instance, ticket=ticket)
                 return original_wait(ack_available=ack_available, **wait_kwargs)
             execution_engine.wait_for_ack = sim_wait
             try:

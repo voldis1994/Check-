@@ -264,7 +264,7 @@ def parse_ack(data: dict[str, Any] | str) -> AckRecord:
     payload = _ensure_mapping(data, 'ack')
     schema_version = _validate_schema_version(payload, 'ack', is_supported_protocol_schema_version)
     kwargs: dict[str, Any] = {'schema_version': schema_version, 'timestamp_utc': _require_key(payload, 'timestamp_utc', 'ack'), 'command_id': _require_key(payload, 'command_id', 'ack'), 'account_id': _require_key(payload, 'account_id', 'ack'), 'symbol': _require_key(payload, 'symbol', 'ack'), 'magic': _require_key(payload, 'magic', 'ack'), 'status': _require_key(payload, 'status', 'ack')}
-    for optional in ('ticket', 'error_code', 'error_message', 'fill_price', 'open_time_utc', 'volume', 'side'):
+    for optional in ('ticket', 'error_code', 'error_message', 'fill_price', 'open_time_utc', 'volume', 'side', 'action', 'requested_stop_loss', 'applied_stop_loss', 'requested_take_profit', 'applied_take_profit', 'broker_error_code'):
         if optional in payload and payload[optional] is not None:
             kwargs[optional] = payload[optional]
     return _build_model(AckRecord, 'ack', **kwargs)

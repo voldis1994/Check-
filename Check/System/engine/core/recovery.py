@@ -146,7 +146,13 @@ def recover_pending_ack(runtime: LiveRuntime, instance: Instance, *, unconfirmed
             if order_command.action == OrderAction.OPEN.value:
                 entry_price = resolve_recovery_entry_price_for_open(runtime, instance)
             log_ack_failure(runtime.paths, instance, ack_record)
-            apply_ack_to_instance_state(instance_state, order_command, ack_record, entry_price=entry_price)
+            apply_ack_to_instance_state(
+                instance_state,
+                order_command,
+                ack_record,
+                entry_price=entry_price,
+                trailing_step_pips=runtime.config.trade_management.trailing_step_pips,
+            )
             interpret_ack(ack_record)
             archive_processed_control(runtime.paths, instance)
             archive_processed_ack(runtime.paths, instance)

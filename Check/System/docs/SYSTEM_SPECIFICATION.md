@@ -948,6 +948,12 @@ Universe JSON nedrīkst saturēt laukus: `signal`, `direction`, `trade`, `buy`, 
 | `magic` | integer | jā | Magic |
 | `status` | string | jā | SUCCESS, FAILED, REJECTED |
 | `ticket` | integer | nē | Izveidotā vai modificētā pozīcija |
+| `action` | string | nē | OPEN/MODIFY/CLOSE (MODIFY ACK obligāti) |
+| `requested_stop_loss` | number | nē | Pieprasītais SL (MODIFY) |
+| `applied_stop_loss` | number | nē | Brokera faktiskais SL pēc OrderModify |
+| `requested_take_profit` | number | nē | Pieprasītais TP (MODIFY) |
+| `applied_take_profit` | number | nē | Brokera faktiskais TP pēc OrderModify |
+| `broker_error_code` | integer | nē | MT4 GetLastError / broker kļūdas kods |
 | `error_code` | integer | nē | MT4 kļūdas kods |
 | `error_message` | string | nē | Kļūdas apraksts |
 

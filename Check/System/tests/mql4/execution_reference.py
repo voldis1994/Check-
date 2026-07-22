@@ -17,6 +17,12 @@ class AckResult:
     error_code: int = 0
     error_message: str = ''
     has_ticket: bool = False
+    action: str = ''
+    requested_stop_loss: float | None = None
+    applied_stop_loss: float | None = None
+    requested_take_profit: float | None = None
+    applied_take_profit: float | None = None
+    broker_error_code: int = 0
 
 @dataclass
 class OrderExecutionContext:
@@ -30,6 +36,13 @@ class OrderExecutionContext:
     order_send_error: int = 130
     order_modify_error: int = 130
     order_close_error: int = 130
+    previous_stop_loss: float = 1.08000
+    previous_take_profit: float = 1.09000
+    applied_stop_loss: float | None = None
+    applied_take_profit: float | None = None
+    order_type: int = 0  # OP_BUY
+    reselect_after_modify: bool = True
+    price_tolerance: float = 0.00001
 
     def __post_init__(self) -> None:
         if self.known_tickets is None:
@@ -41,12 +54,49 @@ def build_ack_file_path(root_path: str, account_id: str, symbol: str, magic: int
 def is_supported_ack_status(status: str) -> bool:
     return status in SUPPORTED_ACK_STATUSES
 
-def build_ack_json(*, command_id: str, account_id: str, symbol: str, magic: int, status: str, timestamp_utc: str, ticket: int | None=None, error_code: int | None=None, error_message: str | None=None) -> str:
-    payload: dict[str, object] = {'account_id': account_id, 'command_id': command_id, 'magic': magic, 'schema_version': PROTOCOL_SCHEMA_VERSION, 'status': status, 'symbol': symbol, 'timestamp_utc': timestamp_utc}
+def build_ack_json(
+    *,
+    command_id: str,
+    account_id: str,
+    symbol: str,
+    magic: int,
+    status: str,
+    timestamp_utc: str,
+    ticket: int | None = None,
+    error_code: int | None = None,
+    error_message: str | None = None,
+    action: str | None = None,
+    requested_stop_loss: float | None = None,
+    applied_stop_loss: float | None = None,
+    requested_take_profit: float | None = None,
+    applied_take_profit: float | None = None,
+    broker_error_code: int | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        'account_id': account_id,
+        'command_id': command_id,
+        'magic': magic,
+        'schema_version': PROTOCOL_SCHEMA_VERSION,
+        'status': status,
+        'symbol': symbol,
+        'timestamp_utc': timestamp_utc,
+    }
+    if action:
+        payload['action'] = action
     if ticket is not None and ticket > 0:
         payload['ticket'] = ticket
+    if requested_stop_loss is not None:
+        payload['requested_stop_loss'] = requested_stop_loss
+    if applied_stop_loss is not None:
+        payload['applied_stop_loss'] = applied_stop_loss
+    if requested_take_profit is not None:
+        payload['requested_take_profit'] = requested_take_profit
+    if applied_take_profit is not None:
+        payload['applied_take_profit'] = applied_take_profit
     if error_code is not None and error_code != 0:
         payload['error_code'] = error_code
+    if broker_error_code is not None and broker_error_code != 0:
+        payload['broker_error_code'] = broker_error_code
     if error_message:
         payload['error_message'] = error_message
     return json.dumps(payload, ensure_ascii=False, indent=2) + '\n'
@@ -68,10 +118,19 @@ def set_rejected_ack(result: AckResult, message: str, *, error_code: int=0) -> A
     return AckResult(status=AckStatus.REJECTED.value, error_message=message, error_code=error_code)
 
 def set_failed_ack(result: AckResult, message: str, *, error_code: int) -> AckResult:
-    return AckResult(status=AckStatus.FAILED.value, error_message=message, error_code=error_code)
+    return AckResult(status=AckStatus.FAILED.value, error_message=message, error_code=error_code, broker_error_code=error_code)
 
 def set_success_ack(ticket: int) -> AckResult:
     return AckResult(status=AckStatus.SUCCESS.value, ticket=ticket, has_ticket=ticket > 0)
+
+def _sl_improves(*, order_type: int, previous_sl: float, applied_sl: float, tolerance: float) -> bool:
+    if previous_sl <= 0.0 and applied_sl > 0.0:
+        return True
+    if order_type == 0:  # BUY
+        return applied_sl > previous_sl + tolerance
+    if order_type == 1:  # SELL
+        return applied_sl < previous_sl - tolerance
+    return False
 
 def execute_open(command: control_reference.ControlCommandData, context: OrderExecutionContext) -> AckResult:
     if not command.has_side or not is_supported_trade_side(command.side):
@@ -92,13 +151,65 @@ def execute_open(command: control_reference.ControlCommandData, context: OrderEx
 
 def execute_modify(command: control_reference.ControlCommandData, context: OrderExecutionContext) -> AckResult:
     if not command.has_ticket or command.ticket <= 0:
-        return set_rejected_ack(AckResult(), 'modify command requires ticket')
+        result = set_rejected_ack(AckResult(), 'modify command requires ticket')
+        result.action = OrderAction.MODIFY.value
+        return result
     if not select_order_by_ticket(command.ticket, symbol=command.symbol, magic=command.magic, known_tickets=context.known_tickets or set()):
-        return set_rejected_ack(AckResult(), 'modify ticket not found for instance')
+        result = set_rejected_ack(AckResult(), 'modify ticket not found for instance')
+        result.action = OrderAction.MODIFY.value
+        return result
+    requested_sl = command.stop_loss if command.has_stop_loss else context.previous_stop_loss
+    requested_tp = command.take_profit if command.has_take_profit else context.previous_take_profit
     modified = True if context.order_modify_result is None else context.order_modify_result
     if not modified:
-        return set_failed_ack(AckResult(), 'OrderModify failed', error_code=context.order_modify_error)
-    return set_success_ack(command.ticket)
+        result = set_failed_ack(AckResult(), 'OrderModify failed', error_code=context.order_modify_error)
+        result.action = OrderAction.MODIFY.value
+        result.requested_stop_loss = requested_sl
+        result.requested_take_profit = requested_tp
+        return result
+    if not context.reselect_after_modify:
+        result = set_failed_ack(AckResult(), 'OrderModify succeeded but reselect failed', error_code=1)
+        result.action = OrderAction.MODIFY.value
+        result.requested_stop_loss = requested_sl
+        result.requested_take_profit = requested_tp
+        return result
+    applied_sl = context.applied_stop_loss if context.applied_stop_loss is not None else requested_sl
+    applied_tp = context.applied_take_profit if context.applied_take_profit is not None else requested_tp
+    if not _sl_improves(order_type=context.order_type, previous_sl=context.previous_stop_loss, applied_sl=applied_sl, tolerance=context.price_tolerance):
+        return AckResult(
+            status=AckStatus.FAILED.value,
+            ticket=command.ticket,
+            has_ticket=True,
+            error_message='applied stop loss does not improve protection',
+            action=OrderAction.MODIFY.value,
+            requested_stop_loss=requested_sl,
+            applied_stop_loss=applied_sl,
+            requested_take_profit=requested_tp,
+            applied_take_profit=applied_tp,
+        )
+    if abs(applied_sl - requested_sl) > context.price_tolerance:
+        return AckResult(
+            status=AckStatus.FAILED.value,
+            ticket=command.ticket,
+            has_ticket=True,
+            error_message='applied stop loss outside requested tolerance',
+            action=OrderAction.MODIFY.value,
+            requested_stop_loss=requested_sl,
+            applied_stop_loss=applied_sl,
+            requested_take_profit=requested_tp,
+            applied_take_profit=applied_tp,
+        )
+    return AckResult(
+        status=AckStatus.SUCCESS.value,
+        ticket=command.ticket,
+        has_ticket=True,
+        action=OrderAction.MODIFY.value,
+        requested_stop_loss=requested_sl,
+        applied_stop_loss=applied_sl,
+        requested_take_profit=requested_tp,
+        applied_take_profit=applied_tp,
+        broker_error_code=0,
+    )
 
 def execute_close(command: control_reference.ControlCommandData, context: OrderExecutionContext) -> AckResult:
     if not command.has_ticket or command.ticket <= 0:

@@ -79,7 +79,16 @@ def is_valid_open_fill_ack(ack_record: AckRecord) -> bool:
         return False
     return True
 
-def apply_ack_to_instance_state(instance_state: InstanceState, order_command: OrderCommand, ack_record: AckRecord, *, entry_price: float | None=None, reference_take_profit: float | None=None, position_last_bar_utc: str | None=None) -> None:
+def apply_ack_to_instance_state(
+    instance_state: InstanceState,
+    order_command: OrderCommand,
+    ack_record: AckRecord,
+    *,
+    entry_price: float | None = None,
+    reference_take_profit: float | None = None,
+    position_last_bar_utc: str | None = None,
+    trailing_step_pips: float | None = None,
+) -> None:
     instance_state.update_execution(command_id=ack_record.command_id, ack_status=ack_record.status)
     if order_command.action == OrderAction.OPEN.value:
         if is_valid_open_fill_ack(ack_record):
@@ -108,79 +117,135 @@ def apply_ack_to_instance_state(instance_state: InstanceState, order_command: Or
                 instance_state.clear_position()
     elif order_command.action == OrderAction.MODIFY.value:
         # Never clear a pending OPEN identity just because trailing MODIFY acked.
-        if ack_record.status == AckStatus.SUCCESS.value and order_command.stop_loss is not None and order_command.take_profit is not None:
-            instance_state.update_position_levels(stop_loss=order_command.stop_loss, take_profit=order_command.take_profit)
-            from engine.risk.money_step_trailing import MoneyStepTrailingState, confirm_protective_sl
+        from engine.risk.money_step_trailing import (
+            MoneyStepTrailingState,
+            REASON_TRAILING_ACK_SL_MISMATCH,
+            confirm_protective_sl,
+            mark_protective_ack_sl_mismatch,
+            mark_protective_modify_rejected,
+        )
+
+        def _as_optional_float(value: object) -> float | None:
+            if value is None or isinstance(value, bool):
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            return None
+
+        def _money_state_from_instance(*, pending_fallback: float | None) -> MoneyStepTrailingState:
+            return MoneyStepTrailingState(
+                peak_net_profit_money=instance_state.peak_net_profit_money,
+                money_trailing_step_index=instance_state.money_trailing_step_index,
+                locked_profit_money=instance_state.locked_profit_money,
+                last_money_trailing_sl=instance_state.last_money_trailing_sl,
+                be_plus_confirmed=instance_state.be_plus_confirmed,
+                confirmed_protective_sl=instance_state.confirmed_protective_sl,
+                pending_protective_sl=instance_state.pending_protective_sl if instance_state.pending_protective_sl is not None else pending_fallback,
+                pending_trailing_reason=instance_state.pending_trailing_reason,
+                pip_trail_confirmed_steps=instance_state.pip_trail_confirmed_steps,
+                computed_be_plus_sl=instance_state.computed_be_plus_sl,
+                next_pip_trail_sl=instance_state.next_pip_trail_sl,
+                last_trailing_modify_status=instance_state.last_trailing_modify_status,
+                last_trailing_broker_error=instance_state.last_trailing_broker_error,
+                trailing_reason_code=instance_state.trailing_reason_code,
+            )
+
+        if ack_record.status == AckStatus.SUCCESS.value:
             digits = instance_state.instrument_digits or 5
             point = instance_state.instrument_point or (10 ** (-digits))
             pip = instance_state.instrument_pip or (point * 10.0)
             price_tolerance = max(point, 10 ** (-digits), 1e-05)
-            money_state = MoneyStepTrailingState(
-                peak_net_profit_money=instance_state.peak_net_profit_money,
-                money_trailing_step_index=instance_state.money_trailing_step_index,
-                locked_profit_money=instance_state.locked_profit_money,
-                last_money_trailing_sl=instance_state.last_money_trailing_sl,
-                be_plus_confirmed=instance_state.be_plus_confirmed,
-                confirmed_protective_sl=instance_state.confirmed_protective_sl,
-                pending_protective_sl=instance_state.pending_protective_sl if instance_state.pending_protective_sl is not None else order_command.stop_loss,
-                pending_trailing_reason=instance_state.pending_trailing_reason,
-                pip_trail_confirmed_steps=instance_state.pip_trail_confirmed_steps,
-                computed_be_plus_sl=instance_state.computed_be_plus_sl,
-                next_pip_trail_sl=instance_state.next_pip_trail_sl,
-                last_trailing_modify_status=instance_state.last_trailing_modify_status,
-                last_trailing_broker_error=instance_state.last_trailing_broker_error,
-                trailing_reason_code=instance_state.trailing_reason_code,
+            resolved_step = trailing_step_pips
+            if resolved_step is None:
+                resolved_step = instance_state.pending_trailing_step_pips
+            if resolved_step is None:
+                resolved_step = 0.0
+
+            applied_sl = _as_optional_float(getattr(ack_record, 'applied_stop_loss', None))
+            applied_tp = _as_optional_float(getattr(ack_record, 'applied_take_profit', None))
+            pending_sl = instance_state.pending_protective_sl
+            if pending_sl is None:
+                pending_sl = _as_optional_float(order_command.stop_loss)
+
+            identity_ok = (
+                ack_record.command_id == order_command.command_id
+                and (ack_record.action is None or ack_record.action == OrderAction.MODIFY.value)
+                and ack_record.ticket is not None
+                and order_command.ticket is not None
+                and int(ack_record.ticket) == int(order_command.ticket)
+                and instance_state.open_ticket is not None
+                and int(ack_record.ticket) == int(instance_state.open_ticket)
+                and ack_record.symbol == instance_state.instance.symbol
+                and int(ack_record.magic) == int(instance_state.instance.magic)
+                and applied_sl is not None
+                and pending_sl is not None
+                and abs(float(applied_sl) - float(pending_sl)) <= price_tolerance
             )
-            confirmed = confirm_protective_sl(
-                money_state,
-                broker_sl=float(order_command.stop_loss),
-                price_tolerance=price_tolerance,
-                trailing_step_pips=3.0,
-                pip=pip,
-                digits=digits,
-                side=instance_state.position_side or Side.BUY.value,
-            )
-            # Recompute next pip target if BE just confirmed — caller cycle will refine with config.
-            instance_state.apply_money_trailing_state(
-                peak_net_profit_money=confirmed.peak_net_profit_money,
-                money_trailing_step_index=confirmed.money_trailing_step_index,
-                locked_profit_money=confirmed.locked_profit_money,
-                last_money_trailing_sl=confirmed.last_money_trailing_sl,
-                ticket=instance_state.open_ticket,
-                be_plus_confirmed=confirmed.be_plus_confirmed,
-                confirmed_protective_sl=confirmed.confirmed_protective_sl,
-                pending_protective_sl=None,
-                pending_trailing_reason=None,
-                pip_trail_confirmed_steps=confirmed.pip_trail_confirmed_steps,
-                computed_be_plus_sl=confirmed.computed_be_plus_sl,
-                next_pip_trail_sl=confirmed.next_pip_trail_sl,
-                last_trailing_modify_status='SUCCESS',
-                last_trailing_broker_error=None,
-                trailing_reason_code=confirmed.trailing_reason_code,
-                sync_pending=True,
-            )
+
+            if identity_ok and applied_sl is not None:
+                stop_loss = applied_sl
+                take_profit = applied_tp if applied_tp is not None else order_command.take_profit
+                if take_profit is not None:
+                    instance_state.update_position_levels(stop_loss=stop_loss, take_profit=take_profit)
+                else:
+                    instance_state.update_position_levels(stop_loss=stop_loss, take_profit=instance_state.position_take_profit or 0.0)
+                money_state = _money_state_from_instance(pending_fallback=pending_sl)
+                confirmed = confirm_protective_sl(
+                    money_state,
+                    broker_sl=float(applied_sl),
+                    price_tolerance=price_tolerance,
+                    trailing_step_pips=float(resolved_step),
+                    pip=pip,
+                    digits=digits,
+                    side=instance_state.position_side or Side.BUY.value,
+                )
+                instance_state.apply_money_trailing_state(
+                    peak_net_profit_money=confirmed.peak_net_profit_money,
+                    money_trailing_step_index=confirmed.money_trailing_step_index,
+                    locked_profit_money=confirmed.locked_profit_money,
+                    last_money_trailing_sl=confirmed.last_money_trailing_sl,
+                    ticket=instance_state.open_ticket,
+                    be_plus_confirmed=confirmed.be_plus_confirmed,
+                    confirmed_protective_sl=confirmed.confirmed_protective_sl,
+                    pending_protective_sl=None,
+                    pending_trailing_reason=None,
+                    pip_trail_confirmed_steps=confirmed.pip_trail_confirmed_steps,
+                    computed_be_plus_sl=confirmed.computed_be_plus_sl,
+                    next_pip_trail_sl=confirmed.next_pip_trail_sl,
+                    last_trailing_modify_status='SUCCESS',
+                    last_trailing_broker_error=None,
+                    trailing_reason_code=confirmed.trailing_reason_code,
+                    pending_trailing_step_pips=None,
+                    sync_pending=True,
+                )
+            else:
+                money_state = _money_state_from_instance(pending_fallback=_as_optional_float(order_command.stop_loss))
+                mismatched = mark_protective_ack_sl_mismatch(money_state, status=REASON_TRAILING_ACK_SL_MISMATCH)
+                instance_state.apply_money_trailing_state(
+                    peak_net_profit_money=mismatched.peak_net_profit_money,
+                    money_trailing_step_index=mismatched.money_trailing_step_index,
+                    locked_profit_money=mismatched.locked_profit_money,
+                    last_money_trailing_sl=mismatched.last_money_trailing_sl,
+                    ticket=instance_state.open_ticket,
+                    be_plus_confirmed=mismatched.be_plus_confirmed,
+                    confirmed_protective_sl=mismatched.confirmed_protective_sl,
+                    pending_protective_sl=mismatched.pending_protective_sl,
+                    pending_trailing_reason=mismatched.pending_trailing_reason,
+                    pip_trail_confirmed_steps=mismatched.pip_trail_confirmed_steps,
+                    computed_be_plus_sl=mismatched.computed_be_plus_sl,
+                    next_pip_trail_sl=mismatched.next_pip_trail_sl,
+                    last_trailing_modify_status=mismatched.last_trailing_modify_status,
+                    last_trailing_broker_error=mismatched.last_trailing_broker_error,
+                    trailing_reason_code=mismatched.trailing_reason_code,
+                    sync_pending=True,
+                )
         elif ack_record.status in {AckStatus.FAILED.value, AckStatus.REJECTED.value}:
-            from engine.risk.money_step_trailing import MoneyStepTrailingState, mark_protective_modify_rejected
-            money_state = MoneyStepTrailingState(
-                peak_net_profit_money=instance_state.peak_net_profit_money,
-                money_trailing_step_index=instance_state.money_trailing_step_index,
-                locked_profit_money=instance_state.locked_profit_money,
-                last_money_trailing_sl=instance_state.last_money_trailing_sl,
-                be_plus_confirmed=instance_state.be_plus_confirmed,
-                confirmed_protective_sl=instance_state.confirmed_protective_sl,
-                pending_protective_sl=instance_state.pending_protective_sl if instance_state.pending_protective_sl is not None else order_command.stop_loss,
-                pending_trailing_reason=instance_state.pending_trailing_reason,
-                pip_trail_confirmed_steps=instance_state.pip_trail_confirmed_steps,
-                computed_be_plus_sl=instance_state.computed_be_plus_sl,
-                next_pip_trail_sl=instance_state.next_pip_trail_sl,
-                last_trailing_modify_status=instance_state.last_trailing_modify_status,
-                last_trailing_broker_error=instance_state.last_trailing_broker_error,
-                trailing_reason_code=instance_state.trailing_reason_code,
-            )
+            money_state = _money_state_from_instance(pending_fallback=_as_optional_float(order_command.stop_loss))
+            broker_code = ack_record.broker_error_code if ack_record.broker_error_code is not None else ack_record.error_code
             rejected = mark_protective_modify_rejected(
                 money_state,
                 status=str(ack_record.status),
-                error_code=str(ack_record.error_code) if ack_record.error_code is not None else None,
+                error_code=str(broker_code) if broker_code is not None else None,
             )
             instance_state.apply_money_trailing_state(
                 peak_net_profit_money=rejected.peak_net_profit_money,
@@ -237,7 +302,7 @@ def log_ack_failure(paths: SystemPaths, instance: Instance, ack_record: AckRecor
 def _requires_trade_execution(order_command: OrderCommand) -> bool:
     return order_command.action in {OrderAction.OPEN.value, OrderAction.MODIFY.value, OrderAction.CLOSE.value}
 
-def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_state: InstanceState, decision_result: DecisionResult, risk_engine_result: RiskEngineResult, runtime: RuntimeConfig, management_result: TradeManagementResult | None=None, timestamp_utc: str | None=None, started_monotonic: float | None=None, monotonic_fn: Callable[[], float]=time.monotonic, sleep_fn: Callable[[float], None]=time.sleep, poll_interval_ms: int=50, retry_alert_context: RetryAlertContext | None=None, position_last_bar_utc: str | None=None, preexisting_tickets: tuple[int, ...]=(), signal_quality_config: SignalQualityConfig | None=None) -> ExecutionResult:
+def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_state: InstanceState, decision_result: DecisionResult, risk_engine_result: RiskEngineResult, runtime: RuntimeConfig, management_result: TradeManagementResult | None=None, timestamp_utc: str | None=None, started_monotonic: float | None=None, monotonic_fn: Callable[[], float]=time.monotonic, sleep_fn: Callable[[float], None]=time.sleep, poll_interval_ms: int=50, retry_alert_context: RetryAlertContext | None=None, position_last_bar_utc: str | None=None, preexisting_tickets: tuple[int, ...]=(), signal_quality_config: SignalQualityConfig | None=None, trailing_step_pips: float | None=None) -> ExecutionResult:
     resolved_timestamp = timestamp_utc or now_utc()
     order_command = resolve_order_command(decision_result, risk_engine_result, management_result, ticket=instance_state.open_ticket, side=instance_state.position_side)
     if instance_state.last_command_id:
@@ -311,7 +376,7 @@ def run_execution_engine(*, paths: SystemPaths, instance: Instance, instance_sta
         _archive_money_trailing_state(paths, instance, instance_state)
     if _is_full_close_ack(instance_state, order_command, ack_record):
         _register_close_cooldown(instance_state=instance_state, signal_quality_config=signal_quality_config, close_bar_utc=position_last_bar_utc or resolved_timestamp, close_time_utc=resolved_timestamp, was_loss=False)
-    apply_ack_to_instance_state(instance_state, order_command, ack_record, entry_price=resolved_entry_price, reference_take_profit=resolve_reference_take_profit_for_open(decision_result, order_command), position_last_bar_utc=position_last_bar_utc)
+    apply_ack_to_instance_state(instance_state, order_command, ack_record, entry_price=resolved_entry_price, reference_take_profit=resolve_reference_take_profit_for_open(decision_result, order_command), position_last_bar_utc=position_last_bar_utc, trailing_step_pips=trailing_step_pips)
     if order_command.action == OrderAction.OPEN.value and is_valid_open_fill_ack(ack_record):
         _register_open_fingerprint(instance_state=instance_state, decision_result=decision_result, signal_quality_config=signal_quality_config)
     trade_entry = log_trade_ack(paths, instance, ack_record, timestamp_utc=resolved_timestamp, price=resolved_entry_price if order_command.action == OrderAction.OPEN.value else None)

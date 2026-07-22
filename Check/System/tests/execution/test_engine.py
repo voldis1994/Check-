@@ -19,7 +19,7 @@ from engine.journal.error_journal import build_error_journal_path
 from engine.journal.trade_journal import INTENT_REASON_PREFIX, build_trade_journal_path
 from engine.normalizer.market_normalizer import NormalizedMarketBar
 from engine.protocol.constants import AckStatus, Decision, ErrorType, OrderAction, PROTOCOL_SCHEMA_VERSION, REASON_ACK_TIMEOUT, RiskResult, Side, TradeEvent
-from engine.protocol.models import RiskConfig, RuntimeConfig, StatusRecord, UniverseRecord
+from engine.protocol.models import AckRecord, RiskConfig, RuntimeConfig, StatusRecord, UniverseRecord
 from engine.protocol.parser import parse_control, parse_error_journal_line, parse_trade_journal_line
 from engine.risk.engine import RiskEngineResult, run_risk_engine
 from engine.state.instance_state import InstanceState
@@ -62,7 +62,7 @@ def _wait_decision_result() -> DecisionResult:
 def _allow_risk_result() -> RiskEngineResult:
     return RiskEngineResult(result=RiskResult.ALLOW.value, reason='', position_size=0.1, stop_loss=1.0988, take_profit=1.1117)
 
-def _ack_payload(*, status: str, command_id: str=FIXED_COMMAND_ID, ticket: int | None=555, fill_price: float | None=None, side: str | None=None, volume: float | None=None, error_code: int | None=None, error_message: str | None=None) -> str:
+def _ack_payload(*, status: str, command_id: str=FIXED_COMMAND_ID, ticket: int | None=555, fill_price: float | None=None, side: str | None=None, volume: float | None=None, error_code: int | None=None, error_message: str | None=None, action: str | None=None, requested_stop_loss: float | None=None, applied_stop_loss: float | None=None, requested_take_profit: float | None=None, applied_take_profit: float | None=None) -> str:
     ticket_field = f',\n  "ticket": {ticket}' if ticket is not None else ''
     error_fields = ''
     if error_code is not None:
@@ -76,6 +76,16 @@ def _ack_payload(*, status: str, command_id: str=FIXED_COMMAND_ID, ticket: int |
         fill_fields += f',\n  "side": "{side}"'
     if volume is not None:
         fill_fields += f',\n  "volume": {volume}'
+    if action is not None:
+        fill_fields += f',\n  "action": "{action}"'
+    if requested_stop_loss is not None:
+        fill_fields += f',\n  "requested_stop_loss": {requested_stop_loss}'
+    if applied_stop_loss is not None:
+        fill_fields += f',\n  "applied_stop_loss": {applied_stop_loss}'
+    if requested_take_profit is not None:
+        fill_fields += f',\n  "requested_take_profit": {requested_take_profit}'
+    if applied_take_profit is not None:
+        fill_fields += f',\n  "applied_take_profit": {applied_take_profit}'
     return f'{{\n  "schema_version": "{PROTOCOL_SCHEMA_VERSION}",\n  "timestamp_utc": "2026-07-07T06:00:00.000Z",\n  "command_id": "{command_id}",\n  "account_id": "12345",\n  "symbol": "EURUSD",\n  "magic": 100001,\n  "status": "{status}"{ticket_field}{fill_fields}{error_fields}\n}}'
 
 def _write_ack(paths: SystemPaths, instance: Instance, payload: str) -> None:
@@ -144,9 +154,24 @@ def test_apply_ack_to_instance_state_updates_execution_and_position_on_success_o
 def test_apply_ack_to_instance_state_updates_position_levels_on_success_modify() -> None:
     state = _instance_state()
     state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.1, entry_price=1.1031, stop_loss=1.0988, take_profit=1.1117)
+    state.pending_protective_sl = 1.1031
     order_command = OrderCommand(command_id='cmd-modify-1', action=OrderAction.MODIFY.value, reason='TRADE_MANAGEMENT_BREAKEVEN: stop loss moved to entry', decision_id='decision-123', side=Side.BUY.value, stop_loss=1.1031, take_profit=1.1117, ticket=555)
-    ack_record = MagicMock(command_id='cmd-modify-1', status=AckStatus.SUCCESS.value, ticket=555)
-    apply_ack_to_instance_state(state, order_command, ack_record)
+    ack_record = AckRecord(
+        schema_version=PROTOCOL_SCHEMA_VERSION,
+        timestamp_utc='2026-07-07T06:00:00.000Z',
+        command_id='cmd-modify-1',
+        account_id='12345',
+        symbol='EURUSD',
+        magic=100001,
+        status=AckStatus.SUCCESS.value,
+        ticket=555,
+        action=OrderAction.MODIFY.value,
+        requested_stop_loss=1.1031,
+        applied_stop_loss=1.1031,
+        requested_take_profit=1.1117,
+        applied_take_profit=1.1117,
+    )
+    apply_ack_to_instance_state(state, order_command, ack_record, trailing_step_pips=3.0)
     assert state.position_stop_loss == pytest.approx(1.1031)
     assert state.position_take_profit == pytest.approx(1.1117)
     assert state.open_ticket == 555
@@ -342,9 +367,22 @@ def test_run_execution_engine_prefers_trade_management_modify_before_wait_decisi
     instance = _instance()
     state = _instance_state()
     state.update_position(open_ticket=555, position_side=Side.BUY.value, position_volume=0.1, entry_price=1.1031, stop_loss=1.0988, take_profit=1.1117)
-    _write_ack(paths, instance, _ack_payload(status=AckStatus.SUCCESS.value, ticket=555))
+    state.pending_protective_sl = 1.1031
+    _write_ack(
+        paths,
+        instance,
+        _ack_payload(
+            status=AckStatus.SUCCESS.value,
+            ticket=555,
+            action=OrderAction.MODIFY.value,
+            requested_stop_loss=1.1031,
+            applied_stop_loss=1.1031,
+            requested_take_profit=1.1117,
+            applied_take_profit=1.1117,
+        ),
+    )
     management_result = TradeManagementResult(action=OrderAction.MODIFY.value, reason='TRADE_MANAGEMENT_BREAKEVEN: stop loss moved to entry', stop_loss=1.1031, take_profit=1.1117)
-    result = run_execution_engine(paths=paths, instance=instance, instance_state=state, decision_result=_wait_decision_result(), risk_engine_result=_allow_risk_result(), runtime=_runtime_config(), management_result=management_result, timestamp_utc='2026-07-07T06:00:00.000Z')
+    result = run_execution_engine(paths=paths, instance=instance, instance_state=state, decision_result=_wait_decision_result(), risk_engine_result=_allow_risk_result(), runtime=_runtime_config(), management_result=management_result, timestamp_utc='2026-07-07T06:00:00.000Z', trailing_step_pips=3.0)
     assert result.order_command.action == OrderAction.MODIFY.value
     assert result.order_command.ticket == 555
     assert result.trade_intent_logged is True

@@ -63,7 +63,9 @@ Galvenie lauki: `command_id`, `account_id`, `symbol`, `magic`, `action`, `reason
 |-------|---------|
 | `ack_{symbol}_{magic}.json` | JSON |
 
-Galvenie lauki: `command_id`, `account_id`, `symbol`, `magic`, `status`, `ticket`, `error_code`, `error_message`.
+Galvenie lauki: `command_id`, `account_id`, `symbol`, `magic`, `status`, `ticket`, `error_code`, `error_message`, `action`, `requested_stop_loss`, `applied_stop_loss`, `requested_take_profit`, `applied_take_profit`, `broker_error_code`.
+
+MODIFY SUCCESS ACK pēc `OrderModify` obligāti ietver MT4 atkārtoti nolasīto `applied_stop_loss` / `applied_take_profit`. Python nedrīkst apstiprināt trailing no pieprasītā `stop_loss`.
 
 `status` vērtības ārējā ACK JSON failā: `SUCCESS`, `FAILED`, `REJECTED`.
 
