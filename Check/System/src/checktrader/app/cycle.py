@@ -93,7 +93,40 @@ def _apply_broker_specs(context: AppContext, market: MarketSnapshot) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> CycleAudit:
+def merge_market_history(context: AppContext, market: MarketSnapshot) -> None:
+    """Merge bridge bars into rolling history and refresh market TF lists in-place."""
+    if market.m1:
+        context.history.merge("M1", market.m1)
+
+    m1_all = context.history.get("M1")
+    if m1_all:
+        m5_agg, m15_agg = aggregate_standard(m1_all)
+        context.history.merge("M5", m5_agg)
+        context.history.merge("M15", m15_agg)
+
+    if market.m5:
+        context.history.merge("M5", market.m5)
+    if market.m15:
+        context.history.merge("M15", market.m15)
+
+    market.m1 = context.history.get("M1")
+    market.m5 = context.history.get("M5")
+    market.m15 = context.history.get("M15")
+
+    if market.symbol and market.symbol.upper() not in {"", "AUTO"}:
+        if context.specs.symbol.upper() in {"AUTO", ""}:
+            context.specs.symbol = market.symbol
+        _apply_broker_specs(context, market)
+
+    save_history(context.config.paths.history_file, context.history)
+
+
+def run_cycle(
+    context: AppContext,
+    market: MarketSnapshot | None = None,
+    *,
+    shared_regime: RegimeSnapshot | None = None,
+) -> CycleAudit:
     now = datetime.now(UTC)
     is_live = context.config.runtime.mode == "live"
     audit = CycleAudit(
@@ -171,37 +204,12 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
             context.audit.write(audit)
             return audit
 
-    # ── Step 3: merge closed M1 history ────────────────────────────────────
-    if market.m1:
-        context.history.merge("M1", market.m1)
-
-    # ── Step 4: aggregate M5 / M15 from M1 ────────────────────────────────
-    m1_all = context.history.get("M1")
-    if m1_all:
-        m5_agg, m15_agg = aggregate_standard(m1_all)
-        context.history.merge("M5", m5_agg)
-        context.history.merge("M15", m15_agg)
-
-    # Also merge any directly-provided higher-TF bars (legacy or pre-built)
-    if market.m5:
-        context.history.merge("M5", market.m5)
-    if market.m15:
-        context.history.merge("M15", market.m15)
-
-    market.m1 = context.history.get("M1")
-    market.m5 = context.history.get("M5")
-    market.m15 = context.history.get("M15")
+    # ── Step 3/4: merge history + aggregate higher TF ───────────────────────
+    merge_market_history(context, market)
     audit.metrics["m1_count"] = len(market.m1)
     audit.metrics["m15_count"] = len(market.m15)
-
     if market.symbol and market.symbol.upper() not in {"", "AUTO"}:
         audit.symbol = market.symbol
-        if context.specs.symbol.upper() in {"AUTO", ""}:
-            context.specs.symbol = market.symbol
-        _apply_broker_specs(context, market)
-
-    # Persist M1 progress even when higher-TF validation fails later.
-    save_history(context.config.paths.history_file, context.history)
 
     # Always sync broker positions first — open trades must be managed even when
     # history/regime is not ready for new entries.
@@ -216,16 +224,25 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
     audit.reasons.append(reason_seq)
 
     if ok_seq:
-        regime = context.detector.update(market.m15)
+        local_regime = context.detector.update(market.m15)
     else:
         # Keep going for management; block only *new* entries via UNKNOWN regime.
-        regime = RegimeSnapshot(
+        local_regime = RegimeSnapshot(
             MarketRegime.UNKNOWN,
             datetime.now(UTC),
             reason_seq,
             0.0,
             IndicatorSnapshot(datetime.now(UTC)),
         )
+
+    # Same symbol across accounts must share one market regime (richest M15 wins).
+    if shared_regime is not None:
+        regime = shared_regime
+        audit.metrics["regime_source"] = "shared"
+        audit.metrics["shared_m15"] = int((shared_regime.metadata or {}).get("shared_m15") or 0)
+    else:
+        regime = local_regime
+        audit.metrics["regime_source"] = "local"
 
     audit.market_regime = regime.regime
     audit.reasons.append(regime.reason)
@@ -242,9 +259,11 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
     }
     if regime.reason == ReasonCode.HISTORY_INSUFFICIENT:
         need = int((regime.metadata or {}).get("need") or context.config.regimes.trend.ema50_period)
-        have = len(market.m15)
+        have = int((regime.metadata or {}).get("m15") or (regime.metadata or {}).get("shared_m15") or len(market.m15))
         audit.metrics["warmup_m15"] = have
         audit.metrics["warmup_need"] = need
+        # Keep warm-up visible as the primary reason (not overwritten later to REGIME_UNKNOWN alone).
+        audit.set_reason(ReasonCode.HISTORY_INSUFFICIENT, [f"m15={have}/{need}"])
 
     # ── Step 7: expire/update setups ────────────────────────────────────────
     last_bar = last_closed(market.m15)
@@ -289,69 +308,83 @@ def run_cycle(context: AppContext, market: MarketSnapshot | None = None) -> Cycl
             if any(p.position_id == pos.position_id for p in context.state.positions):
                 pos.current_price = market.bid if pos.side == Side.BUY else market.ask
 
-    elif ok_seq:
-        # ── Step 9: strategy router (new entries only when bars are usable) ─
-        result = context.router.evaluate(
-            StrategyContext(
-                context.config,
-                context.specs,
-                market,
-                regime,
-                market.account,
-                context.state.positions,
-                context.state.setups,
+    elif ok_seq or (
+        shared_regime is not None
+        and shared_regime.regime != MarketRegime.UNKNOWN
+        and reason_seq != ReasonCode.BARS_NOT_SEQUENTIAL
+    ):
+        # Warm-up: do not rewrite HISTORY_INSUFFICIENT into generic REGIME_UNKNOWN.
+        if regime.reason == ReasonCode.HISTORY_INSUFFICIENT:
+            audit.decision = Decision.HOLD
+            need = int((regime.metadata or {}).get("need") or context.config.regimes.trend.ema50_period)
+            have = int(
+                (regime.metadata or {}).get("m15")
+                or (regime.metadata or {}).get("shared_m15")
+                or len(market.m15)
             )
-        )
-        audit.reasons.append(result.reason)
-        audit.signal = result.signal
-        audit.decision = result.decision
-
-        if result.setup:
-            audit.setup_state = result.setup.state
-
-        if result.signal:
-            audit.selected_strategy = result.signal.strategy
-
-            # ── Step 10: risk validate ───────────────────────────────────────
-            risk = validate_order(
-                result.signal,
-                config=context.config,
-                specs=context.specs,
-                account=market.account,
-                positions=context.state.positions,
-                limit_state=context.state.limits,
-                bid=market.bid,
-                ask=market.ask,
-                atr_value=regime.indicators.atr,
-                now=now,
-            )
-            audit.risk_result = risk
-            audit.reasons.extend(risk.messages)
-
-            if risk.allowed:
-                # ── Step 11: order command ───────────────────────────────────
-                cmd = build_open(result.signal, risk.lot, context.config.execution)
-                ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
-                audit.command = cmd
-                audit.execution_result = _ack_to_exec_result(ack)
-                audit.reasons.append(ack.reason)
-                audit.decision = Decision.OPEN
-                audit.set_reason(ack.reason)
-
-                # ── Step 12: update limits on accepted trade ─────────────────
-                if ack.accepted:
-                    record_trade_open(context.state.limits, now)
-                    # Advance setup state to ORDER_PENDING if a setup is linked
-                    if result.setup is not None:
-                        transition(result.setup, SetupState.ORDER_PENDING)
-                        result.setup.command_id = cmd.command_id
-                        context.state.setups.upsert(result.setup)
-            else:
-                audit.failed_conditions = [r.value for r in risk.messages if r != risk.reason]
-                audit.set_reason(risk.reason, audit.failed_conditions or None)
-                audit.decision = Decision.BLOCK
+            audit.set_reason(ReasonCode.HISTORY_INSUFFICIENT, [f"m15={have}/{need}"])
         else:
-            audit.set_reason(result.reason)
+            # ── Step 9: strategy router (new entries when bars/regime usable) ─
+            result = context.router.evaluate(
+                StrategyContext(
+                    context.config,
+                    context.specs,
+                    market,
+                    regime,
+                    market.account,
+                    context.state.positions,
+                    context.state.setups,
+                )
+            )
+            audit.reasons.append(result.reason)
+            audit.signal = result.signal
+            audit.decision = result.decision
+
+            if result.setup:
+                audit.setup_state = result.setup.state
+
+            if result.signal:
+                audit.selected_strategy = result.signal.strategy
+
+                # ── Step 10: risk validate ───────────────────────────────────
+                risk = validate_order(
+                    result.signal,
+                    config=context.config,
+                    specs=context.specs,
+                    account=market.account,
+                    positions=context.state.positions,
+                    limit_state=context.state.limits,
+                    bid=market.bid,
+                    ask=market.ask,
+                    atr_value=regime.indicators.atr,
+                    now=now,
+                )
+                audit.risk_result = risk
+                audit.reasons.extend(risk.messages)
+
+                if risk.allowed:
+                    # ── Step 11: order command ───────────────────────────────
+                    cmd = build_open(result.signal, risk.lot, context.config.execution)
+                    ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
+                    audit.command = cmd
+                    audit.execution_result = _ack_to_exec_result(ack)
+                    audit.reasons.append(ack.reason)
+                    audit.decision = Decision.OPEN
+                    audit.set_reason(ack.reason)
+
+                    # ── Step 12: update limits on accepted trade ─────────────
+                    if ack.accepted:
+                        record_trade_open(context.state.limits, now)
+                        if result.setup is not None:
+                            transition(result.setup, SetupState.ORDER_PENDING)
+                            result.setup.command_id = cmd.command_id
+                            context.state.setups.upsert(result.setup)
+                else:
+                    audit.failed_conditions = [r.value for r in risk.messages if r != risk.reason]
+                    audit.set_reason(risk.reason, audit.failed_conditions or None)
+                    audit.decision = Decision.BLOCK
+            else:
+                audit.set_reason(result.reason)
 
     # ── Step 13: save history + state ───────────────────────────────────────
     save_history(context.config.paths.history_file, context.history)
