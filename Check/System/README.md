@@ -37,12 +37,16 @@ Use `scripts/stop.ps1` to create `runtime/STOP_TRADING`. Operators should also d
 
 1. Install Python 3.12 or newer.
 2. From this directory, run `.\scripts\setup.ps1`.
-3. Run `.\scripts\deploy_mt4.ps1` to copy the EA and includes into every `%APPDATA%\MetaQuotes\Terminal\*\MQL4\` directory.
-4. Restart MT4 or refresh Navigator.
-5. Compile `CHECK_SYSTEM_V3.mq4`.
-6. Attach it to an M1 chart for the configured symbol.
-7. In the EA settings, enable **Allow DLL imports**.
-8. Enable AutoTrading only when ready for live execution.
+3. Run `.\scripts\deploy_mt4.ps1` **or double-click `DEPLOY_MT4.bat`**.
+   This copies `CHECK_SYSTEM_V3.mq4` **and all four `CHECK_V3_*.mqh` files** into every terminal:
+   - `MQL4\Experts\` (EA + includes side-by-side)
+   - `MQL4\Include\`
+4. In MetaEditor open the EA from **Data Folder → MQL4\Experts\CHECK_SYSTEM_V3.mq4** (not only from the git repo).
+5. Compile with **F7** — must be **0 errors**.
+6. Attach to an **M1** chart.
+7. Enable **Allow DLL imports**.
+8. Leave `BridgeRootPath` empty (AUTO).
+9. Enable AutoTrading only when ready for live.
 
 The default MT4 `BridgeRootPath` is empty, which resolves automatically to:
 
