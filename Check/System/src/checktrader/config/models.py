@@ -62,39 +62,29 @@ class RegimeTrendConfig(StrictModel):
     adx_period: int = Field(14, ge=1)
     # Slope measured over this many bars
     slope_lookback: int = Field(5, ge=1)
-    # EMA20 slope (|delta| / ATR) must be >= ema20_slope_atr for standard trend
-    ema20_slope_atr: float = Field(0.15, ge=0.0)
-    # EMA50 slope must be >= ema50_slope_atr
-    ema50_slope_atr: float = Field(0.08, ge=0.0)
-    # Minimum ADX for standard trend
-    adx_min: float = Field(20.0, ge=0.0)
-    # ADX >= adx_strong overrides slope requirement (structure + strong ADX enough)
-    adx_strong: float = Field(25.0, ge=0.0)
-    # |EMA20 - EMA50| / ATR >= ema_sep_atr
-    ema_sep_atr: float = Field(0.20, ge=0.0)
+    # Softened for NATURALGAS — strict path still exists; soft path uses half ADX
+    ema20_slope_atr: float = Field(0.03, ge=0.0)
+    ema50_slope_atr: float = Field(0.01, ge=0.0)
+    adx_min: float = Field(12.0, ge=0.0)
+    adx_strong: float = Field(18.0, ge=0.0)
+    ema_sep_atr: float = Field(0.10, ge=0.0)
 
 
 class RegimeRangeConfig(StrictModel):
     atr_period: int = Field(14, ge=1)
     adx_period: int = Field(14, ge=1)
-    adx_max: float = Field(18.0, ge=0.0)
+    adx_max: float = Field(28.0, ge=0.0)
     ema20_period: int = Field(20, ge=1)
     ema50_period: int = Field(50, ge=1)
-    # EMA50 flatness: slope over flat_lookback bars / ATR <= flat_atr
     ema50_flat_lookback: int = Field(8, ge=1)
-    ema50_flat_atr: float = Field(0.20, ge=0.0)
-    # Max EMA separation (|EMA20-EMA50| / ATR)
-    ema_sep_atr: float = Field(0.35, ge=0.0)
-    # Range boundary detection using last range_lookback M15 bars
+    ema50_flat_atr: float = Field(0.45, ge=0.0)
+    ema_sep_atr: float = Field(0.80, ge=0.0)
     range_lookback: int = Field(24, ge=2)
-    width_min_atr: float = Field(1.5, gt=0.0)
-    width_max_atr: float = Field(6.0, gt=0.0)
-    # Bar high/low must be within touch_tol_atr * ATR of boundary to count as touch
-    touch_tol_atr: float = Field(0.15, ge=0.0)
-    # Minimum bars between two touches of the same side
-    min_bars_between_touches: int = Field(3, ge=0)
-    # Minimum valid touches required on each side
-    min_touches_per_side: int = Field(2, ge=1)
+    width_min_atr: float = Field(0.80, gt=0.0)
+    width_max_atr: float = Field(8.0, gt=0.0)
+    touch_tol_atr: float = Field(0.25, ge=0.0)
+    min_bars_between_touches: int = Field(1, ge=0)
+    min_touches_per_side: int = Field(1, ge=1)
 
 
 class RegimeTransitionConfig(StrictModel):
@@ -113,37 +103,28 @@ class TrendContinuationConfig(StrictModel):
     atr_period: int = Field(14, ge=1)
     adx_period: int = Field(14, ge=1)
     swing_lookback: int = Field(2, ge=1)
-    # Pullback zone: EMA20 - zone_low_atr*ATR <= price <= EMA20 + zone_high_atr*ATR
-    pullback_zone_low_atr: float = Field(0.25, ge=0.0)
-    pullback_zone_high_atr: float = Field(0.20, ge=0.0)
-    # Invalidation: BUY invalidated if close < EMA50 - invalidation_atr*ATR
-    invalidation_atr: float = Field(0.10, ge=0.0)
-    # Trigger confirmation buffer: max(trigger_buffer_atr*ATR, trigger_buffer_ticks*tick)
-    trigger_buffer_atr: float = Field(0.05, ge=0.0)
-    trigger_buffer_ticks: int = Field(2, ge=0)
-    # Candle quality filters
-    body_ratio_min: float = Field(0.55, ge=0.0, le=1.0)
-    max_candle_atr: float = Field(2.5, gt=0.0)
-    # Entry is entry_distance_atr * ATR above/below EMA20
-    entry_distance_atr: float = Field(0.35, ge=0.0)
-    # Stop placed stop_buffer_atr * ATR below swing low (or above swing high)
+    pullback_zone_low_atr: float = Field(1.20, ge=0.0)
+    pullback_zone_high_atr: float = Field(1.20, ge=0.0)
+    invalidation_atr: float = Field(0.35, ge=0.0)
+    trigger_buffer_atr: float = Field(0.02, ge=0.0)
+    trigger_buffer_ticks: int = Field(1, ge=0)
+    body_ratio_min: float = Field(0.25, ge=0.0, le=1.0)
+    max_candle_atr: float = Field(4.0, gt=0.0)
+    entry_distance_atr: float = Field(0.80, ge=0.0)
     stop_buffer_atr: float = Field(0.15, ge=0.0)
-    # Stop may not exceed stop_max_atr * ATR from entry
-    stop_max_atr: float = Field(2.0, gt=0.0)
-    take_profit_rr: float = Field(2.0, gt=0.0)
-    # Setup expires after this many M1 bars
-    expiry_m1_bars: int = Field(8, ge=1)
+    stop_max_atr: float = Field(2.5, gt=0.0)
+    take_profit_rr: float = Field(1.5, gt=0.0)
+    expiry_m1_bars: int = Field(12, ge=1)
+    # When EMA aligned, open on M1 momentum instead of waiting forever for pullback arm
+    immediate_m1_entry: bool = True
 
 
 class RangeReversionConfig(StrictModel):
     enabled: bool = True
     atr_period: int = Field(14, ge=1)
     adx_period: int = Field(14, ge=1)
-    # Price must be in the outer zone_pct fraction of the range
-    zone_pct: float = Field(0.20, ge=0.0, le=1.0)
-    # Lower wick / candle range >= wick_pct (for buy signal)
-    wick_pct: float = Field(0.35, ge=0.0, le=1.0)
-    # Stop placed stop_buffer_atr * ATR beyond boundary
+    zone_pct: float = Field(0.30, ge=0.0, le=1.0)
+    wick_pct: float = Field(0.20, ge=0.0, le=1.0)
     stop_buffer_atr: float = Field(0.20, ge=0.0)
     take_profit_rr: float = Field(1.5, gt=0.0)
     expiry_m1_bars: int = Field(6, ge=1)
@@ -152,30 +133,22 @@ class RangeReversionConfig(StrictModel):
 class BreakoutConfig(StrictModel):
     enabled: bool = True
     atr_period: int = Field(14, ge=1)
-    # Box is defined by the last N M5 bars; N must be in [box_min_m5_bars, box_max_m5_bars]
-    box_min_m5_bars: int = Field(12, ge=1)
-    box_max_m5_bars: int = Field(30, ge=1)
-    # Box width / M15 ATR must be in [width_min_atr, width_max_atr]
-    width_min_atr: float = Field(0.80, gt=0.0)
-    width_max_atr: float = Field(4.0, gt=0.0)
-    # Bar high/low within touch_tol_atr * ATR of box boundary counts as touch
-    touch_tol_atr: float = Field(0.12, ge=0.0)
-    min_touches_per_side: int = Field(2, ge=1)
-    # confirmation_mode: breakout_only → entry on break; breakout_and_retest → wait for retest
-    confirmation_mode: Literal["breakout_only", "breakout_and_retest"] = "breakout_and_retest"
-    # Price must close beyond boundary by breakout_buffer_atr * ATR
-    breakout_buffer_atr: float = Field(0.10, ge=0.0)
-    # Retest: price must return within retest_tol_atr * ATR of broken boundary
-    retest_tol_atr: float = Field(0.15, ge=0.0)
-    # False breakout: price closes back inside box by > false_breakout_close_back_atr * ATR
-    false_breakout_close_back_atr: float = Field(0.10, ge=0.0)
+    box_min_m5_bars: int = Field(6, ge=1)
+    box_max_m5_bars: int = Field(24, ge=1)
+    width_min_atr: float = Field(0.40, gt=0.0)
+    width_max_atr: float = Field(6.0, gt=0.0)
+    touch_tol_atr: float = Field(0.20, ge=0.0)
+    min_touches_per_side: int = Field(1, ge=1)
+    confirmation_mode: Literal["breakout_only", "breakout_and_retest"] = "breakout_only"
+    breakout_buffer_atr: float = Field(0.05, ge=0.0)
+    retest_tol_atr: float = Field(0.20, ge=0.0)
+    false_breakout_close_back_atr: float = Field(0.15, ge=0.0)
     stop_buffer_atr: float = Field(0.20, ge=0.0)
-    take_profit_rr: float = Field(2.0, gt=0.0)
+    take_profit_rr: float = Field(1.5, gt=0.0)
     expiry_m1_bars: int = Field(8, ge=1)
-    # M1 impulse: catch staircase / momentum breaks that never form a clean M5 box retest
     m1_impulse_enabled: bool = True
-    m1_impulse_lookback: int = Field(30, ge=5)
-    m1_impulse_min_body_atr: float = Field(0.12, ge=0.0)
+    m1_impulse_lookback: int = Field(15, ge=5)
+    m1_impulse_min_body_atr: float = Field(0.05, ge=0.0)
 
 
 class StrategiesConfig(StrictModel):

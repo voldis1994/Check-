@@ -300,8 +300,27 @@ class TrendContinuationStrategy:
             "slope_atr": slope_atr,
         }
 
-        if failed_arm:
+        # Hard gates only — slope/pullback are informational (stop pointless PULLBACK_NOT_FOUND holds).
+        hard_keys = {
+            "ema_alignment",
+            "not_invalidated",
+            "close_above_ema50",
+            "close_below_ema50",
+        }
+        hard_fail = [f for f in failed_arm if f in hard_keys]
+        if hard_fail:
+            # Still try immediate M1 momentum if EMA stack leans with price.
+            if cfg.immediate_m1_entry:
+                immediate = self._immediate_m1_open(context, is_up=is_up, ema20=ema20, ema50=ema50, a=a, cfg=cfg)
+                if immediate is not None:
+                    return immediate
             return StrategyResult(Decision.HOLD, ReasonCode.PULLBACK_NOT_FOUND, diagnostics=arm_diag)
+
+        # EMA aligned: prefer immediate M1 entry over ARMED→HOLD wait.
+        if cfg.immediate_m1_entry:
+            immediate = self._immediate_m1_open(context, is_up=is_up, ema20=ema20, ema50=ema50, a=a, cfg=cfg)
+            if immediate is not None:
+                return immediate
 
         # Compute stop from M5 swing
         side = Side.BUY if is_up else Side.SELL
@@ -353,4 +372,72 @@ class TrendContinuationStrategy:
             ReasonCode.SETUP_ARMED,
             setup=setup,
             diagnostics=arm_diag,
+        )
+
+    def _immediate_m1_open(
+        self,
+        context: StrategyContext,
+        *,
+        is_up: bool,
+        ema20: float,
+        ema50: float,
+        a: float,
+        cfg: Any,
+    ) -> StrategyResult | None:
+        m1_bars = closed_bars(context.m1)
+        if not m1_bars:
+            return None
+        last = m1_bars[-1]
+        body = abs(last.close - last.open)
+        candle_range = last.high - last.low
+        if candle_range <= 0:
+            return None
+        if body / candle_range < cfg.body_ratio_min:
+            return None
+        if candle_range > cfg.max_candle_atr * a:
+            return None
+
+        if is_up:
+            if not (last.close > last.open and last.close > ema20 and last.close > ema50):
+                return None
+            entry = context.market.ask
+            stop = min(last.low, ema20) - cfg.stop_buffer_atr * a
+            if stop >= entry:
+                return None
+            tp = entry + (entry - stop) * cfg.take_profit_rr
+            return StrategyResult(
+                Decision.OPEN,
+                ReasonCode.TREND_BUY_SIGNAL,
+                StrategySignal(
+                    StrategyType.TREND_CONTINUATION,
+                    Side.BUY,
+                    context.specs.symbol,
+                    entry,
+                    stop,
+                    tp,
+                    ReasonCode.TREND_BUY_SIGNAL,
+                ),
+                diagnostics={"mode": "immediate_m1", "ema20": ema20, "ema50": ema50},
+            )
+
+        if not (last.close < last.open and last.close < ema20 and last.close < ema50):
+            return None
+        entry = context.market.bid
+        stop = max(last.high, ema20) + cfg.stop_buffer_atr * a
+        if stop <= entry:
+            return None
+        tp = entry - (stop - entry) * cfg.take_profit_rr
+        return StrategyResult(
+            Decision.OPEN,
+            ReasonCode.TREND_SELL_SIGNAL,
+            StrategySignal(
+                StrategyType.TREND_CONTINUATION,
+                Side.SELL,
+                context.specs.symbol,
+                entry,
+                stop,
+                tp,
+                ReasonCode.TREND_SELL_SIGNAL,
+            ),
+            diagnostics={"mode": "immediate_m1", "ema20": ema20, "ema50": ema50},
         )

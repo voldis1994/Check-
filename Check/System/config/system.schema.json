@@ -81,7 +81,7 @@
           "type": "integer"
         },
         "confirmation_mode": {
-          "default": "breakout_and_retest",
+          "default": "breakout_only",
           "enum": [
             "breakout_only",
             "breakout_and_retest"
@@ -90,19 +90,19 @@
           "type": "string"
         },
         "breakout_buffer_atr": {
-          "default": 0.1,
+          "default": 0.05,
           "minimum": 0.0,
           "title": "Breakout Buffer Atr",
           "type": "number"
         },
         "retest_tol_atr": {
-          "default": 0.15,
+          "default": 0.2,
           "minimum": 0.0,
           "title": "Retest Tol Atr",
           "type": "number"
         },
         "false_breakout_close_back_atr": {
-          "default": 0.1,
+          "default": 0.15,
           "minimum": 0.0,
           "title": "False Breakout Close Back Atr",
           "type": "number"
@@ -114,7 +114,7 @@
           "type": "number"
         },
         "take_profit_rr": {
-          "default": 2.0,
+          "default": 1.5,
           "exclusiveMinimum": 0.0,
           "title": "Take Profit Rr",
           "type": "number"
@@ -131,13 +131,13 @@
           "type": "boolean"
         },
         "m1_impulse_lookback": {
-          "default": 30,
+          "default": 15,
           "minimum": 5,
           "title": "M1 Impulse Lookback",
           "type": "integer"
         },
         "m1_impulse_min_body_atr": {
-          "default": 0.12,
+          "default": 0.05,
           "minimum": 0.0,
           "title": "M1 Impulse Min Body Atr",
           "type": "number"
@@ -723,31 +723,31 @@
           "type": "integer"
         },
         "ema20_slope_atr": {
-          "default": 0.15,
+          "default": 0.03,
           "minimum": 0.0,
           "title": "Ema20 Slope Atr",
           "type": "number"
         },
         "ema50_slope_atr": {
-          "default": 0.08,
+          "default": 0.01,
           "minimum": 0.0,
           "title": "Ema50 Slope Atr",
           "type": "number"
         },
         "adx_min": {
-          "default": 20.0,
+          "default": 12.0,
           "minimum": 0.0,
           "title": "Adx Min",
           "type": "number"
         },
         "adx_strong": {
-          "default": 25.0,
+          "default": 18.0,
           "minimum": 0.0,
           "title": "Adx Strong",
           "type": "number"
         },
         "ema_sep_atr": {
-          "default": 0.2,
+          "default": 0.1,
           "minimum": 0.0,
           "title": "Ema Sep Atr",
           "type": "number"
@@ -964,10 +964,15 @@
           "type": "number"
         },
         "expiry_m1_bars": {
-          "default": 8,
+          "default": 12,
           "minimum": 1,
           "title": "Expiry M1 Bars",
           "type": "integer"
+        },
+        "immediate_m1_entry": {
+          "default": true,
+          "title": "Immediate M1 Entry",
+          "type": "boolean"
         }
       },
       "title": "TrendContinuationConfig",

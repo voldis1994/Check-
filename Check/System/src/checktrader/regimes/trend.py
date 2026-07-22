@@ -1,4 +1,4 @@
-"""TREND_UP / TREND_DOWN detection — sections 5.1 / 5.2."""
+"""TREND_UP / TREND_DOWN detection — sections 5.1 / 5.2 (strict + soft)."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def detect_trend(candles: list[Candle], config: RegimeTrendConfig) -> RegimeSnap
         and lp > lm
     )
     if up_indicators and (_swing_structure_ok(bars, bullish=True) or ladx >= config.adx_strong):
-        meta = {"ema200": l200, "adx": ladx, "slope20": slope20, "slope50": slope50}
+        meta = {"ema200": l200, "adx": ladx, "slope20": slope20, "slope50": slope50, "soft": 0.0}
         ind = _indicator_snapshot(bars, lf=lf, ls=ls, l200=l200, la=la, ladx=ladx, lp=lp, lm=lm, meta=meta)
         return RegimeSnapshot(
             MarketRegime.TREND_UP,
@@ -96,13 +96,54 @@ def detect_trend(candles: list[Candle], config: RegimeTrendConfig) -> RegimeSnap
         and lm > lp
     )
     if dn_indicators and (_swing_structure_ok(bars, bullish=False) or ladx >= config.adx_strong):
-        meta = {"ema200": l200, "adx": ladx, "slope20": slope20, "slope50": slope50}
+        meta = {"ema200": l200, "adx": ladx, "slope20": slope20, "slope50": slope50, "soft": 0.0}
         ind = _indicator_snapshot(bars, lf=lf, ls=ls, l200=l200, la=la, ladx=ladx, lp=lp, lm=lm, meta=meta)
         return RegimeSnapshot(
             MarketRegime.TREND_DOWN,
             bars[-1].time,
             ReasonCode.REGIME_TREND_DOWN_CONFIRMED,
             abs(lf - ls) / la,
+            ind,
+        )
+
+    # Soft path: skip EMA200 stack + swing structure, keep real ADX + EMA separation.
+    soft_adx = max(10.0, config.adx_min * 0.75)
+    sep = abs(lf - ls) / la
+    soft_up = (
+        lf > ls
+        and close > ls
+        and ladx >= soft_adx
+        and lp >= lm
+        and slope20 >= 0.0
+        and sep >= max(0.08, config.ema_sep_atr * 0.5)
+    )
+    if soft_up:
+        meta = {"ema200": l200, "adx": ladx, "slope20": slope20, "slope50": slope50, "soft": 1.0}
+        ind = _indicator_snapshot(bars, lf=lf, ls=ls, l200=l200, la=la, ladx=ladx, lp=lp, lm=lm, meta=meta)
+        return RegimeSnapshot(
+            MarketRegime.TREND_UP,
+            bars[-1].time,
+            ReasonCode.REGIME_TREND_UP_CONFIRMED,
+            max(0.15, sep),
+            ind,
+        )
+
+    soft_dn = (
+        lf < ls
+        and close < ls
+        and ladx >= soft_adx
+        and lm >= lp
+        and slope20 <= 0.0
+        and sep >= max(0.08, config.ema_sep_atr * 0.5)
+    )
+    if soft_dn:
+        meta = {"ema200": l200, "adx": ladx, "slope20": slope20, "slope50": slope50, "soft": 1.0}
+        ind = _indicator_snapshot(bars, lf=lf, ls=ls, l200=l200, la=la, ladx=ladx, lp=lp, lm=lm, meta=meta)
+        return RegimeSnapshot(
+            MarketRegime.TREND_DOWN,
+            bars[-1].time,
+            ReasonCode.REGIME_TREND_DOWN_CONFIRMED,
+            max(0.15, sep),
             ind,
         )
 
