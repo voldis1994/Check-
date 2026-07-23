@@ -126,14 +126,14 @@
       "m1_impulse_min_body_atr": 0.05
     },
     "force_entry_when_idle": true,
-    "force_stop_atr": 1.5,
-    "min_stop_atr": 0.75,
+    "force_stop_atr": 1.0,
+    "min_stop_atr": 0.6,
     "force_tp_rr": 1.20
   },
   "risk": {
     "daily_loss_limit_r": 0.0,
     "min_reward_risk": 0.0,
-    "max_stop_atr": 3.0,
+    "max_stop_atr": 2.5,
     "min_stop_points": 1.0,
     "max_stop_points": 10000.0,
     "enforce_account_status": false
@@ -152,7 +152,8 @@
     "take_profit_rr": 2.0,
     "hard_take_profit": false,
     "partial_close_enabled": false,
-    "exit_on_regime_flip": true
+    "exit_on_regime_flip": false,
+    "regime_flip_min_hold_seconds": 180.0
   },
   "execution": {
     "magic_number": 30001,

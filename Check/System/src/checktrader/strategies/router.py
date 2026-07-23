@@ -6,9 +6,8 @@ from dataclasses import dataclass, field
 
 from checktrader.domain.enums import Decision, MarketRegime, ReasonCode, SetupState, Side, StrategyType
 from checktrader.domain.models import StrategyResult, StrategySignal
-from checktrader.management.atr_stops import stop_target_distance
+from checktrader.management.atr_stops import atr_for_stops, stop_target_distance
 from checktrader.market_data.bars import closed_bars
-from checktrader.market_data.indicators import atr
 from checktrader.strategies.base import StrategyContext
 from checktrader.strategies.breakout import BreakoutStrategy
 from checktrader.strategies.exits import hard_take_profit_price
@@ -81,17 +80,20 @@ def _force_m1_entry(context: StrategyContext) -> StrategyResult | None:
     if len(m1) < 2:
         return None
 
-    a = None
-    m15 = closed_bars(context.m15)
-    if len(m15) >= 14:
-        raw = atr(m15, 14)[-1]
-        if raw is not None:
-            a = float(raw)
+    a = atr_for_stops(m15=context.m15, m5=context.m5, m1=context.m1, period=14)
     if a is None or a <= 0:
-        window = m1[-15:]
-        spans = [b.high - b.low for b in window]
-        a = sum(spans) / max(len(spans), 1)
-    if a <= 0:
+        ra = context.regime.indicators.atr
+        if ra is not None and ra > 0:
+            a = float(ra)
+    if a is None or a <= 0:
+        # Last resort: short M1 TR mean, capped to 1% of price (blocks insane SL).
+        window = m1[-min(15, len(m1)) :]
+        if not window:
+            return None
+        raw = sum(b.high - b.low for b in window) / len(window)
+        mid = context.market.mid or window[-1].close
+        a = min(raw, mid * 0.01) if mid > 0 else raw
+    if a is None or a <= 0:
         return None
 
     last = m1[-1]

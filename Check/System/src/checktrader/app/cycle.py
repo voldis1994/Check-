@@ -20,7 +20,6 @@ from checktrader.management.manager import manage_position
 from checktrader.market_data.aggregation import aggregate_standard
 from checktrader.market_data.bars import closed_bars, last_closed
 from checktrader.market_data.history import save_history
-from checktrader.market_data.indicators import atr as atr_series
 from checktrader.market_data.symbols import normalize_symbol, symbols_match
 from checktrader.market_data.validation import heartbeat_fresh, sequential_bars
 from checktrader.risk.limits import record_trade_open
@@ -77,15 +76,18 @@ def _positions_for_symbol(positions: list[Position], symbol: str) -> list[Positi
 
 
 def _management_atr(regime: RegimeSnapshot, market: MarketSnapshot, period: int = 14) -> float | None:
-    """Prefer regime ATR; fall back to M1 ATR so trailing never starves."""
+    """Prefer robust M15 ATR; fall back M5/M1 — never raw mean range (spike → 300pt SL)."""
+    from checktrader.management.atr_stops import atr_for_stops, robust_atr
+
+    value = atr_for_stops(m15=market.m15, m5=market.m5, m1=market.m1, period=period)
+    if value is not None:
+        return value
     if regime.indicators.atr is not None and regime.indicators.atr > 0:
+        # Still spike-guard regime ATR against M15 history when possible
+        guarded = robust_atr(market.m15, period) if market.m15 else None
+        if guarded is not None:
+            return min(float(regime.indicators.atr), guarded * 1.35)
         return float(regime.indicators.atr)
-    m1 = closed_bars(market.m1)
-    if len(m1) >= period + 1:
-        series = atr_series(m1, period)
-        for value in reversed(series):
-            if value is not None and value > 0:
-                return float(value)
     return None
 
 

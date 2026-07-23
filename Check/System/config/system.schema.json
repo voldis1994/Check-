@@ -397,9 +397,15 @@
           "type": "boolean"
         },
         "exit_on_regime_flip": {
-          "default": true,
+          "default": false,
           "title": "Exit On Regime Flip",
           "type": "boolean"
+        },
+        "regime_flip_min_hold_seconds": {
+          "default": 180.0,
+          "minimum": 0.0,
+          "title": "Regime Flip Min Hold Seconds",
+          "type": "number"
         }
       },
       "title": "ManagementConfig",
@@ -801,7 +807,7 @@
           "type": "number"
         },
         "max_stop_atr": {
-          "default": 3.0,
+          "default": 2.5,
           "exclusiveMinimum": 0.0,
           "title": "Max Stop Atr",
           "type": "number"
@@ -906,13 +912,13 @@
           "type": "boolean"
         },
         "force_stop_atr": {
-          "default": 1.5,
+          "default": 1.0,
           "exclusiveMinimum": 0.0,
           "title": "Force Stop Atr",
           "type": "number"
         },
         "min_stop_atr": {
-          "default": 0.75,
+          "default": 0.6,
           "exclusiveMinimum": 0.0,
           "title": "Min Stop Atr",
           "type": "number"

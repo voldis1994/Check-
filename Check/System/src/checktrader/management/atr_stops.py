@@ -1,17 +1,16 @@
 """ATR-adaptive stop / trail distances (volatility-native).
 
-Hard points/pips are NOT used for sizing. ATR already adapts to
-NATURALGAS vs EURUSD because it is measured in that symbol's price.
-
-Points/pips helpers exist only for audit/display after the ATR distance
-is computed (so you can read “≈X points” or “≈Y pips” on the tape).
+Hard points/pips are NOT used for sizing. ATR adapts per symbol.
+Points/pips helpers are display-only for the audit tape.
 """
 
 from __future__ import annotations
 
 from checktrader.config.models import ManagementConfig, StrategiesConfig
 from checktrader.domain.enums import Side
-from checktrader.domain.models import SymbolSpecs
+from checktrader.domain.models import Candle, SymbolSpecs
+from checktrader.market_data.bars import closed_bars
+from checktrader.market_data.indicators import atr as atr_indicator
 
 
 _FX_MARKERS = ("EUR", "USD", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "XAU", "XAG")
@@ -44,7 +43,7 @@ def sync_pip_size(specs: SymbolSpecs) -> None:
     specs.pip_size = pip_size(specs)
 
 
-def atr_distance(atr_value: float, mult: float) -> float:
+def atr_distance(atr_value: float | None, mult: float) -> float:
     if atr_value is None or atr_value <= 0 or mult <= 0:
         return 0.0
     return float(atr_value) * float(mult)
@@ -63,14 +62,51 @@ def distance_pips(price_distance: float, specs: SymbolSpecs) -> float:
     return abs(price_distance) / ps
 
 
+def robust_atr(candles: list[Candle], period: int = 14) -> float | None:
+    """
+    Wilder ATR with spike guard: never use a one-bar blow-up that makes SL 300pts.
+
+    last_atr is capped at 1.35 × median of the last up-to-20 ATR values.
+    """
+    bars = closed_bars(candles)
+    if len(bars) < period + 1:
+        return None
+    series = [float(v) for v in atr_indicator(bars, period) if v is not None and v > 0]
+    if not series:
+        return None
+    last = series[-1]
+    window = series[-min(20, len(series)) :]
+    med = sorted(window)[len(window) // 2]
+    if med <= 0:
+        return last
+    return min(last, med * 1.35)
+
+
+def atr_for_stops(
+    *,
+    m15: list[Candle] | None = None,
+    m5: list[Candle] | None = None,
+    m1: list[Candle] | None = None,
+    period: int = 14,
+) -> float | None:
+    """Prefer M15 ATR, then M5, then M1 — never raw mean candle range."""
+    for series in (m15, m5, m1):
+        if not series:
+            continue
+        value = robust_atr(series, period)
+        if value is not None and value > 0:
+            return value
+    return None
+
+
 def stop_target_distance(
     specs: SymbolSpecs,
     strategies: StrategiesConfig,
     atr_value: float | None,
 ) -> float:
-    """Initial SL = force_stop_atr · ATR (fully adaptive)."""
-    del specs  # digits unused for sizing — ATR carries the scale
-    return atr_distance(atr_value or 0.0, strategies.force_stop_atr)
+    """Initial SL = force_stop_atr · robust ATR."""
+    del specs
+    return atr_distance(atr_value, strategies.force_stop_atr)
 
 
 def trail_lock_distance(
@@ -79,7 +115,7 @@ def trail_lock_distance(
     atr_value: float | None,
 ) -> float:
     del specs
-    return atr_distance(atr_value or 0.0, config.trailing_lock_atr)
+    return atr_distance(atr_value, config.trailing_lock_atr)
 
 
 def trail_start_distance(
@@ -88,7 +124,7 @@ def trail_start_distance(
     atr_value: float | None,
 ) -> float:
     del specs
-    return atr_distance(atr_value or 0.0, config.trailing_start_atr)
+    return atr_distance(atr_value, config.trailing_start_atr)
 
 
 def breakeven_trigger_distance(
@@ -97,7 +133,7 @@ def breakeven_trigger_distance(
     atr_value: float | None,
 ) -> float:
     del specs
-    return atr_distance(atr_value or 0.0, config.breakeven_trigger_atr)
+    return atr_distance(atr_value, config.breakeven_trigger_atr)
 
 
 def clamp_stop_price(

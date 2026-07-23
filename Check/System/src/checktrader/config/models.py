@@ -157,10 +157,10 @@ class StrategiesConfig(StrictModel):
     breakout: BreakoutConfig = Field(default_factory=BreakoutConfig)
     # If strategies would idle-HOLD, still open on M1 momentum (no pointless HOLD loops)
     force_entry_when_idle: bool = True
-    # Adaptive initial SL = force_stop_atr · live ATR (same on NG and EURUSD).
-    force_stop_atr: float = Field(1.5, gt=0.0)
+    # Adaptive initial SL = force_stop_atr · robust ATR.
+    force_stop_atr: float = Field(1.0, gt=0.0)
     # Structure stops may not be tighter/wider than this ATR band.
-    min_stop_atr: float = Field(0.75, gt=0.0)
+    min_stop_atr: float = Field(0.6, gt=0.0)
     force_tp_rr: float = Field(1.20, gt=0.0)
 
 
@@ -169,7 +169,7 @@ class RiskConfig(StrictModel):
     daily_loss_limit_r: float = Field(0.0, ge=0.0)
     # 0 = disabled (no minimum RR gate)
     min_reward_risk: float = Field(0.0, ge=0.0)
-    max_stop_atr: float = Field(3.0, gt=0.0)
+    max_stop_atr: float = Field(2.5, gt=0.0)
     min_stop_points: float = Field(1.0, gt=0.0)
     max_stop_points: float = Field(10000.0, gt=0.0)
     # When false (default): ignore broker connected/trade_allowed/min_equity for entries
@@ -192,7 +192,10 @@ class ManagementConfig(StrictModel):
     take_profit_rr: float = Field(2.0, gt=0.0)
     hard_take_profit: bool = False
     partial_close_enabled: bool = False
-    exit_on_regime_flip: bool = True
+    # OFF by default — was killing new trades on the next 5s cycle (~6s lifetime).
+    exit_on_regime_flip: bool = False
+    # If re-enabled, wait this long after open before allowing flip exits.
+    regime_flip_min_hold_seconds: float = Field(180.0, ge=0.0)
 
 
 class ExecutionConfig(StrictModel):

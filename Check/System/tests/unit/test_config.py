@@ -17,14 +17,16 @@ def test_example_config_loads() -> None:
     assert cfg.instrument.symbol == "AUTO"
     assert cfg.position_sizing.fixed_lot == 0.02
     assert cfg.position.default_lot == 0.02
-    assert cfg.strategies.force_stop_atr == 1.5
-    assert cfg.strategies.min_stop_atr == 0.75
-    assert cfg.risk.max_stop_atr == 3.0
+    assert cfg.strategies.force_stop_atr == 1.0
+    assert cfg.strategies.min_stop_atr == 0.6
+    assert cfg.risk.max_stop_atr == 2.5
     assert cfg.management.hard_take_profit is False
     assert cfg.management.trailing_lock_atr == 0.75
     assert cfg.management.trailing_start_atr == 0.50
     assert cfg.management.breakeven_trigger_atr == 0.75
     assert cfg.management.breakeven_offset_atr == 0.05
+    assert cfg.management.exit_on_regime_flip is False
+    assert cfg.management.regime_flip_min_hold_seconds == 180.0
 
 
 def test_live_observe_allowed_without_trading_enabled() -> None:
