@@ -158,6 +158,58 @@ class BrainNodeState:
     label: str
     level: str  # ok | warn | error | idle
     detail: str
+    action: str = ""
+    hint: str = ""
+
+
+# Primary click actions for Account Brain hubs (dashboard handles these).
+BRAIN_HUB_META: dict[str, dict[str, str]] = {
+    "core": {
+        "label": "CORE",
+        "action": "core_pulse",
+        "hint": "Click → START LIVE if down, else system summary",
+    },
+    "engine": {
+        "label": "ENGINE",
+        "action": "engine_control",
+        "hint": "Click → start LIVE / PAPER or stop engine",
+    },
+    "bridge": {
+        "label": "BRIDGE",
+        "action": "open_requests",
+        "hint": "Click → bridge / market request feed",
+    },
+    "connections": {
+        "label": "LINK",
+        "action": "open_requests",
+        "hint": "Click → connection + status details",
+    },
+    "trading": {
+        "label": "TRADE",
+        "action": "trading_control",
+        "hint": "Click → clear STOP or toggle trading_enabled",
+    },
+    "data_flow": {
+        "label": "FLOW",
+        "action": "open_requests",
+        "hint": "Click → live data / command stream",
+    },
+    "risk": {
+        "label": "RISK",
+        "action": "risk_control",
+        "hint": "Click → clear STOP_TRADING or open settings",
+    },
+    "trail": {
+        "label": "TRAIL",
+        "action": "trail_inspect",
+        "hint": "Click → open positions / trailing status",
+    },
+    "accounts": {
+        "label": "ACCTS",
+        "action": "open_accounts",
+        "hint": "Click → per-client lot size editor",
+    },
+}
 
 
 def brain_node_states(
@@ -234,7 +286,7 @@ def brain_node_states(
             "TRAIL_FAILED",
             "MODIFY_REJECTED",
             "EXECUTION_TIMEOUT",
-        } or "TRAIL" in reason or "MODIFY" in reason and "FAIL" in reason
+        } or "TRAIL" in reason or ("MODIFY" in reason and "FAIL" in reason)
         if manage_fail:
             return "error", reason or "trail fault"
         if open_pos and decision in {"HOLD", "MANAGE", "WAIT"}:
@@ -280,17 +332,66 @@ def brain_node_states(
     else:
         core_l, core_d = "idle", "standby"
 
-    return [
-        BrainNodeState("core", "CORE", core_l, core_d),
-        BrainNodeState("engine", "ENGINE", eng_l, eng_d),
-        BrainNodeState("bridge", "BRIDGE", bridge_l, bridge_d),
-        BrainNodeState("connections", "LINK", conn_l, conn_d),
-        BrainNodeState("trading", "TRADE", trade_l, trade_d),
-        BrainNodeState("data_flow", "FLOW", flow_l, flow_d),
-        BrainNodeState("risk", "RISK", risk_l, risk_d),
-        BrainNodeState("trail", "TRAIL", trail_l, trail_d),
-        BrainNodeState("accounts", "ACCTS", acct_l, acct_d),
-    ]
+    level_map = {
+        "core": (core_l, core_d),
+        "engine": (eng_l, eng_d),
+        "bridge": (bridge_l, bridge_d),
+        "connections": (conn_l, conn_d),
+        "trading": (trade_l, trade_d),
+        "data_flow": (flow_l, flow_d),
+        "risk": (risk_l, risk_d),
+        "trail": (trail_l, trail_d),
+        "accounts": (acct_l, acct_d),
+    }
+    out: list[BrainNodeState] = []
+    for key, (level, detail) in level_map.items():
+        meta = BRAIN_HUB_META[key]
+        out.append(
+            BrainNodeState(
+                key=key,
+                label=meta["label"],
+                level=level,
+                detail=detail,
+                action=meta["action"],
+                hint=meta["hint"],
+            )
+        )
+
+    # Per-account functional nodes (lot editor targets).
+    for bridge in bridges:
+        acct = str(bridge.account_id or "").strip()
+        if not acct or acct == "-":
+            continue
+        stale_acct = bridge.market_age_s is None or bridge.market_age_s > 30
+        if not bridge.connected or stale_acct:
+            lvl, det = "error", f"{acct} bridge fault"
+        elif bridge.positions:
+            lvl, det = "ok", f"{acct} {len(bridge.positions)} pos"
+        else:
+            lvl, det = "ok", f"{acct} flat"
+        out.append(
+            BrainNodeState(
+                key=f"acct:{acct}",
+                label=acct[-6:],
+                level=lvl,
+                detail=det,
+                action="edit_lot",
+                hint=f"Click → edit lot size for account {acct}",
+            )
+        )
+        for pos in bridge.positions[:4]:
+            pl_lvl = "ok" if pos.profit >= 0 else "warn"
+            out.append(
+                BrainNodeState(
+                    key=f"pos:{acct}:{pos.ticket}",
+                    label=f"#{pos.ticket[-4:]}" if pos.ticket else "POS",
+                    level=pl_lvl if abs(pos.profit) < 50 else ("error" if pos.profit < 0 else "ok"),
+                    detail=f"{pos.symbol} {pos.side} {pos.lot} pl={pos.profit:.2f}",
+                    action="show_position",
+                    hint=f"Click → position {pos.ticket} details",
+                )
+            )
+    return out
 
 
 def stop_file_path(rt: Path) -> Path:

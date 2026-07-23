@@ -231,6 +231,8 @@ def test_brain_nodes_and_lot_helpers(tmp_path: Path, monkeypatch) -> None:
     assert by_key["bridge"].level == "error"
     assert by_key["risk"].level == "error"
     assert by_key["core"].level == "error"
+    assert by_key["engine"].action == "engine_control"
+    assert "Click" in by_key["accounts"].hint
 
     rt = tmp_path / "runtime"
     core.write_account_lot_override(rt, "231054", 0.04)
