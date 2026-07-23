@@ -115,12 +115,14 @@ class App:
             "accounts": self._page_accounts(self.body),
             "settings": self._page_settings(self.body),
         }
-        self._show("floor")
 
+        # Footer BEFORE first _show/refresh — otherwise AttributeError: no 'foot'
         foot = tk.Frame(self.root, bg=C["panel"], height=36)
         foot.pack(fill=tk.X, side=tk.BOTTOM)
         self.foot = tk.Label(foot, text="", bg=C["panel"], fg=C["mute"], font=self.f_mono, anchor="w")
         self.foot.pack(fill=tk.X, padx=12, pady=8)
+
+        self._show("floor")
 
     def _page_floor(self, parent) -> tk.Frame:
         f = tk.Frame(parent, bg=C["bg"])
@@ -320,6 +322,8 @@ class App:
             self._render_clients()
 
     def refresh(self) -> None:
+        if not getattr(self, "foot", None) or not getattr(self, "tree", None):
+            return
         online = self.engine.running
         self.status.configure(text="ONLINE" if online else "OFFLINE", fg=C["ok"] if online else C["stop"])
         bridges = clients.all_bridges()
