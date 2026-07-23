@@ -326,32 +326,44 @@
           "title": "Breakeven Trigger Rr",
           "type": "number"
         },
+        "breakeven_offset_atr": {
+          "default": 0.05,
+          "minimum": 0.0,
+          "title": "Breakeven Offset Atr",
+          "type": "number"
+        },
         "breakeven_offset_points": {
-          "default": 2.0,
+          "default": 0.0,
           "minimum": 0.0,
           "title": "Breakeven Offset Points",
           "type": "number"
         },
         "trailing_start_rr": {
-          "default": 0.35,
+          "default": 0.01,
           "exclusiveMinimum": 0.0,
           "title": "Trailing Start Rr",
           "type": "number"
         },
+        "trailing_lock_atr": {
+          "default": 0.5,
+          "exclusiveMinimum": 0.0,
+          "title": "Trailing Lock Atr",
+          "type": "number"
+        },
         "trend_trailing_atr_multiplier": {
-          "default": 0.7,
+          "default": 0.5,
           "exclusiveMinimum": 0.0,
           "title": "Trend Trailing Atr Multiplier",
           "type": "number"
         },
         "breakout_trailing_atr_multiplier": {
-          "default": 0.8,
+          "default": 0.5,
           "exclusiveMinimum": 0.0,
           "title": "Breakout Trailing Atr Multiplier",
           "type": "number"
         },
         "range_trailing_atr_multiplier": {
-          "default": 0.55,
+          "default": 0.5,
           "exclusiveMinimum": 0.0,
           "title": "Range Trailing Atr Multiplier",
           "type": "number"

@@ -20,7 +20,8 @@ def test_example_config_loads() -> None:
     assert cfg.strategies.force_stop_atr == 0.18
     assert cfg.risk.max_stop_atr == 1.50
     assert cfg.management.hard_take_profit is False
-    assert cfg.management.trailing_start_rr == 0.35
+    assert cfg.management.trailing_lock_atr == 0.50
+    assert cfg.management.breakeven_offset_atr == 0.05
 
 
 def test_live_observe_allowed_without_trading_enabled() -> None:

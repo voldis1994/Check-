@@ -42,6 +42,8 @@ class ExecutionCoordinator:
 
         write_command(self.bridge_dir, command)
         ack = self._poll_ack(command.command_id)
+        if ack.accepted and command.action == OrderAction.MODIFY:
+            positions = self._apply_modify_locally(command, positions)
         return ack, positions
 
     def _poll_ack(self, command_id: str) -> Acknowledgement:
@@ -94,6 +96,20 @@ class ExecutionCoordinator:
                 pos for pos in positions if pos.position_id != p.get("position_id")
             ]
         return Acknowledgement(command.command_id, False, ReasonCode.ACK_REJECTED), positions
+
+    def _apply_modify_locally(self, command: Command, positions: list[Position]) -> list[Position]:
+        """Keep local SL/TP in sync after broker ACK so trailing can ratchet next cycle."""
+        p = command.payload
+        pid = p.get("position_id")
+        for pos in positions:
+            if pos.position_id != pid:
+                continue
+            if p.get("stop_loss") is not None:
+                pos.stop_loss = float(p["stop_loss"])
+            if p.get("take_profit") is not None:
+                pos.take_profit = float(p["take_profit"])
+            break
+        return positions
 
     def _save_dedupe(self) -> None:
         if self._dedupe_path is not None:

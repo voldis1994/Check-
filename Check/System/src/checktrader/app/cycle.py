@@ -18,8 +18,9 @@ from checktrader.execution.commands import build_close, build_modify, build_open
 from checktrader.execution.reconciliation import broker_positions_or_empty, reconcile
 from checktrader.management.manager import manage_position
 from checktrader.market_data.aggregation import aggregate_standard
-from checktrader.market_data.bars import last_closed
+from checktrader.market_data.bars import closed_bars, last_closed
 from checktrader.market_data.history import save_history
+from checktrader.market_data.indicators import atr as atr_series
 from checktrader.market_data.symbols import normalize_symbol, symbols_match
 from checktrader.market_data.validation import heartbeat_fresh, sequential_bars
 from checktrader.risk.limits import record_trade_open
@@ -73,6 +74,19 @@ def _norm_symbol(symbol: str | None) -> str:
 
 def _positions_for_symbol(positions: list[Position], symbol: str) -> list[Position]:
     return [p for p in positions if symbols_match(p.symbol, symbol)]
+
+
+def _management_atr(regime: RegimeSnapshot, market: MarketSnapshot, period: int = 14) -> float | None:
+    """Prefer regime ATR; fall back to M1 ATR so trailing never starves."""
+    if regime.indicators.atr is not None and regime.indicators.atr > 0:
+        return float(regime.indicators.atr)
+    m1 = closed_bars(market.m1)
+    if len(m1) >= period + 1:
+        series = atr_series(m1, period)
+        for value in reversed(series):
+            if value is not None and value > 0:
+                return float(value)
+    return None
 
 
 def _apply_broker_specs(context: AppContext, market: MarketSnapshot) -> None:
@@ -293,12 +307,14 @@ def run_cycle(
     audit.metrics["positions_other"] = other_symbol_count
 
     managed_decision: Decision | None = None
+    mgmt_atr = _management_atr(regime, market)
+    audit.metrics["mgmt_atr"] = mgmt_atr
     for pos in list(same_symbol_positions):
         action = manage_position(
             pos,
             bid=market.bid,
             ask=market.ask,
-            atr_value=regime.indicators.atr,
+            atr_value=mgmt_atr,
             regime=regime,
             specs=context.specs,
             config=context.config,

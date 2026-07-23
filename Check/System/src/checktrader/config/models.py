@@ -175,12 +175,19 @@ class RiskConfig(StrictModel):
 
 class ManagementConfig(StrictModel):
     breakeven_trigger_rr: float = Field(0.40, gt=0.0)
-    breakeven_offset_points: float = Field(2.0, ge=0.0)
-    # Start trailing early — hard TP is off by default so trail is the real exit
-    trailing_start_rr: float = Field(0.35, gt=0.0)
-    trend_trailing_atr_multiplier: float = Field(0.70, gt=0.0)
-    breakout_trailing_atr_multiplier: float = Field(0.80, gt=0.0)
-    range_trailing_atr_multiplier: float = Field(0.55, gt=0.0)
+    # ATR offset past entry for BE (not broker points — those break across symbols).
+    breakeven_offset_atr: float = Field(0.05, ge=0.0)
+    # Legacy field kept for schema compat; unused when breakeven_offset_atr > 0.
+    breakeven_offset_points: float = Field(0.0, ge=0.0)
+    # Deprecated RR gate — trailing now starts when profit > lock distance.
+    trailing_start_rr: float = Field(0.01, gt=0.0)
+    # Lock-back behind price in ATR units.
+    # NATURALGAS ref: point≈0.001 → 20 points = 0.02; with ATR≈0.04 → 0.50 ATR.
+    trailing_lock_atr: float = Field(0.50, gt=0.0)
+    # Kept for backward-compatible configs; trailing uses trailing_lock_atr only.
+    trend_trailing_atr_multiplier: float = Field(0.50, gt=0.0)
+    breakout_trailing_atr_multiplier: float = Field(0.50, gt=0.0)
+    range_trailing_atr_multiplier: float = Field(0.50, gt=0.0)
     take_profit_rr: float = Field(2.0, gt=0.0)
     # False = open with no broker TP; exit via trailing / breakeven / regime flip
     hard_take_profit: bool = False
