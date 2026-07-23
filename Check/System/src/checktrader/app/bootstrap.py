@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from checktrader.config.account_lot import apply_account_lot_override
 from checktrader.config.loader import load_config
 from checktrader.config.models import SystemConfig
 from checktrader.config.validation import validate_runtime_safety
@@ -118,6 +119,7 @@ def spawn_account_context(base: AppContext, *, account_id: str, bridge_dir: Path
             ),
         },
     )
+    config = apply_account_lot_override(config, account_id)
 
     history = load_history(
         history_file,

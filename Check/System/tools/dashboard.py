@@ -1,15 +1,15 @@
-"""CHECK SYSTEM ops floor — high-energy desktop console (Tkinter).
+"""ACCOUNT BRAIN — CHECK SYSTEM neural ops console (Tkinter).
 
-Visual language is intentionally unlike the previous navy sidebar deck:
-full-bleed brand rail, color slabs, lime/coral/cyan signal accents.
+Central brain mesh is the main view. Node colors blink when subsystems fail.
+ACCOUNTS tab edits per-client lot size via runtime/accounts/<id>/lot.json.
 """
 
 from __future__ import annotations
 
 import contextlib
-import json
 import math
 import queue
+import random
 import sys
 import threading
 import time
@@ -29,18 +29,24 @@ from dashboard_core import (  # noqa: E402
     EngineProcess,
     arm_live_runtime,
     audit_activity,
-    audit_day_stats,
     audit_file,
+    brain_node_states,
+    clear_account_lot_override,
     clear_stop,
     collect_health,
+    default_fixed_lot,
     format_age,
     format_audit_line,
+    list_known_accounts,
     load_config_json,
-    load_equity_series,
+    lot_bounds,
+    read_account_lot_override,
     resolve_config,
     run_deploy_mt4,
     runtime_dir,
+    set_trading_enabled,
     validate_live_config,
+    write_account_lot_override,
     write_stop,
 )
 
@@ -49,24 +55,24 @@ try:
 except Exception:  # noqa: BLE001
     sync_system_json = None  # type: ignore[assignment]
 
-# Ops-floor palette — loud on purpose, not navy-card console.
+# Cyber neural palette — dark void + electric signal colors
 C = {
-    "void": "#07070A",
-    "ink": "#F4F7FA",
-    "mute": "#8A93A3",
-    "rail": "#101018",
-    "slab": "#14141F",
-    "slab2": "#1B1B2A",
-    "lime": "#C8F542",
-    "lime_dim": "#7FA81A",
-    "coral": "#FF4D6D",
-    "coral_dim": "#B01236",
-    "cyan": "#2DE2E6",
-    "cyan_dim": "#0E8A8E",
-    "violet": "#9B5CFF",
-    "amber": "#FFB020",
-    "mint": "#3DFFB5",
-    "grid": "#24243A",
+    "void": "#05070C",
+    "panel": "#0A0E16",
+    "panel2": "#0F1520",
+    "line": "#1A2740",
+    "ink": "#E8F0FF",
+    "mute": "#6B7C99",
+    "cyan": "#00D4FF",
+    "blue": "#2A6BFF",
+    "green": "#39FF14",
+    "mint": "#00FF88",
+    "amber": "#FFBF00",
+    "orange": "#FF7A1A",
+    "magenta": "#FF2BD6",
+    "violet": "#8B5CFF",
+    "red": "#FF3355",
+    "core": "#C44DFF",
 }
 
 
@@ -78,911 +84,938 @@ def _font(cands: list[str], size: int, weight: str = "normal") -> tuple:
     return ("TkDefaultFont", size, weight) if weight != "normal" else ("TkDefaultFont", size)
 
 
-def _money(v: float, currency: str = "") -> str:
-    suffix = f" {currency}" if currency else ""
-    return f"{v:,.2f}{suffix}"
+def _lerp_hex(a: str, b: str, t: float) -> str:
+    t = max(0.0, min(1.0, t))
+
+    def ch(h: str) -> tuple[int, int, int]:
+        h = h.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    ar, ag, ab = ch(a)
+    br, bg, bb = ch(b)
+    return f"#{int(ar + (br - ar) * t):02x}{int(ag + (bg - ag) * t):02x}{int(ab + (bb - ab) * t):02x}"
+
+
+LEVEL_BASE = {
+    "ok": C["mint"],
+    "warn": C["amber"],
+    "error": C["red"],
+    "idle": C["blue"],
+}
+LEVEL_HOT = {
+    "ok": C["green"],
+    "warn": C["orange"],
+    "error": C["magenta"],
+    "idle": C["cyan"],
+}
+
+
+class BrainMesh:
+    """Procedural neural-brain silhouette with status-bound hub nodes."""
+
+    def __init__(self, canvas: tk.Canvas) -> None:
+        self.canvas = canvas
+        self.phase = 0.0
+        self.hubs: dict[str, dict] = {}
+        self.satellites: list[dict] = []
+        self.edges: list[tuple[int, int]] = []
+        self._built_for: tuple[int, int] | None = None
+        self._node_ids: list[int] = []
+        self._edge_ids: list[int] = []
+        self._glow_ids: list[int] = []
+        self._label_ids: list[int] = []
+        self._states: dict[str, object] = {}
+
+    def ensure_layout(self) -> None:
+        w = max(self.canvas.winfo_width(), 100)
+        h = max(self.canvas.winfo_height(), 100)
+        key = (w, h)
+        if self._built_for == key and self.hubs:
+            return
+        self._built_for = key
+        self._layout(w, h)
+
+    def _layout(self, w: int, h: int) -> None:
+        cx, cy = w * 0.52, h * 0.48
+        rx, ry = w * 0.30, h * 0.34
+        rng = random.Random(42)
+
+        # Hub roles placed in brain lobes
+        hub_specs = [
+            ("core", 0.0, 0.05, 11),
+            ("engine", -0.35, -0.25, 8),
+            ("bridge", 0.42, -0.18, 8),
+            ("connections", 0.55, 0.22, 7),
+            ("trading", -0.48, 0.15, 8),
+            ("data_flow", 0.15, -0.55, 7),
+            ("risk", -0.20, 0.55, 8),
+            ("trail", 0.28, 0.48, 7),
+            ("accounts", -0.55, -0.05, 7),
+        ]
+        self.hubs = {}
+        points: list[tuple[float, float]] = []
+        for key, nx, ny, r in hub_specs:
+            x = cx + nx * rx
+            y = cy + ny * ry
+            self.hubs[key] = {"x": x, "y": y, "r": r, "i": len(points)}
+            points.append((x, y))
+
+        # Satellite field — denser center, brain-ish oval clip
+        self.satellites = []
+        for _ in range(78):
+            ang = rng.uniform(0, math.tau)
+            # Slight frontal bulge + cerebellum dip
+            rr = rng.uniform(0.15, 1.0) ** 0.65
+            ox = math.cos(ang) * rr
+            oy = math.sin(ang) * rr * (0.85 + 0.15 * math.cos(ang * 2))
+            if oy > 0.55 and abs(ox) < 0.25:
+                oy += 0.08  # brainstem hint
+            x = cx + ox * rx
+            y = cy + oy * ry
+            self.satellites.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "r": rng.uniform(1.6, 3.4),
+                    "phase": rng.uniform(0, math.tau),
+                    "hub": rng.choice(list(self.hubs)),
+                }
+            )
+            points.append((x, y))
+
+        # Edges: connect each point to a few nearest
+        self.edges = []
+        for i, (x, y) in enumerate(points):
+            dists = []
+            for j, (x2, y2) in enumerate(points):
+                if i >= j:
+                    continue
+                d = (x - x2) ** 2 + (y - y2) ** 2
+                dists.append((d, j))
+            dists.sort()
+            for d, j in dists[:3]:
+                if d < (rx * 0.55) ** 2:
+                    self.edges.append((i, j))
+
+        self._all_points = points
+
+    def set_states(self, states: list) -> None:
+        self._states = {s.key: s for s in states}
+
+    def draw(self) -> None:
+        self.ensure_layout()
+        c = self.canvas
+        c.delete("brain")
+        w = max(c.winfo_width(), 2)
+        h = max(c.winfo_height(), 2)
+
+        # Atmosphere wash
+        c.create_oval(
+            w * 0.22,
+            h * 0.12,
+            w * 0.82,
+            h * 0.88,
+            fill="#080C18",
+            outline="",
+            tags="brain",
+        )
+        # Magenta core nebula
+        pulse = 0.5 + 0.5 * math.sin(self.phase * 1.4)
+        core = self.hubs.get("core")
+        if core:
+            glow = 40 + 25 * pulse
+            c.create_oval(
+                core["x"] - glow,
+                core["y"] - glow * 0.85,
+                core["x"] + glow,
+                core["y"] + glow * 0.85,
+                fill="",
+                outline=C["core"],
+                width=1,
+                tags="brain",
+            )
+            c.create_oval(
+                core["x"] - glow * 0.55,
+                core["y"] - glow * 0.45,
+                core["x"] + glow * 0.55,
+                core["y"] + glow * 0.45,
+                fill="#1A0A28",
+                outline="",
+                tags="brain",
+            )
+
+        points = self._all_points
+        # Edges
+        for i, j in self.edges:
+            x1, y1 = points[i]
+            x2, y2 = points[j]
+            c.create_line(x1, y1, x2, y2, fill="#14305A", width=1, tags="brain")
+
+        # Satellites inherit hub status
+        for sat in self.satellites:
+            st = self._states.get(sat["hub"])
+            level = getattr(st, "level", "idle") if st else "idle"
+            base = LEVEL_BASE.get(level, C["blue"])
+            hot = LEVEL_HOT.get(level, C["cyan"])
+            blink = level in {"error", "warn"}
+            t = 0.5 + 0.5 * math.sin(self.phase * (4.5 if level == "error" else 2.2) + sat["phase"])
+            if not blink:
+                t = 0.25 + 0.15 * math.sin(self.phase + sat["phase"])
+            color = _lerp_hex(base, hot, t if blink else t * 0.5)
+            r = sat["r"] * (1.15 + 0.35 * t if blink else 1.0)
+            c.create_oval(
+                sat["x"] - r,
+                sat["y"] - r,
+                sat["x"] + r,
+                sat["y"] + r,
+                fill=color,
+                outline="",
+                tags="brain",
+            )
+
+        # Hubs
+        for key, hub in self.hubs.items():
+            st = self._states.get(key)
+            level = getattr(st, "level", "idle") if st else "idle"
+            detail = getattr(st, "detail", "") if st else ""
+            label = getattr(st, "label", key.upper()) if st else key.upper()
+            base = LEVEL_BASE.get(level, C["blue"])
+            hot = LEVEL_HOT.get(level, C["cyan"])
+            blink = level in {"error", "warn"}
+            t = 0.5 + 0.5 * math.sin(self.phase * (5.0 if level == "error" else 2.5))
+            if not blink:
+                t = 0.35
+            color = _lerp_hex(base, hot, t if blink else 0.2)
+            r = hub["r"] * (1.0 + (0.45 * t if blink else 0.0))
+            # outer ring
+            c.create_oval(
+                hub["x"] - r - 4,
+                hub["y"] - r - 4,
+                hub["x"] + r + 4,
+                hub["y"] + r + 4,
+                outline=color,
+                width=2 if blink else 1,
+                tags="brain",
+            )
+            c.create_oval(
+                hub["x"] - r,
+                hub["y"] - r,
+                hub["x"] + r,
+                hub["y"] + r,
+                fill=color,
+                outline="",
+                tags="brain",
+            )
+            c.create_text(
+                hub["x"],
+                hub["y"] - r - 12,
+                text=label,
+                fill=C["ink"] if blink else C["mute"],
+                font=("Segoe UI", 8, "bold"),
+                tags="brain",
+            )
+            if blink or key == "core":
+                c.create_text(
+                    hub["x"],
+                    hub["y"] + r + 11,
+                    text=detail[:28],
+                    fill=color,
+                    font=("Segoe UI", 7),
+                    tags="brain",
+                )
 
 
 class DashboardApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("CHECK · OPS FLOOR")
-        self.root.geometry("1500x920")
-        self.root.minsize(1280, 800)
+        self.root.title("ACCOUNT BRAIN · CHECK SYSTEM")
+        self.root.geometry("1480x900")
+        self.root.minsize(1180, 740)
         self.root.configure(bg=C["void"])
 
-        self.f_mega = _font(["Bahnschrift", "Segoe UI Variable Display", "Arial Black", "Impact"], 42, "bold")
-        self.f_brand = _font(["Bahnschrift", "Segoe UI Variable Display", "Calibri"], 18, "bold")
-        self.f_h1 = _font(["Bahnschrift", "Segoe UI"], 16, "bold")
-        self.f_h2 = _font(["Bahnschrift SemiBold", "Segoe UI"], 11, "bold")
+        self.f_mega = _font(["Bahnschrift", "Segoe UI Variable Display", "Arial Black"], 28, "bold")
+        self.f_brand = _font(["Bahnschrift", "Segoe UI"], 14, "bold")
+        self.f_h1 = _font(["Bahnschrift", "Segoe UI"], 13, "bold")
         self.f_ui = _font(["Bahnschrift", "Segoe UI"], 10)
         self.f_ui_b = _font(["Bahnschrift SemiBold", "Segoe UI"], 10, "bold")
-        self.f_metric = _font(["Bahnschrift", "Segoe UI"], 26, "bold")
         self.f_mono = _font(["Cascadia Mono", "Consolas", "Courier New"], 9)
-        self.f_mono_b = _font(["Cascadia Mono", "Consolas"], 10, "bold")
 
         self.config_path = resolve_config()
         self.engine = EngineProcess()
         self.log_queue: queue.Queue[str] = queue.Queue()
-        self._audit_offset = 0
-        self._stopping = False
-        self._selected_account: str | None = None
-        self._page = "floor"
-        self._pulse = False
-        self._health = None
+        self._page = "main"
         self._nav_btns: dict[str, tk.Button] = {}
-        self._brand_phase = 0.0
-        self._flash_until = 0.0
+        self._health = None
+        self._lot_vars: dict[str, tk.StringVar] = {}
+        self._lot_rows: dict[str, tk.Frame] = {}
+        self._started_wall = time.time()
+        self._selected_node = tk.StringVar(value="core · standby")
 
         self._build()
-        self._tail_audit_init()
         self.refresh()
-        self.root.after(450, self._tick)
         self.root.after(80, self._motion_tick)
+        self.root.after(500, self._tick)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    # ── chrome ──────────────────────────────────────────────────────────────
     def _build(self) -> None:
         shell = tk.Frame(self.root, bg=C["void"])
         shell.pack(fill=tk.BOTH, expand=True)
 
-        # Atmosphere canvas (diagonal hash) behind everything
-        self.atmosphere = tk.Canvas(shell, bg=C["void"], highlightthickness=0, height=1)
-        self.atmosphere.place(x=0, y=0, relwidth=1, relheight=1)
-        self.atmosphere.bind("<Configure>", self._paint_atmosphere)
+        self._build_nav(shell)
 
-        body = tk.Frame(shell, bg=C["void"])
-        body.place(x=0, y=0, relwidth=1, relheight=1)
+        title_row = tk.Frame(shell, bg=C["void"])
+        title_row.pack(fill=tk.X, padx=22, pady=(10, 0))
+        self.title_lbl = tk.Label(
+            title_row,
+            text="ACCOUNT BRAIN — ",
+            bg=C["void"],
+            fg=C["ink"],
+            font=self.f_mega,
+            anchor="w",
+        )
+        self.title_lbl.pack(side=tk.LEFT)
+        self.online_lbl = tk.Label(
+            title_row,
+            text="OFFLINE",
+            bg=C["void"],
+            fg=C["red"],
+            font=self.f_mega,
+            anchor="w",
+        )
+        self.online_lbl.pack(side=tk.LEFT)
+        self.node_hint = tk.Label(
+            title_row,
+            textvariable=self._selected_node,
+            bg=C["void"],
+            fg=C["mute"],
+            font=self.f_ui,
+            anchor="e",
+        )
+        self.node_hint.pack(side=tk.RIGHT)
 
-        self._build_brand_rail(body)
-        self._build_account_runway(body)
-
-        mid = tk.Frame(body, bg=C["void"])
-        mid.pack(fill=tk.BOTH, expand=True, padx=18, pady=(0, 10))
+        mid = tk.Frame(shell, bg=C["void"])
+        mid.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
 
         self.pages: dict[str, tk.Frame] = {}
-        self.pages["floor"] = self._page_floor(mid)
-        self.pages["book"] = self._page_book(mid)
-        self.pages["tape"] = self._page_tape(mid)
-        self._show_page("floor")
+        self.pages["main"] = self._page_main(mid)
+        self.pages["accounts"] = self._page_accounts(mid)
+        self.pages["requests"] = self._page_requests(mid)
+        self.pages["settings"] = self._page_settings(mid)
+        self._show_page("main")
 
-        self._build_status_strip(body)
+        self._build_footer(shell)
 
-    def _paint_atmosphere(self, _event=None) -> None:
-        c = self.atmosphere
-        c.delete("all")
-        w, h = max(c.winfo_width(), 2), max(c.winfo_height(), 2)
-        c.create_rectangle(0, 0, w, h, fill=C["void"], outline="")
-        # Soft color washes
-        c.create_oval(-120, -80, 420, 280, fill="#12181A", outline="")
-        c.create_oval(w - 480, h - 360, w + 80, h + 80, fill="#1A1020", outline="")
-        c.create_oval(w // 2 - 200, h // 2 - 40, w // 2 + 420, h // 2 + 320, fill="#0E1520", outline="")
-        step = 28
-        for i in range(-h, w + h, step):
-            c.create_line(i, 0, i + h, h, fill="#12121C", width=1)
+    def _build_nav(self, parent: tk.Misc) -> None:
+        nav = tk.Frame(parent, bg=C["panel"], height=64)
+        nav.pack(fill=tk.X)
+        nav.pack_propagate(False)
+        inner = tk.Frame(nav, bg=C["panel"])
+        inner.pack(side=tk.LEFT, padx=16, pady=12)
 
-    def _build_brand_rail(self, parent: tk.Misc) -> None:
-        rail = tk.Frame(parent, bg=C["rail"], height=92)
-        rail.pack(fill=tk.X)
-        rail.pack_propagate(False)
-
-        # Lime signal bar on top edge
-        self.brand_bar = tk.Canvas(rail, height=6, bg=C["rail"], highlightthickness=0)
-        self.brand_bar.pack(fill=tk.X)
-        self.brand_bar.bind("<Configure>", lambda _e: self._draw_brand_bar())
-
-        row = tk.Frame(rail, bg=C["rail"])
-        row.pack(fill=tk.BOTH, expand=True, padx=20, pady=(4, 10))
-
-        left = tk.Frame(row, bg=C["rail"])
-        left.pack(side=tk.LEFT, fill=tk.Y)
-        tk.Label(left, text="CHECK", bg=C["rail"], fg=C["lime"], font=self.f_mega).pack(side=tk.LEFT, anchor="s")
-        sub = tk.Frame(left, bg=C["rail"])
-        sub.pack(side=tk.LEFT, padx=(14, 0), anchor="s", pady=(0, 8))
-        tk.Label(sub, text="OPS FLOOR", bg=C["rail"], fg=C["ink"], font=self.f_brand, anchor="w").pack(anchor="w")
-        tk.Label(sub, text="v3 · live bridge command", bg=C["rail"], fg=C["mute"], font=self.f_ui, anchor="w").pack(
-            anchor="w"
-        )
-
-        nav = tk.Frame(row, bg=C["rail"])
-        nav.pack(side=tk.LEFT, padx=(40, 0), fill=tk.Y)
         for key, label, accent in (
-            ("floor", "FLOOR", C["lime"]),
-            ("book", "BOOK", C["cyan"]),
-            ("tape", "TAPE", C["violet"]),
+            ("main", "MAIN", C["cyan"]),
+            ("accounts", "ACCOUNTS", C["blue"]),
+            ("requests", "REQUESTS", C["violet"]),
+            ("settings", "SETTINGS", C["amber"]),
+            ("stop", "STOP", C["red"]),
         ):
             btn = tk.Button(
-                nav,
+                inner,
                 text=label,
-                command=lambda k=key: self._show_page(k),
-                bg=C["slab"],
+                command=(self._confirm_stop if key == "stop" else (lambda k=key: self._show_page(k))),
+                bg=C["panel2"],
                 fg=accent,
-                activebackground=C["slab2"],
+                activebackground=C["line"],
                 activeforeground=accent,
                 relief=tk.FLAT,
                 bd=0,
+                highlightthickness=1,
+                highlightbackground=accent,
+                highlightcolor=accent,
                 font=self.f_ui_b,
-                padx=16,
-                pady=12,
+                padx=18,
+                pady=10,
                 cursor="hand2",
             )
-            btn.pack(side=tk.LEFT, padx=4, pady=10)
+            btn.pack(side=tk.LEFT, padx=5)
             self._nav_btns[key] = btn
 
-        right = tk.Frame(row, bg=C["rail"])
-        right.pack(side=tk.RIGHT, fill=tk.Y)
-        self.pill_sys = self._status_pill(right, "SYSTEM", "OFF", C["coral"])
-        self.pill_sys.pack(side=tk.LEFT, padx=5, pady=14)
-        self.pill_eng = self._status_pill(right, "ENGINE", "IDLE", C["amber"])
-        self.pill_eng.pack(side=tk.LEFT, padx=5, pady=14)
-        self.pill_brg = self._status_pill(right, "BRIDGE", "—", C["mute"])
-        self.pill_brg.pack(side=tk.LEFT, padx=5, pady=14)
-
-    def _draw_brand_bar(self) -> None:
-        c = self.brand_bar
-        c.delete("all")
-        w = max(c.winfo_width(), 2)
-        c.create_rectangle(0, 0, w, 6, fill=C["grid"], outline="")
-        # Sweeping lime segment
-        seg = 180
-        x = int((math.sin(self._brand_phase) * 0.5 + 0.5) * max(w - seg, 1))
-        c.create_rectangle(x, 0, x + seg, 6, fill=C["lime"], outline="")
-        c.create_rectangle(x + seg - 40, 0, x + seg, 6, fill=C["cyan"], outline="")
-
-    def _status_pill(self, parent: tk.Misc, title: str, value: str, color: str) -> tk.Frame:
-        box = tk.Frame(parent, bg=C["slab2"], padx=12, pady=6)
-        tk.Label(box, text=title, bg=C["slab2"], fg=C["mute"], font=self.f_ui).pack(anchor="w")
-        row = tk.Frame(box, bg=C["slab2"])
-        row.pack(anchor="w")
-        stripe = tk.Frame(row, bg=color, width=4, height=16)
-        stripe.pack(side=tk.LEFT, padx=(0, 8))
-        lab = tk.Label(row, text=value, bg=C["slab2"], fg=C["ink"], font=self.f_ui_b)
-        lab.pack(side=tk.LEFT)
-        box._stripe = stripe  # type: ignore[attr-defined]
-        box._lab = lab  # type: ignore[attr-defined]
-        return box
-
-    def _set_pill(self, pill: tk.Frame, value: str, color: str) -> None:
-        pill._lab.configure(text=value)  # type: ignore[attr-defined]
-        pill._stripe.configure(bg=color)  # type: ignore[attr-defined]
-
-    def _build_account_runway(self, parent: tk.Misc) -> None:
-        runway = tk.Frame(parent, bg=C["void"], height=64)
-        runway.pack(fill=tk.X, padx=18, pady=(12, 8))
-        runway.pack_propagate(False)
-        left = tk.Frame(runway, bg=C["void"])
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tk.Label(left, text="ACCOUNTS", bg=C["void"], fg=C["mute"], font=self.f_h2, anchor="w").pack(anchor="w")
-        self.account_list = tk.Frame(left, bg=C["void"])
-        self.account_list.pack(fill=tk.X, pady=(4, 0))
-
-        right = tk.Frame(runway, bg=C["void"])
-        right.pack(side=tk.RIGHT, fill=tk.Y)
-        self.headline_symbol = tk.StringVar(value="—")
-        self.headline_regime = tk.StringVar(value="—")
-        tk.Label(right, textvariable=self.headline_symbol, bg=C["void"], fg=C["cyan"], font=self.f_h1, anchor="e").pack(
-            anchor="e"
-        )
-        tk.Label(
-            right, textvariable=self.headline_regime, bg=C["void"], fg=C["violet"], font=self.f_ui_b, anchor="e"
-        ).pack(anchor="e")
-
-    def _build_status_strip(self, parent: tk.Misc) -> None:
-        strip = tk.Frame(parent, bg=C["lime"], height=34)
-        strip.pack(fill=tk.X, side=tk.BOTTOM)
-        strip.pack_propagate(False)
-        self.footer_var = tk.StringVar(value="Waiting for bridge…")
-        tk.Label(
-            strip,
-            textvariable=self.footer_var,
-            bg=C["lime"],
-            fg="#101010",
-            font=self.f_mono_b,
-            anchor="w",
-            padx=16,
-        ).pack(fill=tk.BOTH, expand=True)
-
-    def _slab(self, parent: tk.Misc, bg: str = "") -> tk.Frame:
-        return tk.Frame(parent, bg=bg or C["slab"])
-
-    def _color_metric(self, parent: tk.Misc, title: str, accent: str) -> tuple[tk.Frame, tk.StringVar, tk.StringVar]:
-        card = tk.Frame(parent, bg=accent)
-        tk.Label(card, text=title, bg=accent, fg="#101010", font=self.f_ui_b, anchor="w").pack(
-            fill=tk.X, padx=14, pady=(12, 0)
-        )
-        val = tk.StringVar(value="—")
-        sub = tk.StringVar(value="")
-        tk.Label(card, textvariable=val, bg=accent, fg="#101010", font=self.f_metric, anchor="w").pack(
-            fill=tk.X, padx=14, pady=(2, 0)
-        )
-        tk.Label(card, textvariable=sub, bg=accent, fg="#203010", font=self.f_ui, anchor="w").pack(
-            fill=tk.X, padx=14, pady=(0, 12)
-        )
-        return card, val, sub
-
-    # ── pages ───────────────────────────────────────────────────────────────
-    def _page_floor(self, parent: tk.Misc) -> tk.Frame:
-        page = tk.Frame(parent, bg=C["void"])
-
-        grid = tk.Frame(page, bg=C["void"])
-        grid.pack(fill=tk.BOTH, expand=True)
-
-        # Left: stacked color metrics
-        left = tk.Frame(grid, bg=C["void"], width=280)
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        left.pack_propagate(False)
-        self.m_balance = self._color_metric(left, "BALANCE", C["lime"])
-        self.m_equity = self._color_metric(left, "EQUITY", C["cyan"])
-        self.m_float = self._color_metric(left, "FLOATING P/L", C["coral"])
-        self.m_trades = self._color_metric(left, "TODAY ACTIONS", C["violet"])
-        for card in (self.m_balance, self.m_equity, self.m_float, self.m_trades):
-            card[0].pack(fill=tk.X, pady=(0, 8))
-
-        # Center: equity wave + signal board
-        center = tk.Frame(grid, bg=C["void"])
-        center.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
-
-        wave = self._slab(center)
-        wave.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-        head = tk.Frame(wave, bg=C["slab"])
-        head.pack(fill=tk.X, padx=14, pady=(12, 0))
-        tk.Label(head, text="EQUITY WAVE", bg=C["slab"], fg=C["mute"], font=self.f_h2, anchor="w").pack(side=tk.LEFT)
-        self.wave_now = tk.StringVar(value="—")
-        tk.Label(head, textvariable=self.wave_now, bg=C["slab"], fg=C["lime"], font=self.f_mono_b, anchor="e").pack(
-            side=tk.RIGHT
-        )
-        self.equity_canvas = tk.Canvas(wave, bg=C["slab"], highlightthickness=0, height=240)
-        self.equity_canvas.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 10))
-        self.equity_canvas.bind("<Configure>", lambda _e: self._draw_equity())
-
-        board = self._slab(center)
-        board.pack(fill=tk.X)
-        tk.Label(board, text="SIGNAL BOARD", bg=C["slab"], fg=C["mute"], font=self.f_h2, anchor="w").pack(
-            fill=tk.X, padx=14, pady=(10, 4)
-        )
-        self.state_vars = {
-            "accounts": tk.StringVar(value="—"),
-            "symbol": tk.StringVar(value="—"),
-            "regime": tk.StringVar(value="—"),
-            "strategy": tk.StringVar(value="—"),
-            "decision": tk.StringVar(value="—"),
-            "reason": tk.StringVar(value="—"),
-            "spread": tk.StringVar(value="—"),
-        }
-        body = tk.Frame(board, bg=C["slab"])
-        body.pack(fill=tk.X, padx=14, pady=(0, 12))
-        cols = tk.Frame(body, bg=C["slab"])
-        cols.pack(fill=tk.X)
-        left_col = tk.Frame(cols, bg=C["slab"])
-        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        right_col = tk.Frame(cols, bg=C["slab"])
-        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0))
-        for key, label, target in (
-            ("accounts", "Accounts", left_col),
-            ("symbol", "Symbol", left_col),
-            ("regime", "Regime", left_col),
-            ("strategy", "Strategy", right_col),
-            ("decision", "Decision", right_col),
-            ("reason", "Reason", right_col),
-            ("spread", "Spread", right_col),
-        ):
-            row = tk.Frame(target, bg=C["slab2"], padx=8, pady=5)
-            row.pack(fill=tk.X, pady=2)
-            tk.Label(row, text=label.upper(), width=10, anchor="w", bg=C["slab2"], fg=C["mute"], font=self.f_ui).pack(
-                side=tk.LEFT
-            )
-            tk.Label(
-                row,
-                textvariable=self.state_vars[key],
-                anchor="w",
-                bg=C["slab2"],
-                fg=C["ink"],
-                font=self.f_mono_b,
-                wraplength=260,
-                justify=tk.LEFT,
-            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # Right: arm panel + health
-        right = tk.Frame(grid, bg=C["void"], width=260)
-        right.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 0))
-        right.pack_propagate(False)
-
-        arm = tk.Frame(right, bg=C["coral"])
-        arm.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(arm, text="ARM", bg=C["coral"], fg="#101010", font=self.f_h2, anchor="w").pack(
-            fill=tk.X, padx=14, pady=(12, 0)
-        )
-        tk.Label(arm, text="Fire the engine", bg=C["coral"], fg="#401018", font=self.f_ui, anchor="w").pack(
-            fill=tk.X, padx=14, pady=(0, 8)
-        )
-        actions = tk.Frame(arm, bg=C["coral"])
-        actions.pack(fill=tk.X, padx=10, pady=(0, 12))
-        self.btn_live = self._big_btn(actions, "START LIVE", "#101010", C["lime"], self.start_live)
-        self.btn_live.pack(fill=tk.X, pady=3)
-        self.btn_paper = self._big_btn(actions, "START PAPER", "#101010", C["cyan"], self.start_paper)
-        self.btn_paper.pack(fill=tk.X, pady=3)
-        self.btn_stop = self._big_btn(actions, "STOP", C["ink"], "#5A1020", self.stop_engine)
-        self.btn_stop.pack(fill=tk.X, pady=3)
-
-        tools = self._slab(right)
-        tools.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(tools, text="TOOLS", bg=C["slab"], fg=C["mute"], font=self.f_h2, anchor="w").pack(
-            fill=tk.X, padx=12, pady=(10, 4)
-        )
-        self.btn_deploy = self._ghost(tools, "Deploy MT4", self.deploy_mt4)
-        self.btn_deploy.pack(fill=tk.X, padx=10, pady=3)
-        self.btn_refresh = self._ghost(tools, "Refresh", self.refresh)
-        self.btn_refresh.pack(fill=tk.X, padx=10, pady=(3, 10))
-
-        health = self._slab(right)
-        health.pack(fill=tk.BOTH, expand=True)
-        tk.Label(health, text="BRIDGE PULSE", bg=C["slab"], fg=C["mute"], font=self.f_h2, anchor="w").pack(
-            fill=tk.X, padx=12, pady=(10, 0)
-        )
-        self.health_canvas = tk.Canvas(health, width=140, height=140, bg=C["slab"], highlightthickness=0)
-        self.health_canvas.pack(pady=8)
-        self.health_label = tk.StringVar(value="—")
-        self.health_detail = tk.StringVar(value="Freshness")
-        tk.Label(health, textvariable=self.health_label, bg=C["slab"], fg=C["mint"], font=self.f_metric).pack()
-        tk.Label(health, textvariable=self.health_detail, bg=C["slab"], fg=C["mute"], font=self.f_ui).pack(
-            pady=(0, 12)
-        )
-
-        # Bottom dual tape/book preview
-        bottom = tk.Frame(page, bg=C["void"])
-        bottom.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        recent = self._slab(bottom)
-        recent.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-        tk.Label(recent, text="RECENT CYCLES", bg=C["slab"], fg=C["mute"], font=self.f_h2, anchor="w").pack(
-            fill=tk.X, padx=12, pady=(10, 4)
-        )
-        self.recent_box = self._mono_box(recent)
-        self.recent_box.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
-
-        positions = self._slab(bottom)
-        positions.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
-        tk.Label(positions, text="OPEN BOOK", bg=C["slab"], fg=C["mute"], font=self.f_h2, anchor="w").pack(
-            fill=tk.X, padx=12, pady=(10, 4)
-        )
-        self.pos_box = self._mono_box(positions)
-        self.pos_box.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
-        return page
-
-    def _page_book(self, parent: tk.Misc) -> tk.Frame:
-        page = tk.Frame(parent, bg=C["void"])
-        panel = self._slab(page)
-        panel.pack(fill=tk.BOTH, expand=True)
-        banner = tk.Frame(panel, bg=C["cyan"], height=48)
-        banner.pack(fill=tk.X)
-        banner.pack_propagate(False)
-        tk.Label(banner, text="LIVE BOOK · EVERY ACCOUNT", bg=C["cyan"], fg="#101010", font=self.f_h1).pack(
-            side=tk.LEFT, padx=16, pady=10
-        )
-        self.trades_box = self._mono_box(panel, height=28)
-        self.trades_box.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        return page
-
-    def _page_tape(self, parent: tk.Misc) -> tk.Frame:
-        page = tk.Frame(parent, bg=C["void"])
-        panel = self._slab(page)
-        panel.pack(fill=tk.BOTH, expand=True)
-        banner = tk.Frame(panel, bg=C["violet"], height=48)
-        banner.pack(fill=tk.X)
-        banner.pack_propagate(False)
-        tk.Label(banner, text="ACTIVITY TAPE", bg=C["violet"], fg="#101010", font=self.f_h1).pack(
-            side=tk.LEFT, padx=16, pady=10
-        )
-        wrap = tk.Frame(panel, bg=C["slab"])
-        wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-        self.activity = tk.Text(
-            wrap,
-            bg="#0B0B12",
-            fg=C["ink"],
-            font=self.f_mono,
+        right = tk.Frame(nav, bg=C["panel"])
+        right.pack(side=tk.RIGHT, padx=16)
+        tk.Button(
+            right,
+            text="START LIVE",
+            command=self._start_live,
+            bg=C["panel2"],
+            fg=C["green"],
+            activebackground=C["line"],
+            activeforeground=C["green"],
             relief=tk.FLAT,
-            highlightthickness=0,
+            highlightthickness=1,
+            highlightbackground=C["green"],
+            font=self.f_ui_b,
             padx=14,
             pady=10,
-        )
-        scroll = tk.Scrollbar(wrap, command=self.activity.yview)
-        self.activity.configure(yscrollcommand=scroll.set, state=tk.DISABLED)
-        self.activity.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.activity.tag_configure("cycle", foreground=C["amber"])
-        self.activity.tag_configure("ok", foreground=C["mint"])
-        self.activity.tag_configure("err", foreground=C["coral"])
-        self.activity.tag_configure("dim", foreground=C["mute"])
-        self.activity.tag_configure("flash", background="#2A1830", foreground=C["lime"])
-        return page
-
-    def _mono_box(self, parent: tk.Misc, height: int = 10) -> tk.Text:
-        box = tk.Text(
-            parent,
-            height=height,
-            bg="#0B0B12",
-            fg=C["ink"],
-            font=self.f_mono,
-            relief=tk.FLAT,
-            highlightthickness=0,
-            padx=12,
-            pady=8,
-        )
-        box.configure(state=tk.DISABLED)
-        return box
-
-    def _big_btn(self, parent: tk.Misc, text: str, fg: str, bg: str, cmd) -> tk.Button:
-        return tk.Button(
-            parent,
-            text=text,
-            command=cmd,
-            bg=bg,
-            fg=fg,
-            activebackground=fg,
-            activeforeground=bg,
-            font=self.f_ui_b,
-            relief=tk.FLAT,
-            bd=0,
-            padx=12,
-            pady=14,
             cursor="hand2",
-        )
-
-    def _ghost(self, parent: tk.Misc, text: str, cmd) -> tk.Button:
-        return tk.Button(
-            parent,
-            text=text,
-            command=cmd,
-            bg=C["slab2"],
-            fg=C["ink"],
-            activebackground=C["grid"],
-            activeforeground=C["ink"],
-            font=self.f_ui,
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Button(
+            right,
+            text="PAPER",
+            command=self._start_paper,
+            bg=C["panel2"],
+            fg=C["cyan"],
+            activebackground=C["line"],
+            activeforeground=C["cyan"],
             relief=tk.FLAT,
-            bd=0,
-            padx=12,
+            highlightthickness=1,
+            highlightbackground=C["cyan"],
+            font=self.f_ui_b,
+            padx=14,
             pady=10,
             cursor="hand2",
-        )
+        ).pack(side=tk.LEFT, padx=4)
 
     def _show_page(self, key: str) -> None:
         self._page = key
-        for _name, frame in self.pages.items():
-            frame.pack_forget()
-        self.pages[key].pack(fill=tk.BOTH, expand=True)
-        accents = {"floor": C["lime"], "book": C["cyan"], "tape": C["violet"]}
+        for name, frame in self.pages.items():
+            if name == key:
+                frame.pack(fill=tk.BOTH, expand=True)
+            else:
+                frame.pack_forget()
         for name, btn in self._nav_btns.items():
-            on = name == key
-            btn.configure(
-                bg=accents[name] if on else C["slab"],
-                fg="#101010" if on else accents[name],
+            if name == "stop":
+                continue
+            accent = {
+                "main": C["cyan"],
+                "accounts": C["blue"],
+                "requests": C["violet"],
+                "settings": C["amber"],
+            }.get(name, C["mute"])
+            if name == key:
+                btn.configure(bg=C["line"], fg=C["ink"], highlightbackground=C["ink"])
+            else:
+                btn.configure(bg=C["panel2"], fg=accent, highlightbackground=accent)
+
+    def _page_main(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=C["void"])
+        left = tk.Frame(frame, bg=C["void"])
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.brain_canvas = tk.Canvas(left, bg=C["void"], highlightthickness=0)
+        self.brain_canvas.pack(fill=tk.BOTH, expand=True)
+        self.brain = BrainMesh(self.brain_canvas)
+        self.brain_canvas.bind("<Configure>", lambda _e: self.brain.draw())
+
+        # Logo mark bottom-left
+        mark = tk.Canvas(left, width=72, height=72, bg=C["void"], highlightthickness=0)
+        mark.place(x=8, y=-80, relheight=0, rely=1.0)
+        mark.create_oval(6, 6, 66, 66, outline=C["amber"], width=2)
+        mark.create_polygon(36, 16, 50, 40, 36, 56, 22, 40, fill=C["mint"], outline="")
+        tk.Label(left, text="IVAN-CORE DATA STREAM", bg=C["void"], fg=C["mute"], font=self.f_ui).place(
+            x=88, rely=1.0, y=-36
+        )
+
+        side = tk.Frame(frame, bg=C["panel"], width=320)
+        side.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        side.pack_propagate(False)
+        tk.Label(side, text="NODE STATUS", bg=C["panel"], fg=C["cyan"], font=self.f_h1).pack(
+            anchor="w", padx=14, pady=(14, 6)
+        )
+        self.node_list = tk.Text(
+            side,
+            bg=C["panel2"],
+            fg=C["ink"],
+            insertbackground=C["ink"],
+            relief=tk.FLAT,
+            font=self.f_mono,
+            height=18,
+            wrap=tk.WORD,
+        )
+        self.node_list.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        self.node_list.configure(state=tk.DISABLED)
+
+        tk.Label(side, text="LIVE TAPE", bg=C["panel"], fg=C["violet"], font=self.f_h1).pack(
+            anchor="w", padx=14, pady=(4, 4)
+        )
+        self.tape = tk.Text(
+            side,
+            bg=C["panel2"],
+            fg=C["mute"],
+            relief=tk.FLAT,
+            font=self.f_mono,
+            height=10,
+            wrap=tk.NONE,
+        )
+        self.tape.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+        self.tape.configure(state=tk.DISABLED)
+        return frame
+
+    def _page_accounts(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=C["void"])
+        head = tk.Frame(frame, bg=C["void"])
+        head.pack(fill=tk.X, pady=(4, 10))
+        tk.Label(
+            head,
+            text="PER-CLIENT LOT SIZE",
+            bg=C["void"],
+            fg=C["cyan"],
+            font=self.f_h1,
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            head,
+            text="Writes runtime/accounts/<id>/lot.json — engine picks it up next cycle",
+            bg=C["void"],
+            fg=C["mute"],
+            font=self.f_ui,
+        ).pack(side=tk.LEFT, padx=12)
+
+        self.accounts_host = tk.Frame(frame, bg=C["void"])
+        self.accounts_host.pack(fill=tk.BOTH, expand=True)
+
+        self.accounts_empty = tk.Label(
+            self.accounts_host,
+            text="No accounts yet — start LIVE with MT4 bridges connected.",
+            bg=C["void"],
+            fg=C["mute"],
+            font=self.f_ui,
+        )
+        self.accounts_empty.pack(pady=40)
+        return frame
+
+    def _page_requests(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=C["void"])
+        tk.Label(frame, text="BRIDGE / AUDIT REQUESTS", bg=C["void"], fg=C["violet"], font=self.f_h1).pack(
+            anchor="w", pady=(4, 8)
+        )
+        self.requests_text = tk.Text(
+            frame,
+            bg=C["panel"],
+            fg=C["ink"],
+            relief=tk.FLAT,
+            font=self.f_mono,
+            wrap=tk.NONE,
+        )
+        self.requests_text.pack(fill=tk.BOTH, expand=True)
+        self.requests_text.configure(state=tk.DISABLED)
+        return frame
+
+    def _page_settings(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=C["void"])
+        tk.Label(frame, text="SETTINGS", bg=C["void"], fg=C["amber"], font=self.f_h1).pack(anchor="w", pady=(4, 12))
+
+        self.settings_info = tk.Label(frame, text="", bg=C["void"], fg=C["ink"], font=self.f_mono, justify=tk.LEFT)
+        self.settings_info.pack(anchor="w")
+
+        row = tk.Frame(frame, bg=C["void"])
+        row.pack(anchor="w", pady=16)
+        tk.Button(
+            row,
+            text="ENABLE TRADING",
+            command=lambda: self._set_trading(True),
+            bg=C["panel2"],
+            fg=C["green"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=C["green"],
+            font=self.f_ui_b,
+            padx=12,
+            pady=8,
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Button(
+            row,
+            text="DISABLE TRADING",
+            command=lambda: self._set_trading(False),
+            bg=C["panel2"],
+            fg=C["amber"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=C["amber"],
+            font=self.f_ui_b,
+            padx=12,
+            pady=8,
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Button(
+            row,
+            text="CLEAR STOP",
+            command=self._clear_stop,
+            bg=C["panel2"],
+            fg=C["cyan"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=C["cyan"],
+            font=self.f_ui_b,
+            padx=12,
+            pady=8,
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Button(
+            row,
+            text="DEPLOY MT4",
+            command=self._deploy,
+            bg=C["panel2"],
+            fg=C["violet"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=C["violet"],
+            font=self.f_ui_b,
+            padx=12,
+            pady=8,
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=4)
+        return frame
+
+    def _build_footer(self, parent: tk.Misc) -> None:
+        foot = tk.Frame(parent, bg=C["panel"], height=48)
+        foot.pack(fill=tk.X, side=tk.BOTTOM)
+        foot.pack_propagate(False)
+        inner = tk.Frame(foot, bg=C["panel"])
+        inner.pack(fill=tk.BOTH, expand=True, padx=18)
+
+        self.foot_vars = {
+            "uptime": tk.StringVar(value="—"),
+            "flow": tk.StringVar(value="—"),
+            "conn": tk.StringVar(value="—"),
+            "time": tk.StringVar(value="LOCAL"),
+            "system": tk.StringVar(value="OFFLINE"),
+        }
+        specs = (
+            ("UPTIME", "uptime", C["green"]),
+            ("DATA FLOW", "flow", C["amber"]),
+            ("CONNECTIONS", "conn", C["mint"]),
+            ("SERVER TIME", "time", C["cyan"]),
+            ("SYSTEM", "system", C["green"]),
+        )
+        for i, (label, key, color) in enumerate(specs):
+            cell = tk.Frame(inner, bg=C["panel"])
+            cell.pack(side=tk.LEFT, expand=True, fill=tk.X)
+            tk.Label(cell, text=label, bg=C["panel"], fg=C["mute"], font=self.f_ui).pack(anchor="w", pady=(8, 0))
+            tk.Label(cell, textvariable=self.foot_vars[key], bg=C["panel"], fg=color, font=self.f_ui_b).pack(
+                anchor="w"
             )
 
-    # ── data / draw ─────────────────────────────────────────────────────────
-    def _selected_bridge(self):
-        health = self._health
-        if health is None or not health.bridges:
-            return None
-        if self._selected_account:
-            for b in health.bridges:
-                if b.account_id == self._selected_account:
-                    return b
-        return health.bridges[0]
+    # ── actions ────────────────────────────────────────────────────────────
+    def _cfg_data(self) -> dict:
+        return load_config_json(self.config_path)
 
-    def _render_accounts(self) -> None:
-        for child in self.account_list.winfo_children():
-            child.destroy()
-        health = self._health
-        if health is None or not health.bridges:
-            tk.Label(self.account_list, text="No MT4 bridge", bg=C["void"], fg=C["coral"], font=self.f_ui_b).pack(
-                side=tk.LEFT
-            )
+    def _rt(self) -> Path:
+        return runtime_dir(self._cfg_data())
+
+    def _start_live(self) -> None:
+        if self.engine.running:
+            messagebox.showinfo("Engine", "Engine already running")
             return
-        if self._selected_account is None:
-            self._selected_account = health.bridges[0].account_id
-        for bridge in health.bridges:
-            active = bridge.account_id == self._selected_account
-            age = format_age(bridge.market_age_s)
-            live = "LIVE" if "STALE" not in age and age != "missing" else "STALE"
-            bg = C["lime"] if active else C["slab2"]
-            fg = "#101010" if active else C["ink"]
-            chip = tk.Frame(self.account_list, bg=bg, padx=12, pady=6)
-            chip.pack(side=tk.LEFT, padx=(0, 8))
-            tk.Label(chip, text=bridge.account_id, bg=bg, fg=fg, font=self.f_mono_b).pack(side=tk.LEFT)
-            tk.Label(chip, text=f"  {live} · {bridge.symbol}", bg=bg, fg=fg, font=self.f_ui).pack(side=tk.LEFT)
-            chip.bind("<Button-1>", lambda _e, a=bridge.account_id: self._select_account(a))
-            for child in chip.winfo_children():
-                child.bind("<Button-1>", lambda _e, a=bridge.account_id: self._select_account(a))
+        if sync_system_json is not None:
+            with contextlib.suppress(Exception):
+                sync_system_json(self.config_path, ROOT / "config" / "system.example.json")
+        arm_live_runtime(self.config_path)
+        ok, detail = validate_live_config(self.config_path)
+        if not ok:
+            messagebox.showerror("Live validation", detail)
+            return
+        clear_stop(self._rt())
+        try:
+            self.engine.start(mode="live", config_path=self.config_path)
+            self._pump_engine_logs()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Start failed", str(exc))
 
-    def _select_account(self, account_id: str) -> None:
-        self._selected_account = account_id
+    def _start_paper(self) -> None:
+        if self.engine.running:
+            messagebox.showinfo("Engine", "Engine already running")
+            return
+        clear_stop(self._rt())
+        try:
+            self.engine.start(mode="paper", config_path=self.config_path)
+            self._pump_engine_logs()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Start failed", str(exc))
+
+    def _pump_engine_logs(self) -> None:
+        proc = self.engine.proc
+        if proc is None or proc.stdout is None:
+            return
+
+        def reader() -> None:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                self.log_queue.put(line.rstrip("\n"))
+
+        threading.Thread(target=reader, daemon=True).start()
+
+    def _confirm_stop(self) -> None:
+        if not messagebox.askyesno("STOP", "Write STOP_TRADING and halt the engine?"):
+            return
+        write_stop(self._rt())
+        self.engine.stop_hard()
         self.refresh()
 
-    def _draw_equity(self) -> None:
-        canvas = self.equity_canvas
-        canvas.delete("all")
-        w = max(canvas.winfo_width(), 100)
-        h = max(canvas.winfo_height(), 100)
-        series = load_equity_series(self._selected_account, limit=120)
-        pad = 18
-        canvas.create_rectangle(0, 0, w, h, fill=C["slab"], outline="")
-        # Grid
-        for i in range(1, 5):
-            y = pad + (h - 2 * pad) * i / 5
-            canvas.create_line(pad, y, w - pad, y, fill=C["grid"])
-        if len(series) < 2:
-            canvas.create_text(
-                w // 2,
-                h // 2,
-                text="Collecting equity samples…\nKeep the floor open while engine runs.",
-                fill=C["mute"],
-                font=self.f_ui,
-                justify=tk.CENTER,
-            )
-            self.wave_now.set("—")
+    def _clear_stop(self) -> None:
+        clear_stop(self._rt())
+        self.refresh()
+
+    def _set_trading(self, enabled: bool) -> None:
+        set_trading_enabled(self.config_path, enabled)
+        self.refresh()
+
+    def _deploy(self) -> None:
+        code, out = run_deploy_mt4()
+        messagebox.showinfo("Deploy MT4", out[-1500:] if out else f"exit={code}")
+
+    def _save_lot(self, account_id: str) -> None:
+        var = self._lot_vars.get(account_id)
+        if var is None:
             return
-        values = [v for _, v in series]
-        lo, hi = min(values), max(values)
-        span = max(hi - lo, 1e-6)
-        pts: list[float] = []
-        for i, (_, val) in enumerate(series):
-            x = pad + (w - 2 * pad) * (i / (len(series) - 1))
-            y = h - pad - (h - 2 * pad) * ((val - lo) / span)
-            pts.extend([x, y])
-        # Filled area under curve
-        area = [pad, h - pad, *pts, w - pad, h - pad]
-        canvas.create_polygon(*area, fill="#1E2A14", outline="")
-        canvas.create_line(*pts, fill=C["lime"], width=3, smooth=True)
-        canvas.create_oval(
-            pts[-2] - 5,
-            pts[-1] - 5,
-            pts[-2] + 5,
-            pts[-1] + 5,
-            fill=C["cyan"],
-            outline=C["ink"],
-            width=1,
+        try:
+            lot = float(var.get().replace(",", "."))
+        except ValueError:
+            messagebox.showerror("Lot", f"Invalid lot for {account_id}")
+            return
+        cfg = self._cfg_data()
+        mn, mx, _step = lot_bounds(cfg)
+        if lot < mn or lot > mx:
+            messagebox.showerror("Lot", f"Lot must be between {mn} and {mx}")
+            return
+        write_account_lot_override(self._rt(), account_id, lot)
+        messagebox.showinfo("Lot", f"{account_id} → fixed_lot={lot:.2f}\nApplies on next engine cycle.")
+        self.refresh()
+
+    def _reset_lot(self, account_id: str) -> None:
+        clear_account_lot_override(self._rt(), account_id)
+        self.refresh()
+
+    def _rebuild_account_rows(self, health) -> None:
+        cfg = self._cfg_data()
+        rt = self._rt()
+        default_lot = default_fixed_lot(cfg)
+        accounts = list_known_accounts(health, rt)
+        # Also include bridges with unknown placeholder skipped
+        for child in list(self.accounts_host.winfo_children()):
+            if child is self.accounts_empty:
+                continue
+            child.destroy()
+        self._lot_vars.clear()
+
+        if not accounts:
+            self.accounts_empty.pack(pady=40)
+            return
+        self.accounts_empty.pack_forget()
+
+        bridge_by = {b.account_id: b for b in health.bridges}
+
+        header = tk.Frame(self.accounts_host, bg=C["panel"])
+        header.pack(fill=tk.X, pady=(0, 6))
+        for col, w in (("ACCOUNT", 16), ("BALANCE", 12), ("SYMBOL", 12), ("LOT", 10), ("SOURCE", 12), ("", 20)):
+            tk.Label(header, text=col, bg=C["panel"], fg=C["mute"], font=self.f_ui_b, width=w, anchor="w").pack(
+                side=tk.LEFT, padx=6, pady=8
+            )
+
+        for acct in accounts:
+            row = tk.Frame(self.accounts_host, bg=C["panel2"])
+            row.pack(fill=tk.X, pady=3)
+            br = bridge_by.get(acct)
+            bal = f"{br.balance:,.2f}" if br else "—"
+            sym = br.symbol if br else "—"
+            override = read_account_lot_override(rt, acct)
+            effective = override if override is not None else default_lot
+            source = "override" if override is not None else "config"
+
+            tk.Label(row, text=acct, bg=C["panel2"], fg=C["ink"], font=self.f_ui_b, width=16, anchor="w").pack(
+                side=tk.LEFT, padx=6, pady=10
+            )
+            tk.Label(row, text=bal, bg=C["panel2"], fg=C["mint"], font=self.f_mono, width=12, anchor="w").pack(
+                side=tk.LEFT, padx=6
+            )
+            tk.Label(row, text=sym, bg=C["panel2"], fg=C["cyan"], font=self.f_ui, width=12, anchor="w").pack(
+                side=tk.LEFT, padx=6
+            )
+
+            var = tk.StringVar(value=f"{effective:.2f}")
+            self._lot_vars[acct] = var
+            ent = tk.Entry(
+                row,
+                textvariable=var,
+                bg=C["void"],
+                fg=C["amber"],
+                insertbackground=C["ink"],
+                relief=tk.FLAT,
+                width=8,
+                font=self.f_mono,
+                highlightthickness=1,
+                highlightbackground=C["line"],
+            )
+            ent.pack(side=tk.LEFT, padx=6)
+            tk.Label(
+                row,
+                text=source,
+                bg=C["panel2"],
+                fg=C["violet"] if source == "override" else C["mute"],
+                font=self.f_ui,
+                width=12,
+                anchor="w",
+            ).pack(side=tk.LEFT, padx=6)
+            tk.Button(
+                row,
+                text="SAVE",
+                command=lambda a=acct: self._save_lot(a),
+                bg=C["panel"],
+                fg=C["green"],
+                relief=tk.FLAT,
+                font=self.f_ui_b,
+                padx=10,
+                cursor="hand2",
+            ).pack(side=tk.LEFT, padx=4)
+            tk.Button(
+                row,
+                text="RESET",
+                command=lambda a=acct: self._reset_lot(a),
+                bg=C["panel"],
+                fg=C["mute"],
+                relief=tk.FLAT,
+                font=self.f_ui_b,
+                padx=8,
+                cursor="hand2",
+            ).pack(side=tk.LEFT, padx=2)
+
+    # ── refresh / animation ────────────────────────────────────────────────
+    def refresh(self) -> None:
+        try:
+            health = collect_health(self.config_path)
+        except Exception as exc:  # noqa: BLE001
+            self._selected_node.set(f"health error: {exc}")
+            return
+        self._health = health
+        states = brain_node_states(
+            health,
+            engine_running=self.engine.running,
+            engine_mode=self.engine.mode,
         )
-        self.wave_now.set(_money(values[-1]))
+        self.brain.set_states(states)
 
-    def _draw_health_ring(self, pct: float, color: str) -> None:
-        canvas = self.health_canvas
-        canvas.delete("all")
-        x0, y0, x1, y1 = 12, 12, 128, 128
-        canvas.create_oval(x0, y0, x1, y1, outline=C["grid"], width=12)
-        extent = max(0.0, min(100.0, pct)) / 100.0 * 360.0
-        if extent > 0:
-            canvas.create_arc(x0, y0, x1, y1, start=90, extent=-extent, style=tk.ARC, outline=color, width=12)
-        canvas.create_text(70, 70, text=f"{pct:.0f}%", fill=C["ink"], font=self.f_h1)
+        online = self.engine.running and not health.stop_present
+        self.online_lbl.configure(
+            text="ONLINE" if online else ("HALTED" if health.stop_present else "STANDBY"),
+            fg=C["green"] if online else (C["red"] if health.stop_present else C["amber"]),
+        )
 
-    def _set_text(self, widget: tk.Text, content: str) -> None:
+        # Node panel
+        lines = []
+        worst = "idle"
+        for st in states:
+            mark = {"ok": "●", "warn": "▲", "error": "✖", "idle": "○"}.get(st.level, "·")
+            lines.append(f"{mark} {st.label:<6} {st.level.upper():<5}  {st.detail}")
+            if st.level == "error":
+                worst = "error"
+            elif st.level == "warn" and worst != "error":
+                worst = "warn"
+            elif st.level == "ok" and worst == "idle":
+                worst = "ok"
+        self._set_text(self.node_list, "\n".join(lines))
+        core = next((s for s in states if s.key == "core"), None)
+        if core:
+            self._selected_node.set(f"{core.label} · {core.detail}")
+
+        # Tape
+        af = audit_file(self._cfg_data())
+        rows = audit_activity(af, limit=12)
+        tape_lines = [format_audit_line(r) for r in rows] or ["(no audit yet)"]
+        self._set_text(self.tape, "\n".join(tape_lines))
+
+        # Requests page
+        req_lines = []
+        for b in health.bridges:
+            req_lines.append(
+                f"{b.account_id}  market={format_age(b.market_age_s)}  status={format_age(b.status_age_s)}  "
+                f"cmds={b.commands} acks={b.acks}  connected={b.connected}  trade={b.trading_allowed}"
+            )
+            for p in b.positions:
+                req_lines.append(
+                    f"    pos {p.ticket} {p.symbol} {p.side} lot={p.lot} sl={p.stop_loss} tp={p.take_profit} pl={p.profit:.2f}"
+                )
+        req_lines.append("")
+        req_lines.extend(tape_lines[:20])
+        self._set_text(self.requests_text, "\n".join(req_lines) or "(quiet)")
+
+        # Settings
+        cfg = self._cfg_data()
+        runtime = cfg.get("runtime") or {}
+        pos = cfg.get("position_sizing") or {}
+        self.settings_info.configure(
+            text=(
+                f"config: {self.config_path}\n"
+                f"mode: {runtime.get('mode')}   trading_enabled: {runtime.get('trading_enabled')}\n"
+                f"symbol: {(cfg.get('instrument') or {}).get('symbol')}\n"
+                f"default lot: {pos.get('fixed_lot')}   min/max: {pos.get('min_lot')}/{pos.get('max_lot')}\n"
+                f"engine: {'RUNNING pid=' + str(self.engine.pid) if self.engine.running else 'IDLE'}\n"
+                f"stop file: {'YES' if health.stop_present else 'no'}"
+            )
+        )
+
+        if self._page == "accounts":
+            self._rebuild_account_rows(health)
+
+        # Footer
+        uptime_s = time.time() - (self.engine.started_at or self._started_wall)
+        if self.engine.running and self.engine.started_at:
+            self.foot_vars["uptime"].set(f"READY  {int(uptime_s)}s")
+        else:
+            self.foot_vars["uptime"].set("READY" if not health.stop_present else "STOPPED")
+
+        fresh = any(b.market_age_s is not None and b.market_age_s <= 15 for b in health.bridges)
+        self.foot_vars["flow"].set("STREAMING" if fresh else ("WAITING" if health.bridges else "IDLE"))
+        conn_ok = any(b.connected for b in health.bridges)
+        self.foot_vars["conn"].set("STABLE" if conn_ok else ("DEGRADED" if health.bridges else "NONE"))
+        self.foot_vars["time"].set(time.strftime("%H:%M:%S"))
+        self.foot_vars["system"].set("ONLINE" if online else ("FAULT" if worst == "error" else "STANDBY"))
+
+    def _set_text(self, widget: tk.Text, text: str) -> None:
         widget.configure(state=tk.NORMAL)
         widget.delete("1.0", tk.END)
-        widget.insert(tk.END, content)
+        widget.insert(tk.END, text)
         widget.configure(state=tk.DISABLED)
 
-    def _append_activity(self, line: str) -> None:
-        tag = "dim"
-        u = line.upper()
-        if line.startswith("CYCLE"):
-            tag = "cycle"
-        elif "ERROR" in u or "FAIL" in u:
-            tag = "err"
-        elif "CTRL" in u or "OK" in u or "ARMED" in u:
-            tag = "ok"
-        self.activity.configure(state=tk.NORMAL)
-        self.activity.insert(tk.END, line.rstrip() + "\n", ("flash", tag))
-        self._flash_until = time.time() + 0.35
-        total = int(float(self.activity.index("end-1c").split(".")[0]))
-        if total > 2500:
-            self.activity.delete("1.0", f"{total - 2500}.0")
-        self.activity.see(tk.END)
-        self.activity.configure(state=tk.DISABLED)
-
-    # ── engine wiring ───────────────────────────────────────────────────────
-    def _tail_audit_init(self) -> None:
-        path = audit_file(load_config_json(self.config_path) if self.config_path.exists() else None)
-        if path.exists():
-            self._audit_offset = path.stat().st_size
-
-    def _poll_audit(self) -> None:
-        try:
-            data = load_config_json(self.config_path)
-        except Exception:  # noqa: BLE001
-            return
-        path = audit_file(data)
-        if not path.exists():
-            return
-        size = path.stat().st_size
-        if size < self._audit_offset:
-            self._audit_offset = 0
-        if size == self._audit_offset:
-            return
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            handle.seek(self._audit_offset)
-            chunk = handle.read()
-            self._audit_offset = handle.tell()
-        for raw in chunk.splitlines():
-            raw = raw.strip()
-            if not raw:
-                continue
-            try:
-                entry = json.loads(raw)
-            except Exception:  # noqa: BLE001
-                self._append_activity(f"AUDIT  {raw[:220]}")
-                continue
-            if isinstance(entry, dict):
-                self._append_activity("CYCLE  " + format_audit_line(entry))
-
-    def _start_reader(self) -> None:
-        if self.engine.proc is None or self.engine.proc.stdout is None:
-            return
-
-        def _feed() -> None:
-            assert self.engine.proc is not None and self.engine.proc.stdout is not None
-            for line in self.engine.proc.stdout:
-                self.log_queue.put(line.rstrip("\n"))
-            self.log_queue.put(f"[engine exited code={self.engine.proc.poll()}]")
-
-        threading.Thread(target=_feed, daemon=True).start()
-
-    def _drain_logs(self) -> None:
-        while True:
+    def _motion_tick(self) -> None:
+        self.brain.phase += 0.12
+        if self._page == "main":
+            self.brain.draw()
+        # Drain log queue into tape lightly
+        drained = 0
+        while drained < 20:
             try:
                 line = self.log_queue.get_nowait()
             except queue.Empty:
                 break
-            self._append_activity("ENGINE " + line)
-
-    def refresh(self) -> None:
-        try:
-            self.config_path = resolve_config(self.config_path)
-            health = collect_health(self.config_path)
-            self._health = health
-            cfg = load_config_json(self.config_path)
-            stats = audit_day_stats(audit_file(cfg))
-            recent = audit_activity(audit_file(cfg), limit=25)
-        except Exception as exc:  # noqa: BLE001
-            self.footer_var.set(f"ERROR: {exc}")
-            return
-
-        self._render_accounts()
-        bridge = self._selected_bridge()
-        currency = bridge.currency if bridge else ""
-        if bridge:
-            self.m_balance[1].set(_money(bridge.balance, currency))
-            self.m_balance[2].set(f"account {bridge.account_id}")
-
-            self.m_equity[1].set(_money(bridge.equity, currency))
-            delta = bridge.equity - bridge.balance
-            self.m_equity[2].set(f"vs balance {delta:+.2f}")
-
-            self.m_float[1].set(_money(bridge.floating_pl, currency))
-            self.m_float[2].set(f"{len(bridge.positions)} open positions")
-            # Recolor float slab by P/L
-            float_bg = C["mint"] if bridge.floating_pl >= 0 else C["coral"]
-            self.m_float[0].configure(bg=float_bg)
-            for child in self.m_float[0].winfo_children():
-                child.configure(bg=float_bg)
-
-            self.state_vars["symbol"].set(f"{bridge.symbol}  bid={bridge.bid} ask={bridge.ask}")
-            self.state_vars["spread"].set("—" if bridge.spread is None else str(bridge.spread))
-            self.headline_symbol.set(f"{bridge.symbol}  M1")
-            age = bridge.market_age_s
-            if age is None:
-                pct, color = 0.0, C["coral"]
-                detail = "market export missing"
-            elif age <= 5:
-                pct, color = 100.0, C["mint"]
-                detail = format_age(age)
-            elif age <= 30:
-                pct, color = max(35.0, 100.0 - age * 2), C["cyan"]
-                detail = format_age(age)
-            else:
-                pct, color = max(5.0, 40.0 - min(age, 120) / 4), C["amber"]
-                detail = format_age(age)
-            self._draw_health_ring(pct, color)
-            self.health_label.set(f"{pct:.0f}%")
-            self.health_detail.set(detail)
-        else:
-            for card in (self.m_balance, self.m_equity, self.m_float):
-                card[1].set("—")
-                card[2].set("")
-            self.state_vars["symbol"].set("—")
-            self.state_vars["spread"].set("—")
-            self.headline_symbol.set("NO SYMBOL")
-            self._draw_health_ring(0, C["coral"])
-            self.health_label.set("—")
-            self.health_detail.set("No bridge")
-
-        self.m_trades[1].set(str(stats["acted"]))
-        self.m_trades[2].set(f"open {stats['opens']} · close {stats['closes']} · block {stats['blocks']}")
-
-        audit = health.last_audit or {}
-        if bridge and bridge.account_id:
-            for row in recent:
-                if str(row.get("account_number") or "") == bridge.account_id:
-                    audit = row
-                    break
-        self.state_vars["accounts"].set(f"{len(health.bridges)} connected")
-        self.state_vars["regime"].set(str(audit.get("market_regime") or "—"))
-        self.state_vars["strategy"].set(str(audit.get("selected_strategy") or "—"))
-        self.state_vars["decision"].set(str(audit.get("decision") or "—"))
-        self.state_vars["reason"].set(str(audit.get("reason_code") or audit.get("human_readable_reason") or "—"))
-        self.headline_regime.set(str(audit.get("market_regime") or "WAITING"))
-
-        lines = [format_audit_line(row) for row in recent[:14]]
-        self._set_text(self.recent_box, "\n".join(lines) if lines else "No audit cycles yet.")
-
-        pos_lines = []
-        trade_lines = []
-        for b in health.bridges:
-            if not b.positions:
-                continue
-            for p in b.positions:
-                line = (
-                    f"{b.account_id}  {p.symbol}  {p.side}  {p.lot:.2f}  "
-                    f"@{p.open_price}  SL={p.stop_loss}  TP={p.take_profit}  "
-                    f"P/L={p.profit:+.2f}"
-                )
-                pos_lines.append(line)
-                trade_lines.append(line)
-        self._set_text(self.pos_box, "\n".join(pos_lines) if pos_lines else "Book flat — no open positions.")
-        self._set_text(self.trades_box, "\n".join(trade_lines) if trade_lines else "Book flat — no open positions.")
-
-        running = self.engine.running
-        mode = self.engine.mode or health.mode
-        ages = [b.market_age_s for b in health.bridges if b.market_age_s is not None]
-        fresh_n = sum(1 for a in ages if a <= 30)
-        if running:
-            self._set_pill(self.pill_sys, "RUNNING", C["mint"] if self._pulse else C["lime"])
-            self._set_pill(self.pill_eng, mode.upper(), C["cyan"] if mode == "live" else C["amber"])
-        else:
-            self._set_pill(self.pill_sys, "STOPPED", C["coral"])
-            self._set_pill(self.pill_eng, "IDLE", C["amber"])
-        self._set_pill(
-            self.pill_brg,
-            f"{fresh_n}/{len(health.bridges)} FRESH" if health.bridges else "NONE",
-            C["mint"] if health.bridges and fresh_n == len(health.bridges) else C["amber"],
-        )
-
-        parts = [f"{b.account_id}:{format_age(b.market_age_s)}" for b in health.bridges]
-        self.footer_var.set(
-            "  ·  ".join(
-                [
-                    f"mode={health.mode}",
-                    f"trading={'on' if health.trading_enabled else 'off'}",
-                    f"pid={self.engine.pid or '-'}",
-                    " | ".join(parts) if parts else "no bridges",
-                ]
-            )
-        )
-
-        self._draw_equity()
-        state = tk.DISABLED if running else tk.NORMAL
-        self.btn_paper.configure(state=state)
-        self.btn_live.configure(state=state)
-        self.btn_stop.configure(state=tk.NORMAL)
-
-    def start_paper(self) -> None:
-        self._append_activity("WARN   PAPER fills locally — use START LIVE for MT4 orders")
-        self._start_mode("paper")
-
-    def start_live(self) -> None:
-        try:
-            armed = arm_live_runtime(self.config_path)
-            if armed:
-                self._append_activity("CTRL   armed system.json mode=live trading_enabled=true")
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Live arm failed", str(exc))
-            self._append_activity(f"ERROR  {exc}")
-            return
-        ok, detail = validate_live_config(self.config_path)
-        if not ok:
-            messagebox.showerror("Live config invalid", detail)
-            self._append_activity(f"ERROR  {detail}")
-            return
-        if not messagebox.askyesno("Confirm LIVE", "Start LIVE on all discovered MT4 accounts?"):
-            return
-        self._start_mode("live")
-
-    def _start_mode(self, mode: str) -> None:
-        try:
-            cfg = load_config_json(self.config_path)
-            cleared = clear_stop(runtime_dir(cfg))
-            self.engine.start(mode=mode, config_path=self.config_path)
-            self._start_reader()
-            msg = f"Started {mode}"
-            if cleared:
-                msg += " (cleared STOP_TRADING)"
-            self._append_activity("CTRL   " + msg)
-            self._show_page("tape")
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Start failed", str(exc))
-            self._append_activity(f"ERROR  {exc}")
-        self.refresh()
-
-    def stop_engine(self) -> None:
-        try:
-            cfg = load_config_json(self.config_path)
-            path = write_stop(runtime_dir(cfg))
-            self._append_activity(f"CTRL   wrote {path.name}")
-            if self.engine.running:
-                self._stopping = True
-
-                def _kill() -> None:
-                    deadline = time.time() + 10
-                    while time.time() < deadline and self.engine.running:
-                        time.sleep(0.2)
-                    if self.engine.running:
-                        self.engine.stop_hard()
-                        self.log_queue.put("[hard-stopped]")
-                    self._stopping = False
-
-                threading.Thread(target=_kill, daemon=True).start()
-            self._append_activity("CTRL   stop requested")
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Stop failed", str(exc))
-        self.refresh()
-
-    def deploy_mt4(self) -> None:
-        self._append_activity("CTRL   deploying MT4…")
-        code, out = run_deploy_mt4()
-        for line in out.splitlines() or [f"exit={code}"]:
-            self._append_activity("DEPLOY " + line)
-        if code != 0:
-            messagebox.showerror("Deploy failed", out[-800:] or f"exit {code}")
-        else:
-            messagebox.showinfo("Deploy", "Done. Open EA from Data Folder and press F7.")
-        self.refresh()
+            drained += 1
+            if line:
+                self.tape.configure(state=tk.NORMAL)
+                self.tape.insert(tk.END, line + "\n")
+                self.tape.see(tk.END)
+                self.tape.configure(state=tk.DISABLED)
+        code = self.engine.poll_exit()
+        if code is not None and code != 0:
+            self._selected_node.set(f"engine exited code={code}")
+        self.root.after(80, self._motion_tick)
 
     def _tick(self) -> None:
-        self._drain_logs()
-        self._poll_audit()
-        if (
-            self.engine.proc is not None
-            and not self.engine.running
-            and not self._stopping
-            and self.engine.poll_exit() is not None
-        ):
-            self.engine.proc = None
         self.refresh()
-        self.root.after(1000, self._tick)
-
-    def _motion_tick(self) -> None:
-        self._brand_phase += 0.12
-        self._pulse = not self._pulse
-        self._draw_brand_bar()
-        if self.engine.running:
-            self._set_pill(self.pill_sys, "RUNNING", C["mint"] if self._pulse else C["lime"])
-        # Clear activity flash highlight after pulse window
-        if time.time() > self._flash_until:
-            with contextlib.suppress(Exception):
-                self.activity.tag_remove("flash", "1.0", tk.END)
-        self.root.after(80, self._motion_tick)
+        self.root.after(900, self._tick)
 
     def _on_close(self) -> None:
         if self.engine.running:
-            if not messagebox.askyesno("Engine running", "Stop engine and exit?"):
+            if messagebox.askyesno("Quit", "Engine is running. Stop it and exit?"):
+                write_stop(self._rt())
+                self.engine.stop_hard()
+            else:
                 return
-            with contextlib.suppress(Exception):
-                write_stop(runtime_dir(load_config_json(self.config_path)))
-            self.engine.stop_hard(timeout_s=5)
         self.root.destroy()
 
 
-def main() -> int:
-    try:
-        cfg = resolve_config()
-    except FileNotFoundError as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    if sync_system_json is not None and cfg.name == "system.json":
-        with contextlib.suppress(Exception):
-            sync_system_json(cfg)
+def main() -> None:
     root = tk.Tk()
     DashboardApp(root)
     root.mainloop()
-    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

@@ -11,6 +11,7 @@ from pathlib import Path
 from checktrader.app.bootstrap import AppContext, spawn_account_context
 from checktrader.app.cycle import merge_market_history, run_cycle
 from checktrader.bridge.reader import read_market, read_positions, read_status
+from checktrader.config.account_lot import apply_account_lot_override
 from checktrader.domain.enums import ReasonCode
 from checktrader.domain.models import CycleAudit, MarketSnapshot
 from checktrader.market_data.aggregation import aggregate_standard
@@ -27,6 +28,15 @@ _SAFE_ACCOUNT = re.compile(r"[^A-Za-z0-9._-]+")
 def _stop_requested(runtime_dir: Path) -> bool:
     """Return True if a STOP_TRADING sentinel file exists under runtime_dir."""
     return (runtime_dir / _STOP_FILE).exists()
+
+
+def _refresh_account_lot(session: "AccountSession") -> None:
+    """Re-read dashboard lot.json each cycle so per-account size changes apply live."""
+    cfg = apply_account_lot_override(session.context.config, session.account_id)
+    if cfg is session.context.config:
+        return
+    session.context.config = cfg
+    session.context.execution.config = cfg
 
 
 def discover_bridges(
@@ -317,6 +327,7 @@ def run_loop(context: AppContext) -> None:
                 # Pass 3: trade/manage each account with the shared market regime.
                 for session, market in prepared:
                     try:
+                        _refresh_account_lot(session)
                         symbol = market.symbol or session.context.specs.symbol
                         shared = hub.get(symbol)
                         audit = run_cycle(session.context, market, shared_regime=shared)

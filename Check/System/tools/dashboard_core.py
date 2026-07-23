@@ -66,6 +66,233 @@ def arm_live_runtime(config_path: Path) -> bool:
     return changed
 
 
+def set_trading_enabled(config_path: Path, enabled: bool) -> bool:
+    data = load_config_json(config_path)
+    runtime = dict(data.get("runtime") or {})
+    changed = bool(runtime.get("trading_enabled")) is not bool(enabled)
+    runtime["trading_enabled"] = bool(enabled)
+    data["runtime"] = runtime
+    if changed:
+        save_config_json(config_path, data)
+    return changed
+
+
+def default_fixed_lot(config_data: dict[str, Any]) -> float:
+    sizing = config_data.get("position_sizing") or {}
+    position = config_data.get("position") or {}
+    try:
+        return float(sizing.get("fixed_lot") or position.get("default_lot") or 0.02)
+    except (TypeError, ValueError):
+        return 0.02
+
+
+def lot_bounds(config_data: dict[str, Any]) -> tuple[float, float, float]:
+    sizing = config_data.get("position_sizing") or {}
+    try:
+        mn = float(sizing.get("min_lot") or 0.01)
+        mx = float(sizing.get("max_lot") or 100.0)
+        step = float(sizing.get("lot_step") or 0.01)
+    except (TypeError, ValueError):
+        return 0.01, 100.0, 0.01
+    return mn, mx, step
+
+
+def account_lot_file(rt: Path, account_id: str) -> Path:
+    return Path(rt) / "accounts" / str(account_id) / "lot.json"
+
+
+def read_account_lot_override(rt: Path, account_id: str) -> float | None:
+    path = account_lot_file(rt, account_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("fixed_lot", data.get("lot"))
+    try:
+        lot = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return lot if lot > 0 else None
+
+
+def write_account_lot_override(rt: Path, account_id: str, lot: float) -> Path:
+    path = account_lot_file(rt, account_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "fixed_lot": float(lot),
+        "updated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "dashboard",
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def clear_account_lot_override(rt: Path, account_id: str) -> bool:
+    path = account_lot_file(rt, account_id)
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def list_known_accounts(health: HealthSnapshot, rt: Path) -> list[str]:
+    ids: set[str] = set()
+    for bridge in health.bridges:
+        if bridge.account_id and bridge.account_id not in {"", "-"}:
+            ids.add(str(bridge.account_id))
+    accounts_root = Path(rt) / "accounts"
+    if accounts_root.is_dir():
+        for child in accounts_root.iterdir():
+            if child.is_dir() and child.name not in {"", "-", "unknown"}:
+                ids.add(child.name)
+    return sorted(ids)
+
+
+@dataclass(slots=True)
+class BrainNodeState:
+    key: str
+    label: str
+    level: str  # ok | warn | error | idle
+    detail: str
+
+
+def brain_node_states(
+    health: HealthSnapshot,
+    *,
+    engine_running: bool,
+    engine_mode: str | None = None,
+) -> list[BrainNodeState]:
+    """Map subsystem health → neural node colors for Account Brain."""
+    bridges = health.bridges
+    fresh = [b for b in bridges if (b.market_age_s is not None and b.market_age_s <= 30)]
+    stale = [b for b in bridges if (b.market_age_s is None or b.market_age_s > 30)]
+    connected = [b for b in bridges if b.connected]
+    trading_ok = [b for b in bridges if b.trading_allowed]
+    open_pos = sum(len(b.positions) for b in bridges)
+    cmd_backlog = sum(b.commands for b in bridges)
+
+    audit = health.last_audit or {}
+    reason = str(audit.get("reason_code") or "")
+    decision = str(audit.get("decision") or "")
+
+    def _bridge_level() -> tuple[str, str]:
+        if not bridges:
+            return "error", "no MT4 bridge"
+        if stale and not fresh:
+            ages = [b.market_age_s for b in bridges if b.market_age_s is not None]
+            age = max(ages) if ages else None
+            return "error", f"stale market {format_age(age)}"
+        if stale and fresh:
+            return "warn", f"{len(fresh)} fresh / {len(stale)} stale"
+        return "ok", f"{len(bridges)} bridge(s) live"
+
+    def _conn_level() -> tuple[str, str]:
+        if not bridges:
+            return "idle", "waiting"
+        if not connected:
+            return "error", "terminal not connected"
+        if len(connected) < len(bridges):
+            return "warn", f"{len(connected)}/{len(bridges)} connected"
+        return "ok", f"{len(connected)} linked"
+
+    def _trade_level() -> tuple[str, str]:
+        if health.stop_present:
+            return "error", "STOP_TRADING armed"
+        if not health.trading_enabled:
+            return "warn", "trading disabled"
+        if bridges and not trading_ok:
+            return "warn", "EA trade not allowed"
+        if health.mode != "live":
+            return "idle", f"mode={health.mode}"
+        return "ok", "armed"
+
+    def _flow_level() -> tuple[str, str]:
+        if not bridges:
+            return "idle", "no stream"
+        if cmd_backlog > 8:
+            return "warn", f"{cmd_backlog} cmds queued"
+        if fresh:
+            return "ok", "streaming"
+        return "warn", "waiting"
+
+    def _risk_level() -> tuple[str, str]:
+        if health.stop_present:
+            return "error", "halted"
+        if reason.startswith("RISK_"):
+            return "error", reason
+        if reason in {"BRIDGE_UNAVAILABLE", "DATA_STALE", "EXECUTION_REJECTED", "EXECUTION_TIMEOUT"}:
+            return "error", reason
+        return "ok", "clear"
+
+    def _trail_level() -> tuple[str, str]:
+        manage_fail = reason in {
+            "MANAGEMENT_FAILED",
+            "TRAIL_FAILED",
+            "MODIFY_REJECTED",
+            "EXECUTION_TIMEOUT",
+        } or "TRAIL" in reason or "MODIFY" in reason and "FAIL" in reason
+        if manage_fail:
+            return "error", reason or "trail fault"
+        if open_pos and decision in {"HOLD", "MANAGE", "WAIT"}:
+            return "ok", f"managing {open_pos} pos"
+        if open_pos:
+            return "ok", f"{open_pos} open"
+        return "idle", "flat"
+
+    def _engine_level() -> tuple[str, str]:
+        if engine_running:
+            return "ok", f"running ({engine_mode or health.mode})"
+        if health.mode == "live" and health.trading_enabled:
+            return "error", "engine down"
+        return "idle", "idle"
+
+    def _accounts_level() -> tuple[str, str]:
+        ids = {b.account_id for b in bridges if b.account_id not in {"", "-"}}
+        if not ids:
+            return "idle", "no accounts"
+        bad = [b for b in bridges if not b.connected or (b.market_age_s is None or b.market_age_s > 30)]
+        if bad and len(bad) == len(bridges):
+            return "error", f"{len(ids)} account(s) unhealthy"
+        if bad:
+            return "warn", f"{len(bad)} account issue(s)"
+        return "ok", f"{len(ids)} account(s)"
+
+    bridge_l, bridge_d = _bridge_level()
+    conn_l, conn_d = _conn_level()
+    trade_l, trade_d = _trade_level()
+    flow_l, flow_d = _flow_level()
+    risk_l, risk_d = _risk_level()
+    trail_l, trail_d = _trail_level()
+    eng_l, eng_d = _engine_level()
+    acct_l, acct_d = _accounts_level()
+
+    levels = [eng_l, bridge_l, conn_l, trade_l, flow_l, risk_l, trail_l, acct_l]
+    if "error" in levels:
+        core_l, core_d = "error", "fault detected"
+    elif "warn" in levels:
+        core_l, core_d = "warn", "degraded"
+    elif eng_l == "ok":
+        core_l, core_d = "ok", "online"
+    else:
+        core_l, core_d = "idle", "standby"
+
+    return [
+        BrainNodeState("core", "CORE", core_l, core_d),
+        BrainNodeState("engine", "ENGINE", eng_l, eng_d),
+        BrainNodeState("bridge", "BRIDGE", bridge_l, bridge_d),
+        BrainNodeState("connections", "LINK", conn_l, conn_d),
+        BrainNodeState("trading", "TRADE", trade_l, trade_d),
+        BrainNodeState("data_flow", "FLOW", flow_l, flow_d),
+        BrainNodeState("risk", "RISK", risk_l, risk_d),
+        BrainNodeState("trail", "TRAIL", trail_l, trail_d),
+        BrainNodeState("accounts", "ACCTS", acct_l, acct_d),
+    ]
+
+
 def stop_file_path(rt: Path) -> Path:
     return rt / STOP_NAME
 

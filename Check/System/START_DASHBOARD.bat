@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title CHECK SYSTEM - Ops Floor
+title CHECK SYSTEM - Account Brain
 cd /d "%~dp0"
 
 set "PYTHONPATH=%CD%\src;%PYTHONPATH%"

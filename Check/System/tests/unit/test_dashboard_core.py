@@ -199,3 +199,46 @@ def test_equity_series_and_day_stats(tmp_path: Path, monkeypatch) -> None:
     assert stats["blocks"] == 1
     assert stats["acted"] == 2
     assert len(core.audit_activity(audit, limit=2)) == 2
+
+
+def test_brain_nodes_and_lot_helpers(tmp_path: Path, monkeypatch) -> None:
+    import dashboard_core as core
+
+    monkeypatch.setattr(core, "ROOT", tmp_path)
+    cfg = {
+        "runtime": {"mode": "live", "trading_enabled": True},
+        "instrument": {"symbol": "NATURALGAS"},
+        "position_sizing": {"fixed_lot": 0.02, "min_lot": 0.01, "max_lot": 1.0, "lot_step": 0.01},
+        "paths": {"runtime_dir": "runtime", "audit_file": "runtime/audit.jsonl", "bridge_dir": "runtime/bridge"},
+    }
+    config_path = tmp_path / "config" / "system.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(cfg), encoding="utf-8")
+    (tmp_path / "runtime").mkdir(parents=True)
+
+    health = core.HealthSnapshot(
+        config_path=config_path,
+        mode="live",
+        trading_enabled=True,
+        symbol="NATURALGAS",
+        stop_present=False,
+        bridges=[],
+        last_audit={"reason_code": "DATA_STALE", "decision": "WAIT"},
+    )
+    nodes = core.brain_node_states(health, engine_running=False, engine_mode=None)
+    by_key = {n.key: n for n in nodes}
+    assert by_key["engine"].level == "error"
+    assert by_key["bridge"].level == "error"
+    assert by_key["risk"].level == "error"
+    assert by_key["core"].level == "error"
+
+    rt = tmp_path / "runtime"
+    core.write_account_lot_override(rt, "231054", 0.04)
+    assert core.read_account_lot_override(rt, "231054") == 0.04
+    (rt / "accounts" / "231054").mkdir(parents=True, exist_ok=True)
+    assert "231054" in core.list_known_accounts(health, rt)
+    assert core.clear_account_lot_override(rt, "231054") is True
+    assert core.default_fixed_lot(cfg) == 0.02
+    assert core.lot_bounds(cfg) == (0.01, 1.0, 0.01)
+    assert core.set_trading_enabled(config_path, False) is True
+    assert core.load_config_json(config_path)["runtime"]["trading_enabled"] is False
