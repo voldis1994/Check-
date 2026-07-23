@@ -255,8 +255,17 @@ class App:
                 font=self.f_mono,
             )
             ent.grid(row=i, column=1, sticky="w", padx=8, pady=5)
-            if key in {"mt4_exe", "metaeditor_exe"}:
+            if key == "mt4_exe":
+                self._btn(form, "…", C["sky"], lambda k=key: self._browse(k), padx=8).grid(row=i, column=2, padx=2)
+                self._btn(form, "DETECT", C["ok"], self._detect_mt4, padx=8).grid(row=i, column=3, padx=2)
+            elif key == "metaeditor_exe":
                 self._btn(form, "…", C["sky"], lambda k=key: self._browse(k), padx=8).grid(row=i, column=2, padx=4)
+
+        # Auto-fill MT4 path if empty
+        if not str(self._vars.get("mt4_exe", tk.StringVar()).get()).strip():
+            found = clients.find_terminal_exe()
+            if found is not None:
+                self._vars["mt4_exe"].set(str(found))
 
         self.trend_v = tk.BooleanVar(value=bool(cfg.get("trend", True)))
         self.bo_v = tk.BooleanVar(value=bool(cfg.get("breakout", True)))
@@ -278,6 +287,24 @@ class App:
         path = filedialog.askopenfilename(title="Select executable", filetypes=[("EXE", "*.exe"), ("All", "*.*")])
         if path:
             self._vars[key].set(path)
+
+    def _detect_mt4(self) -> None:
+        found = clients.find_terminal_exe(self._vars["mt4_exe"].get())
+        if found is None:
+            found = clients.find_terminal_exe()
+        if found is None:
+            messagebox.showwarning(
+                "DETECT",
+                "terminal.exe not found.\n\nClick … and select it manually "
+                "(usually in your broker MetaTrader 4 folder).",
+            )
+            return
+        self._vars["mt4_exe"].set(str(found))
+        editor = clients.find_metaeditor(str(found))
+        if editor is not None and "metaeditor_exe" in self._vars:
+            self._vars["metaeditor_exe"].set(str(editor))
+        messagebox.showinfo("DETECT", f"Found:\n{found}")
+
 
     def _show(self, key: str) -> None:
         self._page = key
@@ -342,8 +369,22 @@ class App:
             data["trend"] = bool(self.trend_v.get())
             data["breakout"] = bool(self.bo_v.get())
             data["force_idle"] = bool(self.force_v.get())
+            # Prefer a real existing path
+            resolved = clients.find_terminal_exe(str(data.get("mt4_exe") or ""))
+            if resolved is not None:
+                data["mt4_exe"] = str(resolved)
+                self._vars["mt4_exe"].set(str(resolved))
             settings_mod.save(data)
-            messagebox.showinfo("Settings", "Saved.")
+            n = clients.refresh_launch_bats(str(data.get("mt4_exe") or ""))
+            messagebox.showinfo(
+                "Settings",
+                f"Saved.\nLaunch scripts updated: {n}\n\n"
+                + (
+                    f"MT4: {data.get('mt4_exe')}"
+                    if data.get("mt4_exe")
+                    else "WARNING: terminal.exe still empty - use DETECT or …"
+                ),
+            )
             self.refresh()
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Settings", str(exc))
