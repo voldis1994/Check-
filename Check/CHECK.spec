@@ -20,7 +20,6 @@ a = Analysis(
         "app.strategy",
         "app.settings",
         "app.clients",
-        "app.atr",
         "app.paths",
     ],
     hookspath=[],

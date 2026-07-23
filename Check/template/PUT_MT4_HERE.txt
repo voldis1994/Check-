@@ -1,0 +1,15 @@
+Put your ORIGINAL MetaTrader 4 folder in this directory.
+
+Example:
+  Check\template\MetaTrader 4\terminal.exe
+  Check\template\MetaTrader 4\metaeditor.exe
+  Check\template\MetaTrader 4\MQL4\...
+
+Then run:
+  Check\SETUP.bat
+
+SETUP will:
+  - copy this MT4 into instances\_master
+  - install CHECK.mq4
+  - clone a private MT4 per account when you add one
+  - open the CHECK desk EXE

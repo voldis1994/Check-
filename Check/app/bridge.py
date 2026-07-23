@@ -1,4 +1,4 @@
-"""File bridge IO — CHECK Platform v4 protocol."""
+"""File bridge IO — CHECK v5."""
 
 from __future__ import annotations
 

@@ -1,0 +1,8 @@
+{
+  "magic": 50001,
+  "cycle_sec": 3.0,
+  "trend": true,
+  "breakout": true,
+  "symbol": "AUTO",
+  "max_bars": 300
+}
