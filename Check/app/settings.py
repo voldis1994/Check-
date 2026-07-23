@@ -1,4 +1,4 @@
-"""Global settings — no SL/BE/trail (those are per-account)."""
+"""Global settings — strategies + portfolio hard caps (no %)."""
 
 from __future__ import annotations
 
@@ -7,15 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from app import paths
+from app.risk import GLOBAL_RISK_DEFAULTS
 
-DEFAULTS: dict[str, Any] = {
-    "magic": 50001,
-    "cycle_sec": 3.0,
-    "trend": True,
-    "breakout": True,
-    "symbol": "AUTO",
-    "max_bars": 300,
-}
+DEFAULTS: dict[str, Any] = dict(GLOBAL_RISK_DEFAULTS)
 
 
 def _defaults_path() -> Path:
@@ -41,9 +35,8 @@ def load() -> dict[str, Any]:
     out = dict(DEFAULTS)
     out.update(_load_json(_defaults_path()))
     out.update(_load_json(_settings_path()))
-    # strip any legacy ATR keys if present
     for k in list(out):
-        if "atr" in k.lower():
+        if "atr" in k.lower() or "percent" in k.lower() or k.endswith("_pct"):
             out.pop(k, None)
     return out
 
@@ -55,7 +48,7 @@ def save(data: dict[str, Any]) -> Path:
     payload.update(_load_json(_defaults_path()))
     payload.update(data)
     for k in list(payload):
-        if "atr" in k.lower():
+        if "atr" in k.lower() or "percent" in k.lower() or k.endswith("_pct"):
             payload.pop(k, None)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return path

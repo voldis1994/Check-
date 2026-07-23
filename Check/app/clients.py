@@ -13,16 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from app import paths
+from app.risk import ACCOUNT_RISK_DEFAULTS, merge_account_risk
 
-# Default points — user edits per account in UI
-ACCOUNT_DEFAULTS = {
-    "lot": 0.02,
-    "sl_points": 150,
-    "be_start_points": 50,
-    "be_offset_points": 5,
-    "trail_start_points": 80,
-    "trail_lock_points": 40,
-}
+ACCOUNT_DEFAULTS = dict(ACCOUNT_RISK_DEFAULTS)
 
 
 def _now() -> str:
@@ -100,7 +93,9 @@ def read(cid: str) -> dict[str, Any] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    return merge_account_risk(data)
 
 
 def write_client(cid: str, data: dict[str, Any]) -> None:
@@ -155,12 +150,7 @@ def add(
     password: str,
     server: str,
     label: str = "",
-    lot: float = 0.02,
-    sl_points: float = 150,
-    be_start_points: float = 50,
-    be_offset_points: float = 5,
-    trail_start_points: float = 80,
-    trail_lock_points: float = 40,
+    **risk_fields: Any,
 ) -> dict[str, Any]:
     paths.ensure_layout()
     login = login.strip()
@@ -179,23 +169,24 @@ def add(
     bridge = _seed_bridge(mt4_dir)
     terminal = mt4_dir / "terminal.exe"
 
-    client = {
-        "id": cid,
-        "label": (label or login).strip(),
-        "login": login,
-        "password": password,
-        "server": server,
-        "lot": float(lot),
-        "sl_points": float(sl_points),
-        "be_start_points": float(be_start_points),
-        "be_offset_points": float(be_offset_points),
-        "trail_start_points": float(trail_start_points),
-        "trail_lock_points": float(trail_lock_points),
-        "mt4_dir": str(mt4_dir),
-        "mt4_exe": str(terminal),
-        "bridge": str(bridge),
-        "created_at": _now(),
-    }
+    client = merge_account_risk(None)
+    client.update(
+        {
+            "id": cid,
+            "label": (label or login).strip(),
+            "login": login,
+            "password": password,
+            "server": server,
+            "mt4_dir": str(mt4_dir),
+            "mt4_exe": str(terminal),
+            "bridge": str(bridge),
+            "created_at": _now(),
+            "consecutive_losses": 0,
+        }
+    )
+    for k, v in risk_fields.items():
+        if k in ACCOUNT_RISK_DEFAULTS:
+            client[k] = v
     write_client(cid, client)
     (client_path(cid) / "SETUP.txt").write_text(
         "CHECK account ready\n"
@@ -203,8 +194,8 @@ def add(
         "2. Attach CHECK on M1 (BridgePath empty)\n"
         "3. AutoTrading ON\n"
         "4. START LIVE\n"
-        f"\nSL/BE/TRAIL points are set on this account only.\n"
-        f"sl={sl_points} be_start={be_start_points} trail_start={trail_start_points}\n",
+        f"\nHard-number risk for this account only.\n"
+        f"sl_points={client.get('sl_points')} lot={client.get('lot')}\n",
         encoding="utf-8",
     )
 
@@ -219,22 +210,15 @@ def update_risk(cid: str, **fields: Any) -> dict[str, Any]:
     client = read(cid)
     if not client:
         raise ValueError("unknown client")
-    allowed = {
-        "lot",
-        "sl_points",
-        "be_start_points",
-        "be_offset_points",
-        "trail_start_points",
-        "trail_lock_points",
-        "label",
-        "password",
-        "server",
-    }
+    # read() merges defaults; reload raw then merge after edit
+    raw_path = client_path(cid) / "client.json"
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    allowed = set(ACCOUNT_RISK_DEFAULTS) | {"label", "password", "server", "consecutive_losses"}
     for k, v in fields.items():
         if k in allowed:
-            client[k] = v
-    write_client(cid, client)
-    return client
+            raw[k] = v
+    write_client(cid, raw)
+    return read(cid) or merge_account_risk(raw)
 
 
 def delete(cid: str) -> None:

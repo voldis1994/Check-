@@ -1,9 +1,11 @@
-"""M1 trend + breakout. SL distance = points from account (no ATR)."""
+"""M1 trend + breakout. SL = hard points. BE/trail respect On/Off toggles."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
+from app.risk import as_bool, as_float, merge_account_risk
 
 
 @dataclass
@@ -43,15 +45,15 @@ def evaluate(market: dict[str, Any], account: dict[str, Any], global_cfg: dict[s
     if point <= 0:
         point = 0.00001
 
-    sl_pts = float(account.get("sl_points") or 0)
+    acc = merge_account_risk(account)
+    sl_pts = as_float(acc.get("sl_points"), 0)
     if sl_pts <= 0:
-        return None  # user must set SL points per account
+        return None
     stop_d = points_to_price(sl_pts, point)
 
     last = bars[-1]
     prev = bars[-2]
 
-    # rough box width proxy in points for breakout filter
     if global_cfg.get("breakout", True):
         look = bars[-21:-1]
         if len(look) >= 15:
@@ -93,20 +95,26 @@ def manage_sl(
     point: float,
     account: dict[str, Any],
 ) -> float | None:
-    """BE + trail using per-account POINTS (not ATR)."""
+    """BE + trail hard POINTS; skipped when toggle Off."""
     if point <= 0:
         return None
-    be_start = points_to_price(float(account.get("be_start_points") or 0), point)
-    be_off = points_to_price(float(account.get("be_offset_points") or 0), point)
-    trail_start = points_to_price(float(account.get("trail_start_points") or 0), point)
-    trail_lock = points_to_price(float(account.get("trail_lock_points") or 0), point)
+    acc = merge_account_risk(account)
+    be_on = as_bool(acc.get("be_enabled"), True)
+    trail_on = as_bool(acc.get("trail_enabled"), True)
+    if not be_on and not trail_on:
+        return None
+
+    be_start = points_to_price(as_float(acc.get("be_start_points"), 0), point) if be_on else 0.0
+    be_off = points_to_price(as_float(acc.get("be_offset_points"), 0), point) if be_on else 0.0
+    trail_start = points_to_price(as_float(acc.get("trail_start_points"), 0), point) if trail_on else 0.0
+    trail_lock = points_to_price(as_float(acc.get("trail_lock_points"), 0), point) if trail_on else 0.0
 
     if side == "BUY":
         profit = price - entry
         candidate = current_sl
-        if be_start > 0 and profit >= be_start:
+        if be_on and be_start > 0 and profit >= be_start:
             candidate = max(candidate, entry + be_off)
-        if trail_start > 0 and trail_lock > 0 and profit >= trail_start:
+        if trail_on and trail_start > 0 and trail_lock > 0 and profit >= trail_start:
             candidate = max(candidate, price - trail_lock)
         if candidate > current_sl + point * 0.1:
             return candidate
@@ -114,11 +122,11 @@ def manage_sl(
 
     profit = entry - price
     if current_sl <= 0:
-        current_sl = entry + points_to_price(float(account.get("sl_points") or 100), point)
+        current_sl = entry + points_to_price(as_float(acc.get("sl_points"), 100), point)
     candidate = current_sl
-    if be_start > 0 and profit >= be_start:
+    if be_on and be_start > 0 and profit >= be_start:
         candidate = min(candidate, entry - be_off)
-    if trail_start > 0 and trail_lock > 0 and profit >= trail_start:
+    if trail_on and trail_start > 0 and trail_lock > 0 and profit >= trail_start:
         candidate = min(candidate, price + trail_lock)
     if candidate < current_sl - point * 0.1:
         return candidate
