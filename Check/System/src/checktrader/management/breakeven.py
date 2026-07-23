@@ -1,11 +1,11 @@
-"""Breakeven — ATR profit gate (not RR against a tiny structural stop)."""
+"""Breakeven — digit-aware points/pips trigger (not RR against wrong digit math)."""
 
 from __future__ import annotations
 
 from checktrader.config.models import ManagementConfig
 from checktrader.domain.enums import Decision, OrderAction, ReasonCode, Side
 from checktrader.domain.models import ManagementAction, Position, SymbolSpecs
-from checktrader.management.atr_stops import atr_distance
+from checktrader.management.atr_stops import atr_distance, breakeven_trigger_distance, pip_size
 
 
 def risk_per_unit(position: Position) -> float | None:
@@ -33,13 +33,14 @@ def breakeven_action(
     position: Position, price: float, config: ManagementConfig, specs: SymbolSpecs, atr_value: float | None = None
 ) -> ManagementAction:
     profit = _side_profit(position, price)
-
-    # Prefer ATR trigger so a 100-point SL does not wait forever, and a tight SL
-    # does not snap to BE after 2 points.
-    if atr_value is not None and atr_value > 0 and config.breakeven_trigger_atr > 0:
-        if profit < atr_distance(atr_value, config.breakeven_trigger_atr):
+    need = breakeven_trigger_distance(specs, config, atr_value)
+    if need > 0:
+        if profit < need:
             return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
-        offset = atr_distance(atr_value, config.breakeven_offset_atr)
+        if atr_value is not None and atr_value > 0:
+            offset = atr_distance(atr_value, config.breakeven_offset_atr)
+        else:
+            offset = max(pip_size(specs) * 0.5, specs.point)
     else:
         rr = profit_r(position, price)
         if rr is None or rr < config.breakeven_trigger_rr:

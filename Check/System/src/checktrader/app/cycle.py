@@ -108,8 +108,10 @@ def _apply_broker_specs(context: AppContext, market: MarketSnapshot) -> None:
         specs.max_lot = float(meta["max_lot"])
     if "lot_step" in meta:
         specs.lot_step = float(meta["lot_step"])
-    if specs.point > 0 and specs.pip_size <= 0:
-        specs.pip_size = specs.point * 10
+    if specs.point > 0:
+        from checktrader.management.atr_stops import sync_pip_size
+
+        sync_pip_size(specs)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -309,11 +311,31 @@ def run_cycle(
     managed_decision: Decision | None = None
     mgmt_atr = _management_atr(regime, market)
     audit.metrics["mgmt_atr"] = mgmt_atr
-    if mgmt_atr is not None and context.specs.point > 0:
+    from checktrader.management.atr_stops import (
+        distance_pips,
+        distance_points,
+        stop_target_distance,
+        trail_lock_distance,
+        trail_start_distance,
+        uses_pip_quotation,
+    )
+
+    if context.specs.point > 0:
         mcfg = context.config.management
-        audit.metrics["trail_lock_points"] = (mgmt_atr * mcfg.trailing_lock_atr) / context.specs.point
-        audit.metrics["trail_start_points"] = (mgmt_atr * mcfg.trailing_start_atr) / context.specs.point
-        audit.metrics["stop_target_points"] = (mgmt_atr * context.config.strategies.force_stop_atr) / context.specs.point
+        scfg = context.config.strategies
+        stop_d = stop_target_distance(context.specs, scfg, mgmt_atr)
+        lock_d = trail_lock_distance(context.specs, mcfg, mgmt_atr)
+        start_d = trail_start_distance(context.specs, mcfg, mgmt_atr)
+        audit.metrics["quote_mode"] = "pips" if uses_pip_quotation(context.specs) else "points"
+        audit.metrics["digits"] = context.specs.digits
+        audit.metrics["point"] = context.specs.point
+        audit.metrics["pip_size"] = context.specs.pip_size
+        audit.metrics["stop_target_points"] = distance_points(stop_d, context.specs.point)
+        audit.metrics["stop_target_pips"] = distance_pips(stop_d, context.specs)
+        audit.metrics["trail_lock_points"] = distance_points(lock_d, context.specs.point)
+        audit.metrics["trail_lock_pips"] = distance_pips(lock_d, context.specs)
+        audit.metrics["trail_start_points"] = distance_points(start_d, context.specs.point)
+        audit.metrics["trail_start_pips"] = distance_pips(start_d, context.specs)
     for pos in list(same_symbol_positions):
         action = manage_position(
             pos,

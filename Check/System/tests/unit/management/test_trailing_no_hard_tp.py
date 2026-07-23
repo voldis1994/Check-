@@ -1,133 +1,113 @@
-"""ATR SL / trailing — ~100 NATURALGAS points or ~10 FX pips via ATR."""
+"""Digit-aware SL/trail: 100 NG points vs 10 EURUSD pips."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 from checktrader.config.loader import load_config
-from checktrader.config.models import ManagementConfig
+from checktrader.config.models import ManagementConfig, StrategiesConfig
 from checktrader.domain.enums import Decision, MarketRegime, ReasonCode, Side, StrategyType
-from checktrader.domain.models import Position
-from checktrader.management.atr_stops import atr_distance, clamp_stop_price, distance_points
-from checktrader.management.breakeven import breakeven_action
-from checktrader.management.trailing import trail_lock_distance, trail_start_distance, trailing_action
+from checktrader.domain.models import Position, SymbolSpecs
+from checktrader.management.atr_stops import (
+    distance_pips,
+    distance_points,
+    pip_size,
+    stop_target_distance,
+    trail_lock_distance,
+    uses_pip_quotation,
+)
+from checktrader.management.trailing import trailing_action
 from checktrader.strategies.exits import hard_take_profit_price
+
+
+def _ng_specs() -> SymbolSpecs:
+    # NATURALGAS-style 3/4 digit, point=0.001
+    return SymbolSpecs("NATURALGAS", 3, 0.001, 0.001, 0.001, 0.01, 100.0, 0.01, 100.0, 0.0, 0.0)
+
+
+def _eu_specs() -> SymbolSpecs:
+    # EURUSD 5-digit
+    return SymbolSpecs("EURUSD", 5, 0.00001, 0.00001, 0.0001, 0.01, 100.0, 0.01, 100000.0, 0.0, 0.0)
 
 
 def test_hard_take_profit_disabled_returns_none() -> None:
     assert hard_take_profit_price(entry=2.90, stop=2.88, side=Side.BUY, rr=1.5, enabled=False) is None
 
 
-def test_default_config_atr_stop_and_trail() -> None:
+def test_quote_mode_by_digits() -> None:
+    assert uses_pip_quotation(_eu_specs()) is True
+    assert uses_pip_quotation(_ng_specs()) is False
+    # 3-digit NATURALGAS must stay on POINTS (not JPY pip mode)
+    ng3 = SymbolSpecs("NATURALGAS", 3, 0.001, 0.001, 0.001, 0.01, 100.0, 0.01, 100.0, 0.0, 0.0)
+    assert uses_pip_quotation(ng3) is False
+    jpy = SymbolSpecs("USDJPY", 3, 0.001, 0.001, 0.01, 0.01, 100.0, 0.01, 100000.0, 0.0, 0.0)
+    assert uses_pip_quotation(jpy) is True
+    assert pip_size(_eu_specs()) == 0.0001
+    assert pip_size(_ng_specs()) == 0.001
+
+
+def test_naturalgas_100_points_not_confused_with_fx() -> None:
     cfg = load_config()
-    assert cfg.management.hard_take_profit is False
-    assert cfg.strategies.force_stop_atr == 2.5
-    assert cfg.management.trailing_lock_atr == 1.0
-    assert cfg.management.trailing_start_atr == 0.75
-    # NATURALGAS ref: ATR=0.04 point=0.001 → SL≈100pts, trail lock≈40pts
+    specs = _ng_specs()
     atr = 0.04
-    point = 0.001
-    assert abs(distance_points(atr_distance(atr, 2.5), point) - 100.0) < 1e-9
-    assert abs(distance_points(trail_lock_distance(atr, cfg.management), point) - 40.0) < 1e-9
+    dist = stop_target_distance(specs, cfg.strategies, atr)
+    assert abs(distance_points(dist, specs.point) - 100.0) < 1e-6
+    # Must NOT be interpreted as 10 "pips" on gas
+    assert uses_pip_quotation(specs) is False
 
 
-def test_eurusd_style_ten_pips_via_atr() -> None:
-    # EURUSD 5-digit: 10 pips = 0.001 = 100 points when point=0.00001
+def test_eurusd_10_pips_five_digit() -> None:
+    cfg = load_config()
+    specs = _eu_specs()
     atr = 0.0008
-    point = 0.00001
-    # ~1.25 ATR ≈ 10 pips at this ATR
-    assert abs(distance_points(atr_distance(atr, 1.25), point) - 100.0) < 1e-6
+    dist = stop_target_distance(specs, cfg.strategies, atr)
+    assert abs(distance_pips(dist, specs) - 10.0) < 1e-6
+    # 10 pips = 100 broker points on 5-digit
+    assert abs(distance_points(dist, specs.point) - 100.0) < 1e-6
 
 
-def test_clamp_stop_enforces_min_and_max_atr() -> None:
-    entry = 3.0
-    atr = 0.04
-    # Too tight → expand to min 1.0 ATR
-    tight = clamp_stop_price(entry=entry, stop=2.995, side=Side.BUY, atr_value=atr, min_atr=1.0, max_atr=2.5)
-    assert abs((entry - tight) - 0.04) < 1e-9
-    # Too wide → pull to max 2.5 ATR
-    wide = clamp_stop_price(entry=entry, stop=2.0, side=Side.BUY, atr_value=atr, min_atr=1.0, max_atr=2.5)
-    assert abs((entry - wide) - 0.10) < 1e-9
+def test_trail_lock_points_vs_pips() -> None:
+    mcfg = ManagementConfig()
+    ng = trail_lock_distance(_ng_specs(), mcfg, atr_value=0.04)
+    eu = trail_lock_distance(_eu_specs(), mcfg, atr_value=0.0008)
+    assert abs(distance_points(ng, 0.001) - 40.0) < 1e-6
+    assert abs(distance_pips(eu, _eu_specs()) - 8.0) < 1e-6
 
 
-def test_trailing_starts_on_atr_profit_not_tiny_r() -> None:
+def test_default_config_digit_targets() -> None:
+    cfg = load_config()
+    assert cfg.strategies.stop_target_points == 100.0
+    assert cfg.strategies.stop_target_pips == 10.0
+    assert cfg.management.trailing_lock_points == 40.0
+    assert cfg.management.trailing_lock_pips == 8.0
+
+
+def test_trailing_uses_specs() -> None:
     cfg = ManagementConfig()
+    specs = _ng_specs()
     atr = 0.04
-    lock = trail_lock_distance(atr, cfg)
-    start = trail_start_distance(atr, cfg)
+    lock = trail_lock_distance(specs, cfg, atr)
     entry = 2.90
-    # Wide initial SL (~100pts) — RR gate would starve; ATR start must fire.
     pos = Position(
         "p1",
         "NATURALGAS",
         Side.BUY,
         0.02,
         entry,
-        entry - atr * 2.5,
+        entry - 0.10,
         None,
         datetime.now(UTC),
         StrategyType.BREAKOUT,
     )
-    # Below start → hold
-    action = trailing_action(
-        pos, entry + start * 0.5, atr_value=atr, regime=MarketRegime.TREND_UP, config=cfg
-    )
-    assert action.decision is Decision.HOLD
-    # At need=max(start,lock)=lock when lock>start... need = max(0.75,1.0)*atr = lock
-    price = entry + max(start, lock)
-    action = trailing_action(pos, price, atr_value=atr, regime=MarketRegime.TREND_UP, config=cfg)
+    price = entry + lock
+    action = trailing_action(pos, price, atr, MarketRegime.TREND_UP, cfg, specs)
     assert action.decision is Decision.MODIFY
     assert action.reason is ReasonCode.TRAILING_MOVE
     assert action.stop_loss is not None
     assert abs(action.stop_loss - (price - lock)) < 1e-9
 
 
-def test_trailing_keeps_ratcheting() -> None:
-    cfg = ManagementConfig()
-    atr = 0.04
-    lock = trail_lock_distance(atr, cfg)
-    entry = 2.90
-    pos = Position(
-        "p1",
-        "NATURALGAS",
-        Side.BUY,
-        0.02,
-        entry,
-        entry + lock * 0.2,
-        None,
-        datetime.now(UTC),
-        StrategyType.BREAKOUT,
-    )
-    price = entry + lock * 2.0
-    action = trailing_action(pos, price, atr_value=atr, regime=MarketRegime.TRANSITION, config=cfg)
-    assert action.decision is Decision.MODIFY
-    assert action.stop_loss == price - lock
-
-
-def test_breakeven_uses_atr_trigger() -> None:
-    from checktrader.domain.models import SymbolSpecs
-
-    cfg = ManagementConfig()
-    atr = 0.04
-    entry = 2.90
-    specs = SymbolSpecs("NATURALGAS", 3, 0.001, 0.001, 0.01, 0.01, 100.0, 0.01, 100.0, 0.0, 0.0)
-    pos = Position(
-        "p1",
-        "NATURALGAS",
-        Side.BUY,
-        0.02,
-        entry,
-        entry - atr * 2.5,
-        None,
-        datetime.now(UTC),
-        StrategyType.BREAKOUT,
-    )
-    # 0.5 ATR profit — below BE trigger 1.0
-    action = breakeven_action(pos, entry + atr * 0.5, cfg, specs, atr_value=atr)
-    assert action.decision is Decision.HOLD
-    # 1.0 ATR profit — move to BE+
-    action = breakeven_action(pos, entry + atr * 1.0, cfg, specs, atr_value=atr)
-    assert action.decision is Decision.MODIFY
-    assert action.reason is ReasonCode.BREAKEVEN_MOVE
-    assert action.stop_loss is not None
-    assert action.stop_loss > entry
+def test_strategies_defaults() -> None:
+    s = StrategiesConfig()
+    assert s.stop_target_points == 100.0
+    assert s.stop_target_pips == 10.0

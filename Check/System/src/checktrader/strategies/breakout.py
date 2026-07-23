@@ -200,6 +200,8 @@ class BreakoutStrategy:
                 atr_value=a,
                 min_atr=min_atr,
                 max_atr=max_atr,
+                specs=context.specs,
+                strategies=context.config.strategies,
             )
             tp = hard_take_profit_price(
                 entry=entry,
@@ -255,6 +257,8 @@ class BreakoutStrategy:
                 atr_value=a,
                 min_atr=min_atr,
                 max_atr=max_atr,
+                specs=context.specs,
+                strategies=context.config.strategies,
             )
             tp = hard_take_profit_price(
                 entry=entry,
@@ -343,7 +347,14 @@ class BreakoutStrategy:
             raw_stop = last.low - cfg.stop_buffer_atr * a
             min_atr, max_atr = _stop_bounds(context)
             stop = clamp_stop_price(
-                entry=entry, stop=raw_stop, side=Side.BUY, atr_value=a, min_atr=min_atr, max_atr=max_atr
+                entry=entry,
+                stop=raw_stop,
+                side=Side.BUY,
+                atr_value=a,
+                min_atr=min_atr,
+                max_atr=max_atr,
+                specs=context.specs,
+                strategies=context.config.strategies,
             )
             risk = entry - stop
             if risk <= 0:
@@ -381,7 +392,14 @@ class BreakoutStrategy:
             raw_stop = last.high + cfg.stop_buffer_atr * a
             min_atr, max_atr = _stop_bounds(context)
             stop = clamp_stop_price(
-                entry=entry, stop=raw_stop, side=Side.SELL, atr_value=a, min_atr=min_atr, max_atr=max_atr
+                entry=entry,
+                stop=raw_stop,
+                side=Side.SELL,
+                atr_value=a,
+                min_atr=min_atr,
+                max_atr=max_atr,
+                specs=context.specs,
+                strategies=context.config.strategies,
             )
             risk = stop - entry
             if risk <= 0:

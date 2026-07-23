@@ -344,6 +344,18 @@
           "title": "Breakeven Offset Points",
           "type": "number"
         },
+        "breakeven_trigger_points": {
+          "default": 50.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Breakeven Trigger Points",
+          "type": "number"
+        },
+        "breakeven_trigger_pips": {
+          "default": 8.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Breakeven Trigger Pips",
+          "type": "number"
+        },
         "trailing_start_rr": {
           "default": 0.01,
           "exclusiveMinimum": 0.0,
@@ -360,6 +372,42 @@
           "default": 1.0,
           "exclusiveMinimum": 0.0,
           "title": "Trailing Lock Atr",
+          "type": "number"
+        },
+        "trailing_lock_points": {
+          "default": 40.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Trailing Lock Points",
+          "type": "number"
+        },
+        "trailing_lock_pips": {
+          "default": 8.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Trailing Lock Pips",
+          "type": "number"
+        },
+        "trailing_start_points": {
+          "default": 30.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Trailing Start Points",
+          "type": "number"
+        },
+        "trailing_start_pips": {
+          "default": 6.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Trailing Start Pips",
+          "type": "number"
+        },
+        "trail_min_atr": {
+          "default": 0.25,
+          "minimum": 0.0,
+          "title": "Trail Min Atr",
+          "type": "number"
+        },
+        "trail_max_atr": {
+          "default": 2.5,
+          "exclusiveMinimum": 0.0,
+          "title": "Trail Max Atr",
           "type": "number"
         },
         "trend_trailing_atr_multiplier": {
@@ -801,7 +849,7 @@
           "type": "number"
         },
         "max_stop_atr": {
-          "default": 3.5,
+          "default": 4.0,
           "exclusiveMinimum": 0.0,
           "title": "Max Stop Atr",
           "type": "number"
@@ -905,14 +953,26 @@
           "title": "Force Entry When Idle",
           "type": "boolean"
         },
+        "stop_target_points": {
+          "default": 100.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Stop Target Points",
+          "type": "number"
+        },
+        "stop_target_pips": {
+          "default": 10.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Stop Target Pips",
+          "type": "number"
+        },
         "force_stop_atr": {
-          "default": 2.5,
+          "default": 3.5,
           "exclusiveMinimum": 0.0,
           "title": "Force Stop Atr",
           "type": "number"
         },
         "min_stop_atr": {
-          "default": 1.0,
+          "default": 0.5,
           "exclusiveMinimum": 0.0,
           "title": "Min Stop Atr",
           "type": "number"

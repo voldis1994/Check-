@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from checktrader.domain.enums import Decision, MarketRegime, ReasonCode, SetupState, Side, StrategyType
 from checktrader.domain.models import StrategyResult, StrategySignal
+from checktrader.management.atr_stops import stop_target_distance
 from checktrader.market_data.bars import closed_bars
 from checktrader.market_data.indicators import atr
 from checktrader.strategies.base import StrategyContext
@@ -102,7 +103,7 @@ def _force_m1_entry(context: StrategyContext) -> StrategyResult | None:
         bullish = last.close >= prev.close
         bearish = not bullish
 
-    stop_dist = scfg.force_stop_atr * a
+    stop_dist = stop_target_distance(context.specs, scfg, a)
     if bullish:
         entry = context.market.ask
         stop = entry - stop_dist

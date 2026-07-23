@@ -29,7 +29,7 @@ def manage_position(
             return a
     for a in (
         # Trailing first — once in profit it must keep ratcheting (BE used to starve it).
-        trailing_action(position, price, atr_value, regime.regime, config.management),
+        trailing_action(position, price, atr_value, regime.regime, config.management, specs),
         breakeven_action(position, price, config.management, specs, atr_value=atr_value),
     ):
         if a.decision == Decision.MODIFY:
