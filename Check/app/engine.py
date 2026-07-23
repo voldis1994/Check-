@@ -1,4 +1,4 @@
-"""CHECK Platform v4 — live / paper engine."""
+"""CHECK v5 engine — per-account points risk, no ATR."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from app import atr as atr_mod
 from app import bridge, clients, paths, settings as settings_mod
 from app.strategy import evaluate, manage_sl
 
@@ -21,7 +20,7 @@ class Engine:
     _thread: threading.Thread | None = None
     _stop: threading.Event = field(default_factory=threading.Event)
     running: bool = False
-    mode: str = "off"  # live | paper | off
+    mode: str = "off"
     last_reason: str = "—"
     _last_open_at: dict[str, float] = field(default_factory=dict)
     _pending_open: dict[str, str] = field(default_factory=dict)
@@ -38,8 +37,7 @@ class Engine:
             self.on_log(line)
         try:
             paths.ensure_layout()
-            path = self._audit_path()
-            with path.open("a", encoding="utf-8") as fh:
+            with self._audit_path().open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"ts": datetime.now(UTC).isoformat(), "msg": msg, "mode": self.mode}) + "\n")
         except OSError:
             pass
@@ -69,7 +67,7 @@ class Engine:
             if self._stop_path().exists():
                 self.running = False
                 self.mode = "off"
-                self.log("STOP file — halt")
+                self.log("STOP file")
                 break
             try:
                 self._cycle()
@@ -90,6 +88,18 @@ class Engine:
     def _key(self, b: Path) -> str:
         return str(b.resolve())
 
+    def _resolve_account(self, b: Path, market: dict, status: dict | None) -> dict[str, Any]:
+        acc = clients.account_for_bridge(b)
+        if acc:
+            return acc
+        login = str((status or {}).get("account") or market.get("account") or "")
+        if login:
+            by_login = clients.account_by_login(login)
+            if by_login:
+                return by_login
+        # fallback empty risk blocks opens (sl_points 0)
+        return dict(clients.ACCOUNT_DEFAULTS)
+
     def _cycle_bridge(self, b: Path, cfg: dict[str, Any]) -> None:
         key = self._key(b)
         market = bridge.load_market(b)
@@ -107,38 +117,31 @@ class Engine:
         if want not in {"", "AUTO"} and symbol and symbol.upper() != want.upper():
             return
 
-        account = str((status or {}).get("account") or market.get("account") or "")
+        account = self._resolve_account(b, market, status)
         positions = (status or {}).get("positions") or []
-        lot = clients.lot_for_account(account, float(cfg.get("lot") or 0.02))
+        lot = float(account.get("lot") or 0.02)
+        point = float(market.get("point") or 0.00001)
+        digits = int(market.get("digits") or 5)
 
-        bars = market.get("bars_m1") or []
-        raw = atr_mod.atr(bars, 14) if bars else None
-        mid = float(market.get("bid") or 0) or 1.0
-        a = atr_mod.sanitize(raw, mid) if raw else None
-
-        # Resolve pending open ack
         pending_id = self._pending_open.get(key)
         if pending_id:
             ack = bridge.latest_ack(b, pending_id)
             if ack is not None:
-                ok = bool(ack.get("ok"))
-                self.log(f"ACK {pending_id} ok={ok} ticket={ack.get('ticket')}")
+                self.log(f"ACK {pending_id} ok={ack.get('ok')} ticket={ack.get('ticket')}")
                 self._pending_open.pop(key, None)
             elif time.time() - self._last_open_at.get(key, 0) > 30:
                 self._pending_open.pop(key, None)
 
-        # Manage open positions
         for pos in positions:
-            if not isinstance(pos, dict) or a is None:
+            if not isinstance(pos, dict):
                 continue
             side = str(pos.get("side") or "")
             entry = float(pos.get("open") or 0)
             price = float(pos.get("price") or market.get("bid") or entry)
             sl = float(pos.get("sl") or 0)
-            new_sl = manage_sl(side, entry, price, sl, a, cfg)
+            new_sl = manage_sl(side, entry, price, sl, point, account)
             if new_sl is None:
                 continue
-            digits = int(market.get("digits") or 5)
             payload = {
                 "action": "MODIFY",
                 "ticket": int(pos.get("ticket") or 0),
@@ -146,10 +149,10 @@ class Engine:
                 "tp": float(pos.get("tp") or 0),
             }
             if self.mode == "paper":
-                self.log(f"PAPER MODIFY {pos.get('ticket')} sl={new_sl:.5f}")
+                self.log(f"PAPER MODIFY {pos.get('ticket')} sl={new_sl:.{digits}f}")
             else:
                 bridge.write_command(b, payload)
-                self.log(f"MODIFY {pos.get('ticket')} sl={new_sl:.5f}")
+                self.log(f"MODIFY {pos.get('ticket')} sl={new_sl:.{digits}f}")
             self.last_reason = "TRAIL_BE"
 
         if positions:
@@ -159,18 +162,18 @@ class Engine:
         if bridge.pending_commands(b) > 0 or key in self._pending_open:
             self.last_reason = "WAIT_CMD"
             return
-
-        # Cooldown after open (avoid double fire)
         if time.time() - self._last_open_at.get(key, 0) < 15:
             self.last_reason = "COOLDOWN"
             return
 
-        sig = evaluate(market, cfg)
+        sig = evaluate(market, account, cfg)
         if sig is None:
-            self.last_reason = "FLAT"
+            if float(account.get("sl_points") or 0) <= 0:
+                self.last_reason = "SET_SL_POINTS"
+            else:
+                self.last_reason = "FLAT"
             return
 
-        digits = int(market.get("digits") or 5)
         payload = {
             "action": "OPEN",
             "symbol": symbol,
@@ -178,17 +181,23 @@ class Engine:
             "lot": lot,
             "sl": round(sig.sl, digits),
             "tp": 0,
-            "magic": int(cfg.get("magic") or 40001),
+            "magic": int(cfg.get("magic") or 50001),
             "reason": sig.reason,
         }
         self._last_open_at[key] = time.time()
         if self.mode == "paper":
             self.last_reason = f"PAPER_{sig.reason}"
-            self.log(f"PAPER OPEN {sig.side} {symbol} lot={lot} sl={sig.sl:.5f} ({sig.reason})")
+            self.log(
+                f"PAPER OPEN {sig.side} {symbol} lot={lot} sl={sig.sl:.{digits}f} "
+                f"sl_pts={account.get('sl_points')} ({sig.reason})"
+            )
             return
 
         cmd_id = bridge.write_command(b, payload)
         self._pending_open[key] = cmd_id
         bridge.clear_old_acks(b)
         self.last_reason = sig.reason
-        self.log(f"OPEN {sig.side} {symbol} lot={lot} sl={sig.sl:.5f} ({sig.reason}) id={cmd_id}")
+        self.log(
+            f"OPEN {sig.side} {symbol} lot={lot} sl={sig.sl:.{digits}f} "
+            f"sl_pts={account.get('sl_points')} ({sig.reason}) id={cmd_id}"
+        )

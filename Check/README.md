@@ -1,28 +1,27 @@
-# CHECK
+# CHECK v5 — from zero
 
-Complete trading platform (v4). Old `Check/System` removed.
+One bat. Your MT4 template. New EXE. No ATR.
 
-## Start (Windows)
-
-```
-Check\Platform\START.bat
-```
-
-Or build one EXE:
+## 1. Put original MT4 here
 
 ```
-Check\Platform\BUILD_EXE.bat
-→ dist\CHECK\CHECK.exe
+Check\template\MetaTrader 4\terminal.exe
 ```
 
-## One flow
+## 2. Run one file
 
-1. **SETTINGS** → set `terminal.exe` path → Save  
-2. **ACCOUNTS** → Add (login / password / server) — DEPLOY runs automatically  
-3. **LAUNCH MT4** → Navigator → **CHECK** onto **M1** → AutoTrading ON  
-   (`BridgePath` = empty)  
-4. FLOOR shows fresh MARKET → **START LIVE**
+```
+Check\SETUP.bat
+```
 
-**PAPER** = signals only, no broker orders.
+That syncs MT4 → installs EA → opens the desk.
 
-Strategies: **trend** + **breakout** only · all on **M1** · SL/BE/trail = ATR × settings.
+## 3. Trade
+
+1. **ACCOUNTS** → add login / password / server  
+2. Set **SL / BE / TRAIL in POINTS for that account only**  
+3. **LAUNCH** → attach **CHECK** on **M1** (`BridgePath` empty) → AutoTrading  
+4. **START LIVE**
+
+Strategies: M1 **trend** + **breakout** only.  
+Stops are **your numbers per account** — not ATR.

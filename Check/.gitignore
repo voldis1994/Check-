@@ -1,4 +1,4 @@
-# CHECK Platform v4
+# CHECK v5
 __pycache__/
 *.py[cod]
 .venv/
@@ -9,7 +9,13 @@ config/settings.json
 clients/*/
 clients/registry.json
 !clients/.gitkeep
+instances/*
+!instances/.gitkeep
 runtime/*
 !runtime/.gitkeep
+template/*
+!template/PUT_MT4_HERE.txt
 .DS_Store
 *.bak
+.pytest_cache/
+.ruff_cache/

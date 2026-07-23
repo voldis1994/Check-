@@ -1,46 +1,36 @@
 //+------------------------------------------------------------------+
-//| CHECK.mq4 — CHECK Platform v4 EA (M1 bridge)                     |
-//| Brand-new file protocol. Attach to M1 chart.                     |
+//| CHECK.mq4 — CHECK v5 (M1 bridge, no ATR)                         |
+//| Attach to M1. BridgePath empty = MQL4/Files/CHECK                |
 //+------------------------------------------------------------------+
-#property copyright "CHECK Platform"
-#property version   "4.00"
+#property copyright "CHECK"
+#property version   "5.00"
 #property strict
 
-extern string BridgePath = "";   // empty = MQL4/Files/CHECK ; or full path to bridge root
-extern int    MagicNumber = 40001;
+extern string BridgePath = "";
+extern int    MagicNumber = 50001;
 extern int    MaxBarsM1   = 300;
 extern int    ExportSec   = 1;
 
 string g_root;
 datetime g_last_export = 0;
 
-//--- paths ----------------------------------------------------------------
 string JoinPath(string a, string b)
 {
    if(StringLen(a) == 0) return(b);
    int n = StringLen(a);
-   string sep = "\\";
    if(StringGetCharacter(a, n - 1) == '\\' || StringGetCharacter(a, n - 1) == '/')
       return(a + b);
-   return(a + sep + b);
+   return(a + "\\" + b);
 }
 
 void EnsureDir(string path)
 {
-   // FILE_COMMON / terminal Files — CreateDirectory works for relative under Files
-   if(StringFind(path, ":") >= 0 || StringFind(path, "\\\\") == 0)
-   {
-      // absolute — best effort
-      CreateDirectory(path);
-      return;
-   }
    CreateDirectory(path);
 }
 
 string BridgeRoot()
 {
-   if(StringLen(BridgePath) > 0)
-      return(BridgePath);
+   if(StringLen(BridgePath) > 0) return(BridgePath);
    return("CHECK");
 }
 
@@ -54,11 +44,7 @@ void BootDirs()
    EnsureDir(JoinPath(g_root, "acks"));
 }
 
-//--- JSON helpers (minimal) ----------------------------------------------
-string JNum(double v, int dig)
-{
-   return(DoubleToStr(v, dig));
-}
+string JNum(double v, int dig) { return(DoubleToStr(v, dig)); }
 
 string JStr(string s)
 {
@@ -68,10 +54,7 @@ string JStr(string s)
    return("\"" + o + "\"");
 }
 
-string IsoNow()
-{
-   return(TimeToStr(TimeCurrent(), TIME_DATE|TIME_SECONDS));
-}
+string IsoNow() { return(TimeToStr(TimeCurrent(), TIME_DATE|TIME_SECONDS)); }
 
 int FileWriteText(string rel, string body)
 {
@@ -136,13 +119,11 @@ double JsonGetNum(string json, string key)
    return(StrToDouble(num));
 }
 
-//--- market export -------------------------------------------------------
 string BuildBarsM1()
 {
    int n = MathMin(MaxBarsM1, Bars);
    if(n < 2) n = Bars;
    string body = "[";
-   // oldest → newest among last n closed+forming; send closed preference i=n-1..1 then 0
    bool first = true;
    for(int i = n - 1; i >= 0; i--)
    {
@@ -157,8 +138,7 @@ string BuildBarsM1()
          + "\"v\":" + JNum(Volume[i], 0)
          + "}";
    }
-   body = body + "]";
-   return(body);
+   return(body + "]");
 }
 
 void ExportMarket()
@@ -205,7 +185,6 @@ void ExportStatus()
          + "}";
    }
    pos = pos + "]";
-
    string path = JoinPath(JoinPath(g_root, "status"), "latest.json");
    string body = "{"
       + "\"ts\":" + JStr(IsoNow()) + ","
@@ -220,7 +199,6 @@ void ExportStatus()
    FileWriteText(path, body);
 }
 
-//--- commands ------------------------------------------------------------
 void Ack(string id, bool ok, int ticket, string err)
 {
    string path = JoinPath(JoinPath(g_root, "acks"), "ack_" + id + ".json");
@@ -244,10 +222,9 @@ bool DoOpen(string json, string id)
    if(magic <= 0) magic = MagicNumber;
    if(StringLen(sym) == 0) sym = Symbol();
    if(lot <= 0) lot = 0.01;
-
    int cmd = (side == "SELL" ? OP_SELL : OP_BUY);
    double price = (cmd == OP_BUY ? Ask : Bid);
-   int ticket = OrderSend(sym, cmd, lot, price, 30, sl, tp, "CHECK", magic, 0, (cmd==OP_BUY?clrLime:clrRed));
+   int ticket = OrderSend(sym, cmd, lot, price, 30, sl, tp, "CHECK", magic, 0, (cmd==OP_BUY?clrDodgerBlue:clrTomato));
    if(ticket < 0)
    {
       Ack(id, false, 0, "OrderSend " + IntegerToString(GetLastError()));
@@ -267,7 +244,7 @@ bool DoModify(string json, string id)
       Ack(id, false, ticket, "select");
       return(false);
    }
-   if(!OrderModify(ticket, OrderOpenPrice(), sl, tp, 0, clrYellow))
+   if(!OrderModify(ticket, OrderOpenPrice(), sl, tp, 0, clrGold))
    {
       Ack(id, false, ticket, "modify " + IntegerToString(GetLastError()));
       return(false);
@@ -297,7 +274,6 @@ bool DoClose(string json, string id)
 void ProcessCommands()
 {
    string dir = JoinPath(g_root, "commands");
-   // MT4 FileFind — relative under Files
    string pattern = JoinPath(dir, "cmd_*.json");
    string name;
    int h = FileFindFirst(pattern, name);
@@ -319,14 +295,13 @@ void ProcessCommands()
    FileFindClose(h);
 }
 
-//--- lifecycle -----------------------------------------------------------
 int OnInit()
 {
    if(Period() != PERIOD_M1)
-      Alert("CHECK EA: attach to M1 chart");
+      Alert("CHECK: attach to M1 chart");
    BootDirs();
    EventSetTimer(MathMax(1, ExportSec));
-   Comment("CHECK v4 | bridge=", g_root);
+   Comment("CHECK v5 | ", g_root);
    return(INIT_SUCCEEDED);
 }
 
@@ -347,7 +322,4 @@ void OnTick()
    }
 }
 
-void OnTimer()
-{
-   OnTick();
-}
+void OnTimer() { OnTick(); }
