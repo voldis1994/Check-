@@ -234,6 +234,13 @@ def test_brain_nodes_and_lot_helpers(tmp_path: Path, monkeypatch) -> None:
     assert by_key["engine"].action == "engine_control"
     assert "Click" in by_key["accounts"].hint
 
+    report = core.build_floor_report(health, audit_path=tmp_path / "runtime" / "audit.jsonl")
+    assert report.bridge_count == 0
+    assert report.equity_total == 0.0
+    assert report.last_reason == "DATA_STALE"
+    assert report.last_decision == "WAIT"
+    assert report.symbol == "NATURALGAS"
+
     rt = tmp_path / "runtime"
     core.write_account_lot_override(rt, "231054", 0.04)
     assert core.read_account_lot_override(rt, "231054") == 0.04

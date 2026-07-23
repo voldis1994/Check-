@@ -726,6 +726,66 @@ def audit_day_stats(path: Path) -> dict[str, Any]:
     }
 
 
+@dataclass(slots=True)
+class FloorReport:
+    """Aggregated floor numbers for the dashboard summary strip + tables."""
+
+    equity_total: float = 0.0
+    balance_total: float = 0.0
+    floating_pl: float = 0.0
+    bridge_count: int = 0
+    connected: int = 0
+    stale: int = 0
+    positions: int = 0
+    commands: int = 0
+    day_opens: int = 0
+    day_closes: int = 0
+    day_modifies: int = 0
+    day_blocks: int = 0
+    day_holds: int = 0
+    last_reason: str = "—"
+    last_decision: str = "—"
+    symbol: str = "—"
+    mode: str = "—"
+    trading_enabled: bool = False
+    stop_present: bool = False
+
+
+def build_floor_report(
+    health: HealthSnapshot,
+    *,
+    audit_path: Path | None = None,
+) -> FloorReport:
+    bridges = health.bridges
+    floating = sum(b.floating_pl for b in bridges)
+    if floating == 0.0:
+        floating = sum(sum(p.profit for p in b.positions) for b in bridges)
+    stale = sum(1 for b in bridges if b.market_age_s is None or b.market_age_s > 30)
+    day = audit_day_stats(audit_path) if audit_path is not None else {}
+    audit = health.last_audit or {}
+    return FloorReport(
+        equity_total=sum(b.equity for b in bridges),
+        balance_total=sum(b.balance for b in bridges),
+        floating_pl=floating,
+        bridge_count=len(bridges),
+        connected=sum(1 for b in bridges if b.connected),
+        stale=stale,
+        positions=sum(len(b.positions) for b in bridges),
+        commands=sum(b.commands for b in bridges),
+        day_opens=int(day.get("opens") or 0),
+        day_closes=int(day.get("closes") or 0),
+        day_modifies=int(day.get("modifies") or 0),
+        day_blocks=int(day.get("blocks") or 0),
+        day_holds=int(day.get("holds") or 0),
+        last_reason=str(audit.get("reason_code") or "—"),
+        last_decision=str(audit.get("decision") or "—"),
+        symbol=str(health.symbol or "—"),
+        mode=str(health.mode or "—"),
+        trading_enabled=bool(health.trading_enabled),
+        stop_present=bool(health.stop_present),
+    )
+
+
 def read_last_audit(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None

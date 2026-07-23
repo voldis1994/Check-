@@ -1,7 +1,7 @@
-"""CHECK LEDGER — multi-account trading floor console (Tkinter).
+"""CHECK COMMAND — professional multi-account trading control desk (Tkinter).
 
-Table-first ops desk: accounts, bridges, positions, audit tape.
-No brain / neural HUD — real rows you can read and edit.
+Dense summary KPIs + always-visible tables (accounts, positions, system, day).
+Entry point for START_DASHBOARD.bat and frozen CHECK_SYSTEM.exe.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from dashboard_core import (  # noqa: E402
     arm_live_runtime,
     audit_activity,
     audit_file,
+    build_floor_report,
     clear_account_lot_override,
     clear_stop,
     collect_health,
@@ -37,8 +38,10 @@ from dashboard_core import (  # noqa: E402
     format_audit_line,
     list_known_accounts,
     load_config_json,
+    load_equity_series,
     lot_bounds,
     read_account_lot_override,
+    record_equity_samples,
     resolve_config,
     run_deploy_mt4,
     runtime_dir,
@@ -53,20 +56,21 @@ try:
 except Exception:  # noqa: BLE001
     sync_system_json = None  # type: ignore[assignment]
 
-# Ledger desk palette — forest ink + brass (not purple / not cream-serif).
+# Command-desk palette: graphite + brass + signal green (not purple / cream).
 C = {
-    "void": "#0A1210",
-    "panel": "#12201C",
-    "panel2": "#183028",
-    "line": "#254038",
-    "ink": "#E8F0EC",
-    "mute": "#7A9188",
+    "bg": "#0C1110",
+    "panel": "#141C1A",
+    "panel2": "#1A2622",
+    "line": "#2A3B34",
+    "ink": "#ECF3EF",
+    "mute": "#80948A",
     "brass": "#D4A84B",
     "signal": "#3DDC97",
-    "sky": "#4DB6C6",
+    "sky": "#5BB8C8",
     "warn": "#E0A045",
     "stop": "#E85D4C",
     "ok": "#5EE0A0",
+    "dim": "#4A5E55",
 }
 
 
@@ -78,57 +82,52 @@ def _font(cands: list[str], size: int, weight: str = "normal") -> tuple:
     return ("TkDefaultFont", size, weight) if weight != "normal" else ("TkDefaultFont", size)
 
 
-class BrandBar:
-    """Full-bleed brand strip with a slow ledger scan line."""
+class EquityChart:
+    """Mini equity polyline — always draws frame + empty state."""
 
     def __init__(self, canvas: tk.Canvas) -> None:
         self.canvas = canvas
-        self.phase = 0.0
-        self._online = False
-        self._mode = "—"
+        self.points: list[float] = []
         canvas.bind("<Configure>", lambda _e: self.draw())
 
-    def set_status(self, *, online: bool, mode: str) -> None:
-        self._online = online
-        self._mode = mode
-
-    def tick(self) -> None:
-        self.phase = (self.phase + 0.045) % 1.0
+    def set_points(self, values: list[float]) -> None:
+        self.points = values[-120:]
         self.draw()
 
     def draw(self) -> None:
         c = self.canvas
         c.delete("all")
-        w = max(c.winfo_width(), 100)
+        w = max(c.winfo_width(), 40)
         h = max(c.winfo_height(), 40)
-        c.create_rectangle(0, 0, w, h, fill=C["void"], outline="")
-        # Blueprint hatch
-        for i in range(0, w + 40, 28):
-            x = (i + self.phase * 28) % (w + 40) - 20
-            c.create_line(x, 0, x + 18, h, fill="#0F1C18", width=1)
-        # Brand
-        c.create_text(22, h * 0.42, text="CHECK", anchor="w", fill=C["brass"], font=_font(["Bahnschrift", "Segoe UI"], 32, "bold"))
-        c.create_text(168, h * 0.48, text="LEDGER", anchor="w", fill=C["ink"], font=_font(["Bahnschrift", "Segoe UI"], 22, "bold"))
-        c.create_text(290, h * 0.52, text="multi-account floor · tables only", anchor="w", fill=C["mute"], font=_font(["Cascadia Mono", "Consolas"], 9))
-        # Status pill text (not a floating badge overlay — part of brand row)
-        st = "ONLINE" if self._online else "OFFLINE"
-        st_c = C["signal"] if self._online else C["stop"]
-        c.create_text(w - 24, h * 0.35, text=st, anchor="e", fill=st_c, font=_font(["Bahnschrift", "Segoe UI"], 14, "bold"))
-        c.create_text(w - 24, h * 0.68, text=f"mode {self._mode}", anchor="e", fill=C["mute"], font=_font(["Cascadia Mono", "Consolas"], 9))
-        # Scan line
-        y = 4 + (h - 8) * self.phase
-        c.create_line(0, y, w, y, fill=C["signal"], width=1)
+        c.create_rectangle(0, 0, w, h, fill=C["panel2"], outline=C["line"])
+        c.create_text(10, 12, text="EQUITY", anchor="w", fill=C["brass"], font=_font(["Bahnschrift", "Segoe UI"], 9, "bold"))
+        if len(self.points) < 2:
+            c.create_text(w // 2, h // 2, text="waiting for samples…", fill=C["mute"], font=_font(["Cascadia Mono", "Consolas"], 9))
+            return
+        lo, hi = min(self.points), max(self.points)
+        span = max(hi - lo, 1e-9)
+        pad_x, pad_y = 8, 22
+        coords: list[float] = []
+        n = len(self.points)
+        for i, v in enumerate(self.points):
+            x = pad_x + (w - 2 * pad_x) * (i / (n - 1))
+            y = h - pad_y - (h - pad_y - 10) * ((v - lo) / span)
+            coords.extend([x, y])
+        c.create_line(*coords, fill=C["signal"], width=2, smooth=True)
+        c.create_text(w - 8, 12, text=f"{self.points[-1]:.2f}", anchor="e", fill=C["ink"], font=_font(["Cascadia Mono", "Consolas"], 9))
 
 
 class DashboardApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("CHECK LEDGER · trading floor")
-        self.root.geometry("1480x900")
-        self.root.minsize(1180, 720)
-        self.root.configure(bg=C["void"])
+        self.root.title("CHECK COMMAND · trading control desk")
+        self.root.geometry("1560x960")
+        self.root.minsize(1280, 800)
+        self.root.configure(bg=C["bg"])
 
-        self.f_h1 = _font(["Bahnschrift", "Segoe UI"], 13, "bold")
+        self.f_brand = _font(["Bahnschrift", "Segoe UI Variable Display", "Arial Black"], 26, "bold")
+        self.f_h1 = _font(["Bahnschrift", "Segoe UI"], 12, "bold")
+        self.f_kpi = _font(["Bahnschrift", "Segoe UI"], 16, "bold")
         self.f_ui = _font(["Bahnschrift", "Segoe UI"], 10)
         self.f_ui_b = _font(["Bahnschrift SemiBold", "Segoe UI"], 10, "bold")
         self.f_mono = _font(["Cascadia Mono", "Consolas", "Courier New"], 9)
@@ -140,6 +139,7 @@ class DashboardApp:
         self._page = "floor"
         self._nav_btns: dict[str, tk.Button] = {}
         self._health = None
+        self._report = None
         self._lot_vars: dict[str, tk.StringVar] = {}
         self._lot_dirty: dict[str, bool] = {}
         self._lot_meta: dict[str, dict] = {}
@@ -148,12 +148,14 @@ class DashboardApp:
         self._started_wall = time.time()
         self._focus_account: str | None = None
         self._pulse = 0.0
+        self.foot_vars: dict[str, tk.StringVar] = {}
+        self.kpi: dict[str, tk.StringVar] = {}
 
         self._style_trees()
         self._build()
         self.refresh()
-        self.root.after(80, self._motion_tick)
-        self.root.after(800, self._tick)
+        self.root.after(70, self._motion_tick)
+        self.root.after(700, self._tick)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _style_trees(self) -> None:
@@ -161,72 +163,24 @@ class DashboardApp:
         with contextlib.suppress(tk.TclError):
             style.theme_use("clam")
         style.configure(
-            "Ledger.Treeview",
+            "Cmd.Treeview",
             background=C["panel2"],
             foreground=C["ink"],
             fieldbackground=C["panel2"],
             borderwidth=0,
-            rowheight=28,
+            rowheight=26,
             font=self.f_mono,
         )
         style.configure(
-            "Ledger.Treeview.Heading",
+            "Cmd.Treeview.Heading",
             background=C["panel"],
             foreground=C["brass"],
             relief="flat",
             font=self.f_ui_b,
         )
-        style.map(
-            "Ledger.Treeview",
-            background=[("selected", C["line"])],
-            foreground=[("selected", C["ink"])],
-        )
+        style.map("Cmd.Treeview", background=[("selected", C["line"])], foreground=[("selected", C["ink"])])
 
-    def _build(self) -> None:
-        shell = tk.Frame(self.root, bg=C["void"])
-        shell.pack(fill=tk.BOTH, expand=True)
-
-        self.brand_canvas = tk.Canvas(shell, height=72, bg=C["void"], highlightthickness=0)
-        self.brand_canvas.pack(fill=tk.X)
-        self.brand = BrandBar(self.brand_canvas)
-
-        self._build_controls(shell)
-
-        # Metric strip — plain labels, not cards
-        metrics = tk.Frame(shell, bg=C["void"])
-        metrics.pack(fill=tk.X, padx=18, pady=(10, 0))
-        self.metric_vars = {
-            "equity": tk.StringVar(value="—"),
-            "bridges": tk.StringVar(value="—"),
-            "positions": tk.StringVar(value="—"),
-            "stop": tk.StringVar(value="—"),
-            "lot": tk.StringVar(value="—"),
-        }
-        for title, key, color in (
-            ("EQUITY", "equity", C["signal"]),
-            ("BRIDGES", "bridges", C["sky"]),
-            ("POSITIONS", "positions", C["brass"]),
-            ("STOP", "stop", C["stop"]),
-            ("DEFAULT LOT", "lot", C["ok"]),
-        ):
-            cell = tk.Frame(metrics, bg=C["void"])
-            cell.pack(side=tk.LEFT, padx=(0, 28))
-            tk.Label(cell, text=title, bg=C["void"], fg=C["mute"], font=self.f_ui).pack(anchor="w")
-            tk.Label(cell, textvariable=self.metric_vars[key], bg=C["void"], fg=color, font=self.f_h1).pack(anchor="w")
-
-        mid = tk.Frame(shell, bg=C["void"])
-        mid.pack(fill=tk.BOTH, expand=True, padx=16, pady=10)
-        self.pages: dict[str, tk.Frame] = {}
-        self.pages["floor"] = self._page_floor(mid)
-        self.pages["accounts"] = self._page_accounts(mid)
-        self.pages["positions"] = self._page_positions(mid)
-        self.pages["tape"] = self._page_tape(mid)
-        self.pages["settings"] = self._page_settings(mid)
-        # Footer before first page show — refresh() needs foot_vars.
-        self._build_footer(shell)
-        self._show_page("floor")
-
-    def _btn(self, parent: tk.Misc, text: str, color: str, command, *, padx: int = 14) -> tk.Button:
+    def _btn(self, parent: tk.Misc, text: str, color: str, command, *, padx: int = 12) -> tk.Button:
         return tk.Button(
             parent,
             text=text,
@@ -241,64 +195,113 @@ class DashboardApp:
             highlightbackground=color,
             font=self.f_ui_b,
             padx=padx,
-            pady=8,
+            pady=7,
             cursor="hand2",
         )
 
-    def _build_controls(self, parent: tk.Misc) -> None:
-        bar = tk.Frame(parent, bg=C["panel"], height=56)
-        bar.pack(fill=tk.X)
-        bar.pack_propagate(False)
-        left = tk.Frame(bar, bg=C["panel"])
-        left.pack(side=tk.LEFT, padx=14, pady=8)
-        for key, label, accent in (
-            ("floor", "FLOOR", C["brass"]),
-            ("accounts", "ACCOUNTS", C["sky"]),
-            ("positions", "POSITIONS", C["signal"]),
-            ("tape", "TAPE", C["warn"]),
-            ("settings", "SETTINGS", C["mute"]),
-        ):
-            btn = self._btn(left, label, accent, lambda k=key: self._show_page(k))
-            btn.pack(side=tk.LEFT, padx=3)
-            self._nav_btns[key] = btn
-        right = tk.Frame(bar, bg=C["panel"])
-        right.pack(side=tk.RIGHT, padx=14, pady=8)
+    def _build(self) -> None:
+        shell = tk.Frame(self.root, bg=C["bg"])
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        # ── Brand + master controls ───────────────────────────────────────
+        top = tk.Frame(shell, bg=C["bg"])
+        top.pack(fill=tk.X, padx=16, pady=(12, 0))
+        left = tk.Frame(top, bg=C["bg"])
+        left.pack(side=tk.LEFT)
+        tk.Label(left, text="CHECK", bg=C["bg"], fg=C["brass"], font=self.f_brand).pack(side=tk.LEFT)
+        tk.Label(left, text=" COMMAND", bg=C["bg"], fg=C["ink"], font=self.f_brand).pack(side=tk.LEFT)
+        self.online_lbl = tk.Label(left, text="  ·  OFFLINE", bg=C["bg"], fg=C["stop"], font=self.f_h1)
+        self.online_lbl.pack(side=tk.LEFT, padx=(8, 0), pady=(8, 0))
+        self.subtitle = tk.Label(
+            left,
+            text="multi-account desk · summary + tables",
+            bg=C["bg"],
+            fg=C["mute"],
+            font=self.f_ui,
+        )
+        self.subtitle.pack(side=tk.LEFT, padx=14, pady=(10, 0))
+
+        right = tk.Frame(top, bg=C["bg"])
+        right.pack(side=tk.RIGHT)
         self._btn(right, "START LIVE", C["signal"], self._start_live).pack(side=tk.LEFT, padx=3)
         self._btn(right, "PAPER", C["sky"], self._start_paper).pack(side=tk.LEFT, padx=3)
         self._btn(right, "STOP", C["stop"], self._confirm_stop).pack(side=tk.LEFT, padx=3)
+        self._btn(right, "DEPLOY", C["brass"], self._deploy).pack(side=tk.LEFT, padx=3)
 
-    def _show_page(self, key: str) -> None:
-        self._page = key
-        for name, frame in self.pages.items():
-            if name == key:
-                frame.pack(fill=tk.BOTH, expand=True)
-            else:
-                frame.pack_forget()
-        for name, btn in self._nav_btns.items():
-            accent = {
-                "floor": C["brass"],
-                "accounts": C["sky"],
-                "positions": C["signal"],
-                "tape": C["warn"],
-                "settings": C["mute"],
-            }.get(name, C["mute"])
-            if name == key:
-                btn.configure(bg=C["line"], fg=C["ink"], highlightbackground=C["ink"])
-            else:
-                btn.configure(bg=C["panel2"], fg=accent, highlightbackground=accent)
-        if key in {"accounts", "floor", "positions"}:
-            self.refresh()
+        # ── Nav ───────────────────────────────────────────────────────────
+        nav = tk.Frame(shell, bg=C["panel"], height=48)
+        nav.pack(fill=tk.X, padx=0, pady=(10, 0))
+        nav.pack_propagate(False)
+        nav_in = tk.Frame(nav, bg=C["panel"])
+        nav_in.pack(side=tk.LEFT, padx=12, pady=6)
+        for key, label, accent in (
+            ("floor", "FLOOR", C["brass"]),
+            ("accounts", "ACCOUNTS", C["sky"]),
+            ("tape", "TAPE", C["warn"]),
+            ("settings", "SETTINGS", C["mute"]),
+        ):
+            btn = self._btn(nav_in, label, accent, lambda k=key: self._show_page(k))
+            btn.pack(side=tk.LEFT, padx=3)
+            self._nav_btns[key] = btn
+        self.hint = tk.Label(nav, text="", bg=C["panel"], fg=C["mute"], font=self.f_mono)
+        self.hint.pack(side=tk.RIGHT, padx=16)
 
-    def _tree(self, parent: tk.Misc, columns: tuple[str, ...], headings: dict[str, str], widths: dict[str, int]) -> ttk.Treeview:
+        # ── KPI summary strip (always visible) ────────────────────────────
+        kpi_wrap = tk.Frame(shell, bg=C["bg"])
+        kpi_wrap.pack(fill=tk.X, padx=14, pady=(10, 0))
+        self.kpi_frame = kpi_wrap
+        for key, title, color in (
+            ("equity", "EQUITY", C["signal"]),
+            ("balance", "BALANCE", C["sky"]),
+            ("float", "FLOAT P/L", C["brass"]),
+            ("pos", "POSITIONS", C["ink"]),
+            ("bridges", "BRIDGES", C["ok"]),
+            ("day", "DAY OPEN/CLOSE", C["warn"]),
+            ("stop", "STOP", C["stop"]),
+            ("lot", "DEFAULT LOT", C["mute"]),
+        ):
+            self.kpi[key] = tk.StringVar(value="—")
+            cell = tk.Frame(kpi_wrap, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
+            cell.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
+            tk.Label(cell, text=title, bg=C["panel"], fg=C["mute"], font=self.f_ui).pack(anchor="w", padx=10, pady=(6, 0))
+            tk.Label(cell, textvariable=self.kpi[key], bg=C["panel"], fg=color, font=self.f_kpi).pack(anchor="w", padx=10, pady=(0, 8))
+
+        # ── Pages ─────────────────────────────────────────────────────────
+        mid = tk.Frame(shell, bg=C["bg"])
+        mid.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        self.pages: dict[str, tk.Frame] = {}
+        self.pages["floor"] = self._page_floor(mid)
+        self.pages["accounts"] = self._page_accounts(mid)
+        self.pages["tape"] = self._page_tape(mid)
+        self.pages["settings"] = self._page_settings(mid)
+
+        self._build_footer(shell)
+        self._show_page("floor")
+
+    def _section(self, parent: tk.Misc, title: str, color: str) -> tk.Frame:
+        box = tk.Frame(parent, bg=C["panel"], highlightthickness=1, highlightbackground=C["line"])
+        head = tk.Frame(box, bg=C["panel"])
+        head.pack(fill=tk.X)
+        tk.Label(head, text=title, bg=C["panel"], fg=color, font=self.f_h1).pack(side=tk.LEFT, padx=10, pady=6)
+        return box
+
+    def _tree(self, parent: tk.Misc, columns: tuple[str, ...], headings: dict[str, str], widths: dict[str, int], *, height: int = 8) -> ttk.Treeview:
         wrap = tk.Frame(parent, bg=C["line"])
-        wrap.pack(fill=tk.BOTH, expand=True)
-        tree = ttk.Treeview(wrap, columns=columns, show="headings", style="Ledger.Treeview", selectmode="browse")
+        wrap.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        tree = ttk.Treeview(
+            wrap,
+            columns=columns,
+            show="headings",
+            style="Cmd.Treeview",
+            selectmode="browse",
+            height=height,
+        )
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         for col in columns:
             tree.heading(col, text=headings[col], anchor="w")
-            tree.column(col, width=widths.get(col, 100), anchor="w", stretch=True)
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1, pady=1)
+            tree.column(col, width=widths.get(col, 90), anchor="w", stretch=True, minwidth=50)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         tree.tag_configure("ok", foreground=C["ok"])
         tree.tag_configure("warn", foreground=C["warn"])
@@ -307,96 +310,83 @@ class DashboardApp:
         return tree
 
     def _page_floor(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=C["void"])
-        tk.Label(frame, text="ACCOUNTS / BRIDGES", bg=C["void"], fg=C["brass"], font=self.f_h1).pack(anchor="w", pady=(0, 6))
+        frame = tk.Frame(parent, bg=C["bg"])
+
+        # Row 1: system + day + equity
+        row1 = tk.Frame(frame, bg=C["bg"])
+        row1.pack(fill=tk.X, pady=(0, 8))
+
+        sys_box = self._section(row1, "SYSTEM STATUS", C["brass"])
+        sys_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
+        self.sys_tree = self._tree(
+            sys_box,
+            ("item", "value"),
+            {"item": "ITEM", "value": "VALUE"},
+            {"item": 140, "value": 220},
+            height=7,
+        )
+
+        day_box = self._section(row1, "TODAY (UTC AUDIT)", C["warn"])
+        day_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+        self.day_tree = self._tree(
+            day_box,
+            ("metric", "count"),
+            {"metric": "METRIC", "count": "COUNT"},
+            {"metric": 140, "count": 80},
+            height=7,
+        )
+
+        eq_box = self._section(row1, "EQUITY CURVE", C["signal"])
+        eq_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
+        self.eq_canvas = tk.Canvas(eq_box, bg=C["panel2"], highlightthickness=0, height=190)
+        self.eq_canvas.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        self.equity_chart = EquityChart(self.eq_canvas)
+
+        # Row 2: accounts table (main)
+        acc_box = self._section(frame, "ACCOUNTS / BRIDGES", C["sky"])
+        acc_box.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
         self.floor_tree = self._tree(
-            frame,
-            ("account", "equity", "balance", "symbol", "market", "status", "conn", "trade", "pos", "lot"),
+            acc_box,
+            ("account", "equity", "balance", "float", "symbol", "bid", "ask", "market", "conn", "trade", "pos", "cmds", "lot"),
             {
                 "account": "ACCOUNT",
                 "equity": "EQUITY",
                 "balance": "BALANCE",
+                "float": "FLOAT",
                 "symbol": "SYMBOL",
+                "bid": "BID",
+                "ask": "ASK",
                 "market": "MARKET",
-                "status": "STATUS",
                 "conn": "CONN",
                 "trade": "TRADE",
                 "pos": "POS",
+                "cmds": "CMDS",
                 "lot": "LOT",
-            },
-            {
-                "account": 90,
-                "equity": 90,
-                "balance": 90,
-                "symbol": 110,
-                "market": 80,
-                "status": 80,
-                "conn": 70,
-                "trade": 70,
-                "pos": 50,
-                "lot": 70,
-            },
-        )
-        self.floor_tree.bind("<<TreeviewSelect>>", self._on_floor_select)
-
-        tk.Label(frame, text="OPEN POSITIONS", bg=C["void"], fg=C["signal"], font=self.f_h1).pack(anchor="w", pady=(14, 6))
-        self.floor_pos_tree = self._tree(
-            frame,
-            ("account", "ticket", "symbol", "side", "lot", "entry", "sl", "tp", "pl"),
-            {
-                "account": "ACCOUNT",
-                "ticket": "TICKET",
-                "symbol": "SYMBOL",
-                "side": "SIDE",
-                "lot": "LOT",
-                "entry": "ENTRY",
-                "sl": "SL",
-                "tp": "TP",
-                "pl": "P/L",
             },
             {
                 "account": 80,
-                "ticket": 90,
+                "equity": 85,
+                "balance": 85,
+                "float": 75,
                 "symbol": 100,
-                "side": 60,
-                "lot": 60,
-                "entry": 100,
-                "sl": 100,
-                "tp": 90,
-                "pl": 90,
+                "bid": 85,
+                "ask": 85,
+                "market": 70,
+                "conn": 55,
+                "trade": 55,
+                "pos": 45,
+                "cmds": 50,
+                "lot": 55,
             },
+            height=8,
         )
-        return frame
+        self.floor_tree.bind("<<TreeviewSelect>>", self._on_floor_select)
 
-    def _page_accounts(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=C["void"])
-        head = tk.Frame(frame, bg=C["void"])
-        head.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(head, text="PER-ACCOUNT LOT", bg=C["void"], fg=C["sky"], font=self.f_h1).pack(side=tk.LEFT)
-        tk.Label(
-            head,
-            text="Edit lot → SAVE. Override writes runtime/accounts/<id>/lot.json",
-            bg=C["void"],
-            fg=C["mute"],
-            font=self.f_ui,
-        ).pack(side=tk.LEFT, padx=12)
-        self.accounts_host = tk.Frame(frame, bg=C["void"])
-        self.accounts_host.pack(fill=tk.BOTH, expand=True)
-        self.accounts_empty = tk.Label(
-            self.accounts_host,
-            text="No accounts yet — start LIVE with MT4 bridges connected.",
-            bg=C["void"],
-            fg=C["mute"],
-            font=self.f_ui,
-        )
-        self.accounts_empty.pack(pady=40)
-        return frame
-
-    def _page_positions(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=C["void"])
-        tk.Label(frame, text="POSITION BOOK", bg=C["void"], fg=C["signal"], font=self.f_h1).pack(anchor="w", pady=(0, 6))
+        # Row 3: positions
+        pos_box = self._section(frame, "OPEN POSITIONS", C["signal"])
+        pos_box.pack(fill=tk.BOTH, expand=True)
         self.pos_tree = self._tree(
-            frame,
+            pos_box,
             ("account", "ticket", "symbol", "side", "lot", "entry", "price", "sl", "tp", "pl"),
             {
                 "account": "ACCOUNT",
@@ -414,42 +404,66 @@ class DashboardApp:
                 "account": 80,
                 "ticket": 90,
                 "symbol": 100,
-                "side": 60,
-                "lot": 60,
-                "entry": 100,
-                "price": 100,
-                "sl": 100,
-                "tp": 90,
-                "pl": 90,
+                "side": 55,
+                "lot": 55,
+                "entry": 95,
+                "price": 95,
+                "sl": 95,
+                "tp": 85,
+                "pl": 80,
             },
+            height=7,
         )
         return frame
 
+    def _page_accounts(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=C["bg"])
+        head = tk.Frame(frame, bg=C["bg"])
+        head.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(head, text="PER-ACCOUNT LOT CONTROL", bg=C["bg"], fg=C["sky"], font=self.f_h1).pack(side=tk.LEFT)
+        tk.Label(
+            head,
+            text="SAVE writes runtime/accounts/<id>/lot.json · engine picks it up each cycle",
+            bg=C["bg"],
+            fg=C["mute"],
+            font=self.f_ui,
+        ).pack(side=tk.LEFT, padx=12)
+        self.accounts_host = tk.Frame(frame, bg=C["bg"])
+        self.accounts_host.pack(fill=tk.BOTH, expand=True)
+        self.accounts_empty = tk.Label(
+            self.accounts_host,
+            text="No accounts yet — connect MT4 bridges, then START LIVE.",
+            bg=C["bg"],
+            fg=C["mute"],
+            font=self.f_ui,
+        )
+        self.accounts_empty.pack(pady=40)
+        return frame
+
     def _page_tape(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=C["void"])
-        split = tk.Frame(frame, bg=C["void"])
+        frame = tk.Frame(parent, bg=C["bg"])
+        split = tk.Frame(frame, bg=C["bg"])
         split.pack(fill=tk.BOTH, expand=True)
-        left = tk.Frame(split, bg=C["void"])
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-        right = tk.Frame(split, bg=C["void"])
-        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(6, 0))
-        tk.Label(left, text="AUDIT TAPE", bg=C["void"], fg=C["warn"], font=self.f_h1).pack(anchor="w", pady=(0, 6))
+        left = self._section(split, "AUDIT TAPE", C["warn"])
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
+        right = self._section(split, "ENGINE LOG", C["sky"])
+        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(4, 0))
         self.tape = tk.Text(left, bg=C["panel2"], fg=C["ink"], relief=tk.FLAT, font=self.f_mono, wrap=tk.NONE)
-        self.tape.pack(fill=tk.BOTH, expand=True)
+        self.tape.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
         self.tape.configure(state=tk.DISABLED)
-        tk.Label(right, text="ENGINE LOG", bg=C["void"], fg=C["sky"], font=self.f_h1).pack(anchor="w", pady=(0, 6))
         self.engine_log = tk.Text(right, bg=C["panel2"], fg=C["mute"], relief=tk.FLAT, font=self.f_mono, wrap=tk.NONE)
-        self.engine_log.pack(fill=tk.BOTH, expand=True)
+        self.engine_log.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
         self.engine_log.configure(state=tk.DISABLED)
         return frame
 
     def _page_settings(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=C["void"])
-        tk.Label(frame, text="SETTINGS", bg=C["void"], fg=C["brass"], font=self.f_h1).pack(anchor="w", pady=(0, 10))
-        self.settings_info = tk.Label(frame, text="", bg=C["void"], fg=C["ink"], font=self.f_mono, justify=tk.LEFT)
-        self.settings_info.pack(anchor="w")
-        row = tk.Frame(frame, bg=C["void"])
-        row.pack(anchor="w", pady=16)
+        frame = tk.Frame(parent, bg=C["bg"])
+        box = self._section(frame, "RUNTIME / CONFIG", C["brass"])
+        box.pack(fill=tk.BOTH, expand=True)
+        self.settings_info = tk.Label(box, text="", bg=C["panel"], fg=C["ink"], font=self.f_mono, justify=tk.LEFT, anchor="nw")
+        self.settings_info.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        row = tk.Frame(box, bg=C["panel"])
+        row.pack(anchor="w", padx=12, pady=(0, 12))
         for text, color, cmd in (
             ("ENABLE TRADING", C["signal"], lambda: self._set_trading(True)),
             ("DISABLE TRADING", C["warn"], lambda: self._set_trading(False)),
@@ -460,37 +474,56 @@ class DashboardApp:
         return frame
 
     def _build_footer(self, parent: tk.Misc) -> None:
-        foot = tk.Frame(parent, bg=C["panel"], height=44)
+        foot = tk.Frame(parent, bg=C["panel"], height=42)
         foot.pack(fill=tk.X, side=tk.BOTTOM)
         foot.pack_propagate(False)
         inner = tk.Frame(foot, bg=C["panel"])
-        inner.pack(fill=tk.BOTH, expand=True, padx=16)
+        inner.pack(fill=tk.BOTH, expand=True, padx=14)
         self.foot_vars = {
-            "uptime": tk.StringVar(value="—"),
-            "engine": tk.StringVar(value="—"),
-            "conn": tk.StringVar(value="—"),
+            "uptime": tk.StringVar(value="0m 0s"),
+            "engine": tk.StringVar(value="DOWN"),
+            "conn": tk.StringVar(value="NONE"),
+            "reason": tk.StringVar(value="—"),
             "time": tk.StringVar(value="—"),
-            "system": tk.StringVar(value="OFFLINE"),
         }
         for label, key, color in (
             ("UPTIME", "uptime", C["ok"]),
             ("ENGINE", "engine", C["sky"]),
-            ("CONNECTIONS", "conn", C["signal"]),
+            ("CONN", "conn", C["signal"]),
+            ("LAST REASON", "reason", C["warn"]),
             ("LOCAL", "time", C["mute"]),
-            ("SYSTEM", "system", C["brass"]),
         ):
             cell = tk.Frame(inner, bg=C["panel"])
             cell.pack(side=tk.LEFT, expand=True, fill=tk.X)
-            tk.Label(cell, text=label, bg=C["panel"], fg=C["mute"], font=self.f_ui).pack(anchor="w", pady=(6, 0))
+            tk.Label(cell, text=label, bg=C["panel"], fg=C["mute"], font=self.f_ui).pack(anchor="w", pady=(4, 0))
             tk.Label(cell, textvariable=self.foot_vars[key], bg=C["panel"], fg=color, font=self.f_ui_b).pack(anchor="w")
+
+    def _show_page(self, key: str) -> None:
+        self._page = key
+        for name, frame in self.pages.items():
+            if name == key:
+                frame.pack(fill=tk.BOTH, expand=True)
+            else:
+                frame.pack_forget()
+        for name, btn in self._nav_btns.items():
+            accent = {"floor": C["brass"], "accounts": C["sky"], "tape": C["warn"], "settings": C["mute"]}.get(name, C["mute"])
+            if name == key:
+                btn.configure(bg=C["line"], fg=C["ink"], highlightbackground=C["ink"])
+            else:
+                btn.configure(bg=C["panel2"], fg=accent, highlightbackground=accent)
+        if key in {"floor", "accounts"}:
+            self.refresh()
 
     def _on_floor_select(self, _event=None) -> None:
         sel = self.floor_tree.selection()
         if not sel:
             return
-        acct = self.floor_tree.item(sel[0], "values")[0]
-        if acct and acct != "—":
-            self._focus_account = str(acct)
+        vals = self.floor_tree.item(sel[0], "values")
+        if not vals:
+            return
+        acct = str(vals[0])
+        if acct and acct not in {"—", "(no bridges)"}:
+            self._focus_account = acct
             self._show_page("accounts")
 
     # ── engine / config ────────────────────────────────────────────────────
@@ -638,16 +671,15 @@ class DashboardApp:
             src_c = C["brass"] if override is not None else C["mute"]
             focused = self._focus_account == acct
             meta["row"].configure(bg=C["line"] if focused else C["panel2"])
-            meta["account"].configure(text=acct)
-            meta["balance"].configure(text=eq)
-            meta["symbol"].configure(text=str(sym))
-            meta["source"].configure(text=src, fg=src_c)
+            meta["account"].configure(text=acct, bg=meta["row"]["bg"])
+            meta["balance"].configure(text=eq, bg=meta["row"]["bg"])
+            meta["symbol"].configure(text=str(sym), bg=meta["row"]["bg"])
+            meta["source"].configure(text=src, fg=src_c, bg=meta["row"]["bg"])
             if self._lot_dirty.get(acct) or self._entry_focused(acct):
                 continue
             effective = override if override is not None else default_lot
-            current = self._lot_vars[acct].get().strip()
             target = f"{effective:.2f}"
-            if current != target:
+            if self._lot_vars[acct].get().strip() != target:
                 self._set_lot_var(acct, target)
 
     def _rebuild_account_rows(
@@ -676,8 +708,8 @@ class DashboardApp:
         bridge_by = {b.account_id: b for b in health.bridges}
         header = tk.Frame(self.accounts_host, bg=C["panel"])
         header.pack(fill=tk.X, pady=(0, 4))
-        for text, w in (("ACCOUNT", 120), ("EQUITY", 100), ("SYMBOL", 110), ("LOT", 90), ("SOURCE", 90), ("", 200)):
-            tk.Label(header, text=text, bg=C["panel"], fg=C["brass"], font=self.f_ui_b, width=max(w // 8, 8), anchor="w").pack(
+        for text in ("ACCOUNT", "EQUITY", "SYMBOL", "LOT", "SOURCE", "ACTIONS"):
+            tk.Label(header, text=text, bg=C["panel"], fg=C["brass"], font=self.f_ui_b, width=12, anchor="w").pack(
                 side=tk.LEFT, padx=6, pady=6
             )
         for acct in accounts:
@@ -693,7 +725,7 @@ class DashboardApp:
             var = tk.StringVar(value=f"{effective:.2f}")
             self._lot_vars[acct] = var
             var.trace_add("write", lambda *_a, a=acct: self._mark_lot_dirty(a))
-            lbl_acct = tk.Label(row, text=acct, bg=row["bg"], fg=C["ink"], font=self.f_mono_b, width=14, anchor="w")
+            lbl_acct = tk.Label(row, text=acct, bg=row["bg"], fg=C["ink"], font=self.f_mono_b, width=12, anchor="w")
             lbl_acct.pack(side=tk.LEFT, padx=6, pady=8)
             lbl_bal = tk.Label(row, text=eq, bg=row["bg"], fg=C["signal"], font=self.f_mono, width=12, anchor="w")
             lbl_bal.pack(side=tk.LEFT, padx=6)
@@ -702,7 +734,7 @@ class DashboardApp:
             entry = tk.Entry(
                 row,
                 textvariable=var,
-                bg=C["void"],
+                bg=C["bg"],
                 fg=C["ink"],
                 insertbackground=C["brass"],
                 relief=tk.FLAT,
@@ -737,33 +769,80 @@ class DashboardApp:
 
     def _fill_tree(self, tree: ttk.Treeview, rows: list[tuple]) -> None:
         tree.delete(*tree.get_children())
-        for row in rows:
-            values, tag = row[0], row[1]
+        for values, tag in rows:
             tree.insert("", tk.END, values=values, tags=(tag,))
 
     def refresh(self) -> None:
         health = collect_health(self.config_path)
         self._health = health
         cfg = self._cfg_data()
-        online = self.engine.running or any(b.connected for b in health.bridges)
-        mode = self.engine.mode or health.mode or "—"
-        self.brand.set_status(online=online, mode=str(mode))
-
-        equity = sum(b.equity for b in health.bridges) if health.bridges else 0.0
-        n_pos = sum(len(b.positions) for b in health.bridges)
-        self.metric_vars["equity"].set(f"{equity:.2f}" if health.bridges else "—")
-        self.metric_vars["bridges"].set(str(len(health.bridges)))
-        self.metric_vars["positions"].set(str(n_pos))
-        self.metric_vars["stop"].set("ARMED" if health.stop_present else "clear")
-        self.metric_vars["lot"].set(f"{default_fixed_lot(cfg):.2f}")
-
-        # Floor tables
-        default_lot = default_fixed_lot(cfg)
         rt = self._rt()
+        with contextlib.suppress(Exception):
+            record_equity_samples(health.bridges, rt)
+        report = build_floor_report(health, audit_path=audit_file(cfg))
+        self._report = report
+
+        online = self.engine.running or report.connected > 0
+        self.online_lbl.configure(
+            text=f"  ·  {'ONLINE' if online else 'OFFLINE'}",
+            fg=C["signal"] if online else C["stop"],
+        )
+        self.hint.configure(
+            text=f"{report.symbol}  |  mode={report.mode}  |  trade={'ON' if report.trading_enabled else 'OFF'}  |  "
+            f"{report.last_decision}/{report.last_reason}"
+        )
+
+        # KPI strip — always numbers, never blank
+        self.kpi["equity"].set(f"{report.equity_total:.2f}" if report.bridge_count else "0.00")
+        self.kpi["balance"].set(f"{report.balance_total:.2f}" if report.bridge_count else "0.00")
+        self.kpi["float"].set(f"{report.floating_pl:+.2f}")
+        self.kpi["pos"].set(str(report.positions))
+        self.kpi["bridges"].set(f"{report.connected}/{report.bridge_count}" if report.bridge_count else "0/0")
+        self.kpi["day"].set(f"{report.day_opens}/{report.day_closes}")
+        self.kpi["stop"].set("ARMED" if report.stop_present else "clear")
+        self.kpi["lot"].set(f"{default_fixed_lot(cfg):.2f}")
+
+        # System status table
+        eng = "UP" if self.engine.running else "DOWN"
+        eng_mode = (self.engine.mode or "off").upper()
+        self._fill_tree(
+            self.sys_tree,
+            [
+                (("Engine", f"{eng} · {eng_mode} · pid={self.engine.pid or '—'}"), "ok" if self.engine.running else "err"),
+                (("Mode", report.mode), "ok"),
+                (("Trading", "ENABLED" if report.trading_enabled else "DISABLED"), "ok" if report.trading_enabled else "warn"),
+                (("STOP file", "ARMED" if report.stop_present else "clear"), "err" if report.stop_present else "ok"),
+                (("Symbol", report.symbol), "mute"),
+                (("Commands backlog", str(report.commands)), "warn" if report.commands else "ok"),
+                (("Stale bridges", str(report.stale)), "err" if report.stale else "ok"),
+            ],
+        )
+
+        # Day table
+        self._fill_tree(
+            self.day_tree,
+            [
+                (("OPEN", str(report.day_opens)), "ok"),
+                (("CLOSE", str(report.day_closes)), "warn"),
+                (("MODIFY", str(report.day_modifies)), "mute"),
+                (("BLOCK", str(report.day_blocks)), "err" if report.day_blocks else "mute"),
+                (("HOLD", str(report.day_holds)), "mute"),
+                (("Last decision", report.last_decision), "ok"),
+                (("Last reason", report.last_reason[:28]), "warn"),
+            ],
+        )
+
+        # Equity chart
+        series = load_equity_series(limit=120, rt=rt)
+        self.equity_chart.set_points([v for _ts, v in series])
+
+        # Accounts table
+        default_lot = default_fixed_lot(cfg)
         floor_rows: list[tuple] = []
         for b in health.bridges:
             override = read_account_lot_override(rt, b.account_id)
             lot = override if override is not None else default_lot
+            fl = b.floating_pl if b.floating_pl else sum(p.profit for p in b.positions)
             tag = "ok" if b.connected and (b.market_age_s is not None and b.market_age_s <= 30) else (
                 "warn" if b.connected else "err"
             )
@@ -773,56 +852,47 @@ class DashboardApp:
                         b.account_id,
                         f"{b.equity:.2f}",
                         f"{b.balance:.2f}",
-                        b.symbol or health.symbol or "—",
+                        f"{fl:+.2f}",
+                        b.symbol or report.symbol,
+                        f"{b.bid:.5f}" if b.bid else "—",
+                        f"{b.ask:.5f}" if b.ask else "—",
                         format_age(b.market_age_s),
-                        format_age(b.status_age_s),
                         "YES" if b.connected else "NO",
                         "YES" if b.trading_allowed else "NO",
                         str(len(b.positions)),
+                        str(b.commands),
                         f"{lot:.2f}",
                     ),
                     tag,
                 )
             )
-        # Also show accounts that only have lot overrides / folders
         known = set(list_known_accounts(health, rt))
         seen = {b.account_id for b in health.bridges}
         for acct in sorted(known - seen):
             override = read_account_lot_override(rt, acct)
             lot = override if override is not None else default_lot
             floor_rows.append(
-                ((acct, "—", "—", health.symbol or "—", "—", "—", "—", "—", "0", f"{lot:.2f}"), "mute")
+                (
+                    (acct, "—", "—", "—", report.symbol, "—", "—", "—", "—", "—", "0", "0", f"{lot:.2f}"),
+                    "mute",
+                )
             )
+        if not floor_rows:
+            floor_rows = [
+                (
+                    ("(no bridges)", "0.00", "0.00", "+0.00", report.symbol, "—", "—", "—", "NO", "NO", "0", "0", f"{default_lot:.2f}"),
+                    "mute",
+                )
+            ]
         self._fill_tree(self.floor_tree, floor_rows)
 
+        # Positions
         pos_rows: list[tuple] = []
         for b in health.bridges:
             for p in b.positions:
                 tag = "ok" if p.profit >= 0 else "err"
-                pos_rows.append(
-                    (
-                        (
-                            b.account_id,
-                            str(p.ticket),
-                            p.symbol,
-                            p.side,
-                            f"{p.lot:.2f}",
-                            f"{p.open_price:.5f}" if p.open_price else "—",
-                            f"{p.stop_loss:.5f}" if p.stop_loss else "—",
-                            f"{p.take_profit:.5f}" if p.take_profit else "—",
-                            f"{p.profit:.2f}",
-                        ),
-                        tag,
-                    )
-                )
-        self._fill_tree(self.floor_pos_tree, pos_rows)
-
-        book_rows: list[tuple] = []
-        for b in health.bridges:
-            for p in b.positions:
-                tag = "ok" if p.profit >= 0 else "err"
                 cur = p.current_price
-                book_rows.append(
+                pos_rows.append(
                     (
                         (
                             b.account_id,
@@ -834,16 +904,18 @@ class DashboardApp:
                             f"{cur:.5f}" if cur else "—",
                             f"{p.stop_loss:.5f}" if p.stop_loss else "—",
                             f"{p.take_profit:.5f}" if p.take_profit else "—",
-                            f"{p.profit:.2f}",
+                            f"{p.profit:+.2f}",
                         ),
                         tag,
                     )
                 )
-        self._fill_tree(self.pos_tree, book_rows)
+        if not pos_rows:
+            pos_rows = [(("(flat)", "—", "—", "—", "—", "—", "—", "—", "—", "—"), "mute")]
+        self._fill_tree(self.pos_tree, pos_rows)
 
         # Tape
-        lines = [format_audit_line(e) for e in audit_activity(audit_file(cfg), limit=60)]
-        self._set_text(self.tape, "\n".join(lines) if lines else "(no audit yet)")
+        lines = [format_audit_line(e) for e in audit_activity(audit_file(cfg), limit=80)]
+        self._set_text(self.tape, "\n".join(lines) if lines else "(audit empty — start engine to fill tape)")
 
         drained: list[str] = []
         while True:
@@ -861,29 +933,30 @@ class DashboardApp:
         self.settings_info.configure(
             text=(
                 f"config: {self.config_path}\n"
-                f"mode: {health.mode}   trading_enabled: {health.trading_enabled}   stop: {health.stop_present}\n"
-                f"symbol: {health.symbol}\n"
+                f"runtime: {rt}\n"
+                f"mode: {report.mode}   trading_enabled: {report.trading_enabled}   stop: {report.stop_present}\n"
+                f"symbol: {report.symbol}\n"
                 f"default lot: {pos_cfg.get('fixed_lot') or pos_cfg.get('default_lot')}   "
                 f"min/max: {pos_cfg.get('min_lot')}/{pos_cfg.get('max_lot')}\n"
-                f"engine: {'UP' if self.engine.running else 'DOWN'}  pid={self.engine.pid}  mode={self.engine.mode}"
+                f"engine: {eng}  pid={self.engine.pid}  mode={self.engine.mode}\n"
+                f"bridges: {report.bridge_count} connected={report.connected} stale={report.stale}\n"
+                f"day: open={report.day_opens} close={report.day_closes} modify={report.day_modifies} "
+                f"block={report.day_blocks} hold={report.day_holds}"
             )
         )
 
         if self._page == "accounts":
             self._sync_account_rows(health)
 
-        if getattr(self, "foot_vars", None):
+        if self.foot_vars:
             uptime = int(time.time() - self._started_wall)
             self.foot_vars["uptime"].set(f"{uptime // 60}m {uptime % 60}s")
-            self.foot_vars["engine"].set(
-                f"{'LIVE' if self.engine.mode == 'live' else (self.engine.mode or 'off').upper()} · "
-                f"{'UP' if self.engine.running else 'DOWN'}"
-            )
+            self.foot_vars["engine"].set(f"{eng_mode} · {eng}")
             self.foot_vars["conn"].set(
-                "STABLE" if any(b.connected for b in health.bridges) else ("DEGRADED" if health.bridges else "NONE")
+                "STABLE" if report.connected else ("DEGRADED" if report.bridge_count else "NONE")
             )
+            self.foot_vars["reason"].set(f"{report.last_decision} / {report.last_reason}"[:42])
             self.foot_vars["time"].set(time.strftime("%H:%M:%S"))
-            self.foot_vars["system"].set("ONLINE" if online else "OFFLINE")
 
     def _set_text(self, widget: tk.Text, text: str) -> None:
         widget.configure(state=tk.NORMAL)
@@ -892,19 +965,15 @@ class DashboardApp:
         widget.configure(state=tk.DISABLED)
 
     def _motion_tick(self) -> None:
-        self._pulse = (self._pulse + 0.08) % math.tau
-        self.brand.tick()
-        # Soft pulse on ONLINE metric via brand already; nudge stop color when armed
-        if self._health and self._health.stop_present:
-            t = 0.5 + 0.5 * math.sin(self._pulse * 2)
-            # mild brightness pulse on stop label via text swap
-            self.metric_vars["stop"].set("ARMED" if t > 0.2 else "ARMED ·")
-        self.root.after(80, self._motion_tick)
+        self._pulse = (self._pulse + 0.09) % math.tau
+        if self._report and self._report.stop_present:
+            self.kpi["stop"].set("ARMED" if math.sin(self._pulse * 3) > 0 else "ARMED ·")
+        self.root.after(70, self._motion_tick)
 
     def _tick(self) -> None:
         with contextlib.suppress(Exception):
             self.refresh()
-        self.root.after(800, self._tick)
+        self.root.after(700, self._tick)
 
     def _on_close(self) -> None:
         if self.engine.running:
@@ -920,6 +989,11 @@ class DashboardApp:
 
 def main() -> None:
     root = tk.Tk()
+    try:
+        root.state("zoomed")
+    except tk.TclError:
+        with contextlib.suppress(tk.TclError):
+            root.attributes("-zoomed", True)
     DashboardApp(root)
     root.mainloop()
 
