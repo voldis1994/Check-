@@ -118,9 +118,9 @@ def atr_for_stops(
     mid: float | None = None,
     specs: SymbolSpecs | None = None,
 ) -> float | None:
-    """Prefer M15 ATR, then M5, then M1 — sanitized for the symbol."""
+    """Prefer M1 ATR (execution TF), then M5, then M15 — sanitized for the symbol."""
     raw: float | None = None
-    for series in (m15, m5, m1):
+    for series in (m1, m5, m15):
         if not series:
             continue
         value = robust_atr(series, period)

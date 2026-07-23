@@ -1,7 +1,7 @@
 """Keep local system.json trading profile in sync with shipped defaults.
 
-Users should never hand-edit trading gates after a pull. Live/runtime/account_id
-and paths are preserved; regimes/strategies/risk/limits/spread/position/management refresh.
+When runtime.platform_managed is true (CHECK COMMAND / EXE owns settings),
+do NOT overwrite lot / SL / BE / trailing / strategies — only fill missing file.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Sections owned by the repo release profile (always refreshed from example).
+# Sections owned by the repo release profile (refreshed from example unless EXE-managed).
 SHIPPED_TRADING_KEYS: tuple[str, ...] = (
     "regimes",
     "strategies",
@@ -34,14 +34,23 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def is_platform_managed(data: dict[str, Any]) -> bool:
+    runtime = data.get("runtime") or {}
+    return bool(isinstance(runtime, dict) and runtime.get("platform_managed"))
+
+
 def apply_shipped_trading_profile(data: dict[str, Any], *, example: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Replace trading-gate sections; keep runtime/paths/account_id."""
+    """Replace trading-gate sections; keep runtime/paths/account_id.
+
+    Skipped entirely when platform_managed — EXE is source of truth.
+    """
+    if is_platform_managed(data):
+        return dict(data)
     src = example if example is not None else _load_json(example_config_path())
     out = dict(data)
     for key in SHIPPED_TRADING_KEYS:
         if key in src:
             out[key] = src[key]
-    # Soft-patch account equity gates without wiping account_id/currency.
     if isinstance(src.get("account"), dict):
         acc = dict(out.get("account") or {})
         if not acc.get("account_id"):
@@ -51,6 +60,12 @@ def apply_shipped_trading_profile(data: dict[str, Any], *, example: dict[str, An
         acc["min_equity"] = float(src["account"].get("min_equity", 0.0))
         acc["max_drawdown_percent"] = float(src["account"].get("max_drawdown_percent", 100.0))
         out["account"] = acc
+    # Final platform: range strategy always off in shipped profile
+    strategies = dict(out.get("strategies") or {})
+    rr = dict(strategies.get("range_reversion") or {})
+    rr["enabled"] = False
+    strategies["range_reversion"] = rr
+    out["strategies"] = strategies
     return out
 
 
@@ -59,6 +74,7 @@ def sync_system_json(path: Path | str, *, example_path: Path | str | None = None
     Rewrite trading-gate sections on disk from system.example.json.
 
     Preserves runtime, paths, instrument, account_id, etc.
+    No-op when runtime.platform_managed is true.
     Returns True when the file content changed (or was created).
     """
     target = Path(path)
@@ -69,10 +85,13 @@ def sync_system_json(path: Path | str, *, example_path: Path | str | None = None
     example_data = _load_json(example)
     if target.exists():
         current = _load_json(target)
+        if is_platform_managed(current):
+            return False
         merged = apply_shipped_trading_profile(current, example=example_data)
         changed = merged != current
     else:
         merged = dict(example_data)
+        # New installs: allow EXE to take over after first save
         changed = True
 
     if not changed:

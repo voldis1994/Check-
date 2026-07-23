@@ -98,6 +98,10 @@ def _ctx(
     repo: SetupRepository | None = None,
 ) -> StrategyContext:
     cfg = load_config()
+    # Unit-test the range strategy itself even though the live platform disables it.
+    rr = cfg.strategies.range_reversion.model_copy(update={"enabled": True})
+    strategies = cfg.strategies.model_copy(update={"range_reversion": rr})
+    cfg = cfg.model_copy(update={"strategies": strategies})
     price = last_m15.close
     market = MarketSnapshot(
         "EURUSD",

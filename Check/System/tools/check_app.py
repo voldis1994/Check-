@@ -1,7 +1,4 @@
-"""CHECK SYSTEM frozen / desktop entry point.
-
-Used by START_DASHBOARD.bat and by PyInstaller → dist/CHECK_SYSTEM.exe
-"""
+"""CHECK SYSTEM frozen / desktop entry point — EXE is the control plane."""
 
 from __future__ import annotations
 
@@ -11,9 +8,7 @@ from pathlib import Path
 
 
 def _bootstrap() -> Path:
-    """Resolve System root whether running from source or frozen exe."""
     if getattr(sys, "frozen", False):
-        # One-folder or one-file: exe next to System tree or inside _internal.
         here = Path(sys.executable).resolve().parent
         for candidate in (here, here.parent, here / "System", here.parent / "System"):
             if (candidate / "config").is_dir() or (candidate / "tools").is_dir():
@@ -34,8 +29,12 @@ def main() -> int:
 
     cfg = root / "config" / "system.json"
     example = root / "config" / "system.example.json"
+    platform_example = root / "config" / "platform.example.json"
+    platform = root / "config" / "platform.json"
     if not cfg.exists() and example.exists():
         cfg.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    if not platform.exists() and platform_example.exists():
+        platform.write_text(platform_example.read_text(encoding="utf-8"), encoding="utf-8")
 
     try:
         from checktrader.config.migrate import sync_system_json
@@ -44,6 +43,15 @@ def main() -> int:
             sync_system_json(cfg, example)
     except Exception:  # noqa: BLE001
         pass
+
+    try:
+        import platform_store
+
+        platform_store.apply_platform_to_system_json(cfg)
+    except Exception:  # noqa: BLE001
+        pass
+
+    (root / "clients").mkdir(parents=True, exist_ok=True)
 
     import dashboard
 

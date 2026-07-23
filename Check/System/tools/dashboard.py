@@ -50,6 +50,7 @@ from dashboard_core import (  # noqa: E402
     write_account_lot_override,
     write_stop,
 )
+import platform_store  # noqa: E402
 
 try:
     from checktrader.config.migrate import sync_system_json
@@ -120,7 +121,7 @@ class EquityChart:
 class DashboardApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("CHECK COMMAND · trading control desk")
+        self.root.title("CHECK COMMAND · trading platform")
         self.root.geometry("1560x960")
         self.root.minsize(1280, 800)
         self.root.configure(bg=C["bg"])
@@ -134,6 +135,12 @@ class DashboardApp:
         self.f_mono_b = _font(["Cascadia Mono", "Consolas"], 9, "bold")
 
         self.config_path = resolve_config()
+        # Seed platform + push into system.json so EXE owns trading params.
+        if not (ROOT / "config" / "platform.json").exists():
+            platform_store.save_platform(platform_store.load_platform())
+        platform_store.apply_platform_to_system_json(self.config_path)
+        (ROOT / "clients").mkdir(parents=True, exist_ok=True)
+
         self.engine = EngineProcess()
         self.log_queue: queue.Queue[str] = queue.Queue()
         self._page = "floor"
@@ -150,6 +157,8 @@ class DashboardApp:
         self._pulse = 0.0
         self.foot_vars: dict[str, tk.StringVar] = {}
         self.kpi: dict[str, tk.StringVar] = {}
+        self._setting_vars: dict[str, tk.StringVar] = {}
+        self._clients_built: tuple[str, ...] = ()
 
         self._style_trees()
         self._build()
@@ -214,7 +223,7 @@ class DashboardApp:
         self.online_lbl.pack(side=tk.LEFT, padx=(8, 0), pady=(8, 0))
         self.subtitle = tk.Label(
             left,
-            text="multi-account desk · summary + tables",
+            text="M1 platform · trend + breakout · EXE control plane",
             bg=C["bg"],
             fg=C["mute"],
             font=self.f_ui,
@@ -420,24 +429,41 @@ class DashboardApp:
         frame = tk.Frame(parent, bg=C["bg"])
         head = tk.Frame(frame, bg=C["bg"])
         head.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(head, text="PER-ACCOUNT LOT CONTROL", bg=C["bg"], fg=C["sky"], font=self.f_h1).pack(side=tk.LEFT)
+        tk.Label(head, text="CLIENT ACCOUNTS", bg=C["bg"], fg=C["sky"], font=self.f_h1).pack(side=tk.LEFT)
         tk.Label(
             head,
-            text="SAVE writes runtime/accounts/<id>/lot.json · engine picks it up each cycle",
+            text="Add = login+password+server → clients/<id>/ + MT4 launch · Delete removes folder",
             bg=C["bg"],
             fg=C["mute"],
             font=self.f_ui,
         ).pack(side=tk.LEFT, padx=12)
-        self.accounts_host = tk.Frame(frame, bg=C["bg"])
-        self.accounts_host.pack(fill=tk.BOTH, expand=True)
-        self.accounts_empty = tk.Label(
-            self.accounts_host,
-            text="No accounts yet — connect MT4 bridges, then START LIVE.",
-            bg=C["bg"],
+        self._btn(head, "+ ADD ACCOUNT", C["signal"], self._dialog_add_client).pack(side=tk.RIGHT)
+
+        clients_box = self._section(frame, "REGISTERED CLIENTS", C["sky"])
+        clients_box.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        self.clients_host = tk.Frame(clients_box, bg=C["panel"])
+        self.clients_host.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        self.clients_empty = tk.Label(
+            self.clients_host,
+            text="No clients yet — press + ADD ACCOUNT (login / password / server).",
+            bg=C["panel"],
             fg=C["mute"],
             font=self.f_ui,
         )
-        self.accounts_empty.pack(pady=40)
+        self.clients_empty.pack(pady=20)
+
+        lot_box = self._section(frame, "LIVE BRIDGE LOT OVERRIDES", C["brass"])
+        lot_box.pack(fill=tk.BOTH, expand=True)
+        self.accounts_host = tk.Frame(lot_box, bg=C["panel"])
+        self.accounts_host.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        self.accounts_empty = tk.Label(
+            self.accounts_host,
+            text="Bridge lots appear when MT4 exports status (or after you add a client).",
+            bg=C["panel"],
+            fg=C["mute"],
+            font=self.f_ui,
+        )
+        self.accounts_empty.pack(pady=16)
         return frame
 
     def _page_tape(self, parent: tk.Misc) -> tk.Frame:
@@ -458,20 +484,223 @@ class DashboardApp:
 
     def _page_settings(self, parent: tk.Misc) -> tk.Frame:
         frame = tk.Frame(parent, bg=C["bg"])
-        box = self._section(frame, "RUNTIME / CONFIG", C["brass"])
+        box = self._section(frame, "PLATFORM SETTINGS (EXE → engine)", C["brass"])
         box.pack(fill=tk.BOTH, expand=True)
-        self.settings_info = tk.Label(box, text="", bg=C["panel"], fg=C["ink"], font=self.f_mono, justify=tk.LEFT, anchor="nw")
-        self.settings_info.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
-        row = tk.Frame(box, bg=C["panel"])
-        row.pack(anchor="w", padx=12, pady=(0, 12))
-        for text, color, cmd in (
-            ("ENABLE TRADING", C["signal"], lambda: self._set_trading(True)),
-            ("DISABLE TRADING", C["warn"], lambda: self._set_trading(False)),
-            ("CLEAR STOP", C["sky"], self._clear_stop),
-            ("DEPLOY MT4", C["brass"], self._deploy),
-        ):
-            self._btn(row, text, color, cmd).pack(side=tk.LEFT, padx=4)
+        form = tk.Frame(box, bg=C["panel"])
+        form.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        fields = (
+            ("fixed_lot", "LOT SIZE", "0.02"),
+            ("force_stop_atr", "SL SIZE (ATR ×)", "1.0"),
+            ("min_stop_atr", "MIN SL (ATR ×)", "0.6"),
+            ("breakeven_trigger_atr", "BE START (ATR ×)", "0.75"),
+            ("breakeven_offset_atr", "BE OFFSET (ATR ×)", "0.05"),
+            ("trailing_start_atr", "TRAIL START (ATR ×)", "0.50"),
+            ("trailing_lock_atr", "TRAIL LOCK (ATR ×)", "0.75"),
+            ("symbol", "SYMBOL", "AUTO"),
+            ("mt4_terminal_exe", "MT4 terminal.exe PATH", ""),
+            ("cycle_interval_seconds", "CYCLE SEC", "5"),
+        )
+        plat = platform_store.load_platform()
+        grid = tk.Frame(form, bg=C["panel"])
+        grid.pack(fill=tk.X)
+        for i, (key, label, default) in enumerate(fields):
+            row = i // 2
+            col = (i % 2) * 2
+            tk.Label(grid, text=label, bg=C["panel"], fg=C["mute"], font=self.f_ui).grid(
+                row=row, column=col, sticky="w", padx=(0, 8), pady=6
+            )
+            var = tk.StringVar(value=str(plat.get(key, default)))
+            self._setting_vars[key] = var
+            tk.Entry(
+                grid,
+                textvariable=var,
+                bg=C["bg"],
+                fg=C["ink"],
+                insertbackground=C["brass"],
+                relief=tk.FLAT,
+                width=36 if key == "mt4_terminal_exe" else 14,
+                font=self.f_mono,
+                highlightthickness=1,
+                highlightbackground=C["line"],
+                highlightcolor=C["brass"],
+            ).grid(row=row, column=col + 1, sticky="w", padx=(0, 24), pady=6)
+
+        toggles = tk.Frame(form, bg=C["panel"])
+        toggles.pack(fill=tk.X, pady=(8, 0))
+        self._trend_var = tk.BooleanVar(value=bool(plat.get("trend_enabled", True)))
+        self._breakout_var = tk.BooleanVar(value=bool(plat.get("breakout_enabled", True)))
+        self._force_idle_var = tk.BooleanVar(value=bool(plat.get("force_entry_when_idle", True)))
+        tk.Checkbutton(
+            toggles, text="TREND UP/DOWN", variable=self._trend_var, bg=C["panel"], fg=C["ink"],
+            selectcolor=C["bg"], activebackground=C["panel"], font=self.f_ui_b,
+        ).pack(side=tk.LEFT, padx=(0, 16))
+        tk.Checkbutton(
+            toggles, text="BREAKOUT", variable=self._breakout_var, bg=C["panel"], fg=C["ink"],
+            selectcolor=C["bg"], activebackground=C["panel"], font=self.f_ui_b,
+        ).pack(side=tk.LEFT, padx=(0, 16))
+        tk.Checkbutton(
+            toggles, text="FORCE ENTRY WHEN IDLE", variable=self._force_idle_var, bg=C["panel"], fg=C["ink"],
+            selectcolor=C["bg"], activebackground=C["panel"], font=self.f_ui_b,
+        ).pack(side=tk.LEFT)
+
+        row = tk.Frame(form, bg=C["panel"])
+        row.pack(anchor="w", pady=16)
+        self._btn(row, "SAVE SETTINGS", C["signal"], self._save_platform_settings).pack(side=tk.LEFT, padx=4)
+        self._btn(row, "ENABLE TRADING", C["ok"], lambda: self._set_trading(True)).pack(side=tk.LEFT, padx=4)
+        self._btn(row, "DISABLE TRADING", C["warn"], lambda: self._set_trading(False)).pack(side=tk.LEFT, padx=4)
+        self._btn(row, "CLEAR STOP", C["sky"], self._clear_stop).pack(side=tk.LEFT, padx=4)
+        self._btn(row, "DEPLOY MT4 EA", C["brass"], self._deploy).pack(side=tk.LEFT, padx=4)
+
+        self.settings_info = tk.Label(form, text="", bg=C["panel"], fg=C["mute"], font=self.f_mono, justify=tk.LEFT, anchor="nw")
+        self.settings_info.pack(fill=tk.X, pady=(8, 0))
         return frame
+
+    def _save_platform_settings(self) -> None:
+        try:
+            payload = platform_store.load_platform()
+            for key, var in self._setting_vars.items():
+                raw = var.get().strip()
+                if key in {
+                    "fixed_lot",
+                    "force_stop_atr",
+                    "min_stop_atr",
+                    "breakeven_trigger_atr",
+                    "breakeven_offset_atr",
+                    "trailing_start_atr",
+                    "trailing_lock_atr",
+                    "cycle_interval_seconds",
+                    "min_lot",
+                    "max_lot",
+                }:
+                    payload[key] = float(raw.replace(",", "."))
+                else:
+                    payload[key] = raw
+            payload["trend_enabled"] = bool(self._trend_var.get())
+            payload["breakout_enabled"] = bool(self._breakout_var.get())
+            payload["force_entry_when_idle"] = bool(self._force_idle_var.get())
+            platform_store.save_platform(payload)
+            platform_store.apply_platform_to_system_json(self.config_path)
+            messagebox.showinfo("Settings", "Saved. Engine uses these on next cycle / restart.")
+            self.refresh()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Settings", str(exc))
+
+    def _dialog_add_client(self) -> None:
+        win = tk.Toplevel(self.root)
+        win.title("Add MT4 account")
+        win.configure(bg=C["panel"])
+        win.geometry("460x320")
+        win.transient(self.root)
+        win.grab_set()
+        fields = {}
+        for i, (key, label) in enumerate(
+            (
+                ("label", "Label"),
+                ("login", "Login (account number)"),
+                ("password", "Password"),
+                ("server", "Server"),
+                ("lot", "Lot (optional)"),
+            )
+        ):
+            tk.Label(win, text=label, bg=C["panel"], fg=C["mute"], font=self.f_ui).pack(anchor="w", padx=16, pady=(10 if i == 0 else 4, 0))
+            show = "*" if key == "password" else ""
+            var = tk.StringVar()
+            fields[key] = var
+            tk.Entry(
+                win,
+                textvariable=var,
+                show=show,
+                bg=C["bg"],
+                fg=C["ink"],
+                insertbackground=C["brass"],
+                relief=tk.FLAT,
+                font=self.f_mono,
+                highlightthickness=1,
+                highlightbackground=C["line"],
+            ).pack(fill=tk.X, padx=16)
+
+        def save() -> None:
+            try:
+                lot_raw = fields["lot"].get().strip()
+                lot = float(lot_raw.replace(",", ".")) if lot_raw else None
+                client = platform_store.add_client(
+                    login=fields["login"].get(),
+                    password=fields["password"].get(),
+                    server=fields["server"].get(),
+                    label=fields["label"].get(),
+                    lot=lot,
+                    mt4_terminal_exe=platform_store.load_platform().get("mt4_terminal_exe"),
+                )
+                win.destroy()
+                self._clients_built = ()
+                messagebox.showinfo(
+                    "Client",
+                    f"Created clients/{client['id']}/\n"
+                    f"Bridge: {client['bridge_dir']}\n"
+                    f"Launch: clients/{client['id']}/launch_mt4.bat\n"
+                    f"Set EA BridgeRootPath to that bridge parent (see BRIDGE_PATH.txt).",
+                )
+                self._show_page("accounts")
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("Add account", str(exc))
+
+        self._btn(win, "CREATE + LAUNCH FOLDER", C["signal"], save).pack(pady=16)
+
+    def _delete_client(self, client_id: str) -> None:
+        if not messagebox.askyesno("Delete", f"Delete client {client_id} and its MT4 workspace folder?"):
+            return
+        try:
+            platform_store.delete_client(client_id)
+            self._clients_built = ()
+            self.refresh()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Delete", str(exc))
+
+    def _launch_client(self, client_id: str) -> None:
+        ok, msg = platform_store.launch_client_mt4(client_id)
+        if ok:
+            messagebox.showinfo("MT4", msg)
+        else:
+            messagebox.showwarning("MT4", msg)
+
+    def _rebuild_client_rows(self) -> None:
+        clients = platform_store.list_clients()
+        sig = tuple(str(c.get("id")) for c in clients)
+        if sig == self._clients_built and self.clients_host.winfo_children():
+            # still rebuild labels lightly — force full rebuild when page shown
+            pass
+        for child in list(self.clients_host.winfo_children()):
+            if child is self.clients_empty:
+                continue
+            child.destroy()
+        self._clients_built = sig
+        if not clients:
+            self.clients_empty.pack(pady=20)
+            return
+        self.clients_empty.pack_forget()
+        header = tk.Frame(self.clients_host, bg=C["panel2"])
+        header.pack(fill=tk.X, pady=(0, 4))
+        for text in ("ID", "LOGIN", "SERVER", "LABEL", "ACTIONS"):
+            tk.Label(header, text=text, bg=C["panel2"], fg=C["brass"], font=self.f_ui_b, width=14, anchor="w").pack(
+                side=tk.LEFT, padx=4, pady=4
+            )
+        for row in clients:
+            cid = str(row.get("id"))
+            full = platform_store.read_client(cid) or row
+            line = tk.Frame(self.clients_host, bg=C["panel2"])
+            line.pack(fill=tk.X, pady=2)
+            for text, w in (
+                (cid, 14),
+                (str(full.get("login") or ""), 14),
+                (str(full.get("server") or ""), 14),
+                (str(full.get("label") or ""), 14),
+            ):
+                tk.Label(line, text=text, bg=C["panel2"], fg=C["ink"], font=self.f_mono, width=w, anchor="w").pack(
+                    side=tk.LEFT, padx=4, pady=6
+                )
+            self._btn(line, "LAUNCH MT4", C["signal"], lambda c=cid: self._launch_client(c), padx=8).pack(side=tk.LEFT, padx=2)
+            self._btn(line, "DELETE", C["stop"], lambda c=cid: self._delete_client(c), padx=8).pack(side=tk.LEFT, padx=2)
 
     def _build_footer(self, parent: tk.Misc) -> None:
         foot = tk.Frame(parent, bg=C["panel"], height=42)
@@ -511,7 +740,7 @@ class DashboardApp:
                 btn.configure(bg=C["line"], fg=C["ink"], highlightbackground=C["ink"])
             else:
                 btn.configure(bg=C["panel2"], fg=accent, highlightbackground=accent)
-        if key in {"floor", "accounts"}:
+        if key in {"floor", "accounts", "settings"}:
             self.refresh()
 
     def _on_floor_select(self, _event=None) -> None:
@@ -946,7 +1175,11 @@ class DashboardApp:
         )
 
         if self._page == "accounts":
+            self._rebuild_client_rows()
             self._sync_account_rows(health)
+        if self._page == "settings":
+            # keep form values; only refresh info strip
+            pass
 
         if self.foot_vars:
             uptime = int(time.time() - self._started_wall)

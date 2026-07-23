@@ -431,6 +431,13 @@ def discover_bridge_dirs(configured: Path | None = None) -> list[Path]:
         add(configured)
     add(ROOT / "runtime" / "bridge")
 
+    # Per-client workspaces created by CHECK COMMAND
+    clients_root = ROOT / "clients"
+    if clients_root.is_dir():
+        for child in clients_root.iterdir():
+            if child.is_dir():
+                add(child / "bridge" / "runtime" / "bridge")
+
     appdata = os.environ.get("APPDATA")
     if appdata:
         base = Path(appdata) / "MetaQuotes" / "Terminal"

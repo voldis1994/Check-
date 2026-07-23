@@ -96,7 +96,7 @@
       "immediate_m1_entry": true
     },
     "range_reversion": {
-      "enabled": true,
+      "enabled": false,
       "atr_period": 14,
       "adx_period": 14,
       "zone_pct": 0.30,

@@ -29,3 +29,6 @@ runtime/audit.jsonl
 runtime/metrics.json
 runtime/state.json
 runtime/**/*.jsonl
+clients/*/
+!clients/.gitkeep
+config/platform.json

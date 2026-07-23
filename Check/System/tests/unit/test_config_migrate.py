@@ -93,6 +93,28 @@ def test_apply_shipped_trading_profile_keeps_runtime() -> None:
     assert merged["position_sizing"]["fixed_lot"] == 0.02
     assert merged["management"]["hard_take_profit"] is False
     assert merged["management"]["trailing_lock_atr"] == 0.50
+    assert merged["strategies"]["range_reversion"]["enabled"] is False
+
+
+def test_platform_managed_skips_shipped_overwrite() -> None:
+    example = {
+        "strategies": {"force_stop_atr": 0.18, "range_reversion": {"enabled": True}},
+        "management": {"trailing_lock_atr": 0.50},
+        "position_sizing": {"fixed_lot": 0.02, "method": "fixed_lot", "min_lot": 0.01, "max_lot": 1.0, "lot_step": 0.01},
+        "position": {"default_lot": 0.02, "max_open_positions": 1, "allow_hedging": False},
+        "regimes": {},
+        "risk": {},
+        "limits": {},
+        "spread": {},
+    }
+    local = {
+        "runtime": {"mode": "live", "trading_enabled": True, "platform_managed": True},
+        "strategies": {"force_stop_atr": 1.25, "range_reversion": {"enabled": False}},
+        "management": {"trailing_lock_atr": 0.9},
+    }
+    merged = apply_shipped_trading_profile(local, example=example)
+    assert merged["strategies"]["force_stop_atr"] == 1.25
+    assert merged["management"]["trailing_lock_atr"] == 0.9
 
 
 def test_sync_system_json_rewrites_stale_profile(tmp_path: Path) -> None:

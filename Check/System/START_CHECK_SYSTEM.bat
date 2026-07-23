@@ -12,6 +12,14 @@ if not exist "config\system.json" (
   )
 )
 
+if not exist "config\platform.json" (
+  if exist "config\platform.example.json" (
+    copy /Y "config\platform.example.json" "config\platform.json" >nul
+  )
+)
+
+if not exist "clients" mkdir "clients"
+
 REM Prefer frozen exe if present
 if exist "dist\CHECK_SYSTEM\CHECK_SYSTEM.exe" (
   start "" "dist\CHECK_SYSTEM\CHECK_SYSTEM.exe"

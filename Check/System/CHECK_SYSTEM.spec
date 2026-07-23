@@ -17,6 +17,7 @@ a = Analysis(
     hiddenimports=[
         "dashboard",
         "dashboard_core",
+        "platform_store",
         "checktrader",
         "checktrader.config.migrate",
         "pydantic",

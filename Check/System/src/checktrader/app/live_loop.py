@@ -66,6 +66,13 @@ def discover_bridges(
                 if base.is_dir():
                     candidates.append(base / "runtime" / "bridge")
 
+    # CHECK COMMAND client workspaces: clients/<id>/bridge/runtime/bridge
+    clients_root = Path(__file__).resolve().parents[3] / "clients"
+    if clients_root.is_dir():
+        for child in clients_root.iterdir():
+            if child.is_dir():
+                candidates.append(child / "bridge" / "runtime" / "bridge")
+
     ready: dict[str, Path] = {}
     for path in candidates:
         if not path.exists() or not path.is_dir():
