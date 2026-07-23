@@ -1,4 +1,4 @@
-"""CHECK v5 engine — per-account points risk, no ATR."""
+"""CHECK engine — hard-number risk + toggles."""
 
 from __future__ import annotations
 
@@ -6,11 +6,12 @@ import json
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from app import bridge, clients, paths, settings as settings_mod
+from app.risk import as_float, block_new_entries, merge_account_risk
 from app.strategy import evaluate, manage_sl
 
 
@@ -24,6 +25,7 @@ class Engine:
     last_reason: str = "—"
     _last_open_at: dict[str, float] = field(default_factory=dict)
     _pending_open: dict[str, str] = field(default_factory=dict)
+    _day_equity: dict[str, tuple[str, float]] = field(default_factory=dict)
 
     def _audit_path(self) -> Path:
         return paths.app_root() / "runtime" / "audit.jsonl"
@@ -82,8 +84,21 @@ class Engine:
         if not bridges:
             self.last_reason = "NO_BRIDGE"
             return
+        total_open = 0
+        snapshots: list[tuple[Path, dict, dict | None, dict]] = []
         for b in bridges:
-            self._cycle_bridge(b, cfg)
+            market = bridge.load_market(b)
+            status = bridge.load_status(b)
+            if not market:
+                continue
+            account = self._resolve_account(b, market, status)
+            positions = (status or {}).get("positions") or []
+            if isinstance(positions, list):
+                total_open += len(positions)
+            snapshots.append((b, market, status, account))
+
+        for b, market, status, account in snapshots:
+            self._cycle_bridge(b, cfg, market, status, account, total_open)
 
     def _key(self, b: Path) -> str:
         return str(b.resolve())
@@ -91,22 +106,34 @@ class Engine:
     def _resolve_account(self, b: Path, market: dict, status: dict | None) -> dict[str, Any]:
         acc = clients.account_for_bridge(b)
         if acc:
-            return acc
+            return merge_account_risk(acc)
         login = str((status or {}).get("account") or market.get("account") or "")
         if login:
             by_login = clients.account_by_login(login)
             if by_login:
-                return by_login
-        # fallback empty risk blocks opens (sl_points 0)
-        return dict(clients.ACCOUNT_DEFAULTS)
+                return merge_account_risk(by_login)
+        return merge_account_risk(None)
 
-    def _cycle_bridge(self, b: Path, cfg: dict[str, Any]) -> None:
+    def _daily_pl(self, key: str, equity: float | None) -> float | None:
+        if equity is None:
+            return None
+        today = date.today().isoformat()
+        prev = self._day_equity.get(key)
+        if prev is None or prev[0] != today:
+            self._day_equity[key] = (today, equity)
+            return 0.0
+        return equity - prev[1]
+
+    def _cycle_bridge(
+        self,
+        b: Path,
+        cfg: dict[str, Any],
+        market: dict[str, Any],
+        status: dict[str, Any] | None,
+        account: dict[str, Any],
+        total_open: int,
+    ) -> None:
         key = self._key(b)
-        market = bridge.load_market(b)
-        status = bridge.load_status(b)
-        if not market:
-            self.last_reason = "NO_MARKET"
-            return
         age = bridge.age_s(b / "market" / "latest.json")
         if age is not None and age > 60:
             self.last_reason = f"STALE_{age:.0f}s"
@@ -117,11 +144,22 @@ class Engine:
         if want not in {"", "AUTO"} and symbol and symbol.upper() != want.upper():
             return
 
-        account = self._resolve_account(b, market, status)
         positions = (status or {}).get("positions") or []
-        lot = float(account.get("lot") or 0.02)
+        if not isinstance(positions, list):
+            positions = []
+        lot = as_float(account.get("lot"), 0.02)
         point = float(market.get("point") or 0.00001)
         digits = int(market.get("digits") or 5)
+        spread = market.get("spread")
+        try:
+            spread_pts = float(spread) if spread is not None else None
+        except (TypeError, ValueError):
+            spread_pts = None
+        equity = None
+        if status and status.get("equity") is not None:
+            equity = as_float(status.get("equity"), 0)
+        daily_pl = self._daily_pl(key, equity)
+        losses = int(account.get("consecutive_losses") or 0)
 
         pending_id = self._pending_open.get(key)
         if pending_id:
@@ -166,12 +204,23 @@ class Engine:
             self.last_reason = "COOLDOWN"
             return
 
+        blocked = block_new_entries(
+            account=account,
+            global_cfg=cfg,
+            positions=positions,
+            spread_points=spread_pts,
+            equity=equity,
+            daily_pl=daily_pl,
+            consecutive_losses=losses,
+            total_open=total_open,
+        )
+        if blocked:
+            self.last_reason = blocked
+            return
+
         sig = evaluate(market, account, cfg)
         if sig is None:
-            if float(account.get("sl_points") or 0) <= 0:
-                self.last_reason = "SET_SL_POINTS"
-            else:
-                self.last_reason = "FLAT"
+            self.last_reason = "FLAT"
             return
 
         payload = {

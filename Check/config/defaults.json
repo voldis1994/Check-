@@ -4,5 +4,11 @@
   "trend": true,
   "breakout": true,
   "symbol": "AUTO",
-  "max_bars": 300
+  "max_bars": 300,
+  "max_total_open_enabled": false,
+  "max_total_open": 10,
+  "global_daily_loss_enabled": false,
+  "global_daily_loss": 1000,
+  "global_equity_floor_enabled": false,
+  "global_equity_floor": 0
 }

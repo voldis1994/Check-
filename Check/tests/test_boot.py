@@ -1,4 +1,4 @@
-"""Boot smoke for CHECK v5 desk."""
+"""Boot smoke for CHECK Nexus desk."""
 
 from __future__ import annotations
 
@@ -18,11 +18,14 @@ def test_app_builds() -> None:
     try:
         app = App(root)
         assert hasattr(app, "foot")
-        assert hasattr(app, "tree")
+        assert hasattr(app, "live_var")
+        assert hasattr(app, "pos")
         app.refresh()
         app._show("accounts")
-        app._show("global")
-        app._show("live")
+        app._show("risk")
+        app._show("strategies")
+        app._show("settings")
+        app._show("dashboard")
         app.refresh()
     finally:
         root.destroy()

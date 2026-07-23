@@ -21,6 +21,7 @@ a = Analysis(
         "app.settings",
         "app.clients",
         "app.paths",
+        "app.risk",
     ],
     hookspath=[],
     hooksconfig={},

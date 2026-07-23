@@ -1,27 +1,13 @@
-# CHECK v5 — from zero
+# CHECK — Nexus-style desk
 
-One bat. Your MT4 template. New EXE. No ATR.
+Hard numbers only (points / $ / count). Risk functions = On/Off toggles.
+No ATR. No percentages.
 
-## 1. Put original MT4 here
+## Run
 
-```
-Check\template\MetaTrader 4\terminal.exe
-```
+1. Put original MT4 in `Check\template\`
+2. `Check\SETUP.bat`
+3. Desk opens → **Accounts** → add → **Risk Manager** (toggles + hard numbers)
+4. **LAUNCH MT4** → CHECK on M1 → **Live Trading** ON
 
-## 2. Run one file
-
-```
-Check\SETUP.bat
-```
-
-That syncs MT4 → installs EA → opens the desk.
-
-## 3. Trade
-
-1. **ACCOUNTS** → add login / password / server  
-2. Set **SL / BE / TRAIL in POINTS for that account only**  
-3. **LAUNCH** → attach **CHECK** on **M1** (`BridgePath` empty) → AutoTrading  
-4. **START LIVE**
-
-Strategies: M1 **trend** + **breakout** only.  
-Stops are **your numbers per account** — not ATR.
+Strategies: **TREND** + **BREAKOUT** (M1).

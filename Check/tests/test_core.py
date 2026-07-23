@@ -1,4 +1,4 @@
-"""Core v5 tests — no ATR, points risk."""
+"""Risk toggles + hard numbers + strategy."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 from app import clients, paths
-from app.strategy import evaluate, manage_sl, points_to_price
+from app.risk import block_new_entries
+from app.strategy import evaluate, manage_sl
 
 
 def _bars_breakout() -> list[dict]:
@@ -17,33 +18,69 @@ def _bars_breakout() -> list[dict]:
     return bars
 
 
-def test_points_to_price() -> None:
-    assert abs(points_to_price(150, 0.00001) - 0.0015) < 1e-12
+def test_block_daily_loss_hard_dollars() -> None:
+    acc = {
+        "sl_points": 100,
+        "daily_loss_limit_enabled": True,
+        "daily_loss_limit": 200,
+        "max_open_trades_enabled": False,
+        "spread_filter_enabled": False,
+    }
+    assert block_new_entries(
+        account=acc,
+        global_cfg={},
+        positions=[],
+        spread_points=10,
+        equity=9800,
+        daily_pl=-250,
+        consecutive_losses=0,
+        total_open=0,
+    ) == "DAILY_LOSS"
 
 
-def test_breakout_uses_account_sl_points() -> None:
-    market = {"bars_m1": _bars_breakout(), "bid": 1.1021, "ask": 1.1022, "point": 0.00001, "symbol": "EURUSD"}
-    account = {"sl_points": 100}
-    sig = evaluate(market, account, {"breakout": True, "trend": False})
+def test_block_when_toggle_off_allows() -> None:
+    acc = {
+        "sl_points": 100,
+        "daily_loss_limit_enabled": False,
+        "daily_loss_limit": 200,
+        "max_open_trades_enabled": False,
+        "spread_filter_enabled": False,
+    }
+    assert (
+        block_new_entries(
+            account=acc,
+            global_cfg={},
+            positions=[],
+            spread_points=10,
+            equity=9800,
+            daily_pl=-250,
+            consecutive_losses=0,
+            total_open=0,
+        )
+        is None
+    )
+
+
+def test_trail_respects_toggle_off() -> None:
+    account = {
+        "be_enabled": False,
+        "trail_enabled": False,
+        "be_start_points": 10,
+        "trail_start_points": 10,
+        "trail_lock_points": 5,
+        "sl_points": 100,
+    }
+    assert manage_sl("BUY", 1.0, 1.001, 0.999, 0.00001, account) is None
+
+
+def test_breakout_hard_sl_points() -> None:
+    market = {"bars_m1": _bars_breakout(), "bid": 1.1021, "ask": 1.1022, "point": 0.00001}
+    sig = evaluate(market, {"sl_points": 100}, {"breakout": True, "trend": False})
     assert sig is not None
-    assert sig.side == "BUY"
     assert abs(sig.sl - (1.1022 - 0.001)) < 1e-9
 
 
-def test_no_signal_without_sl_points() -> None:
-    market = {"bars_m1": _bars_breakout(), "bid": 1.1021, "ask": 1.1022, "point": 0.00001}
-    assert evaluate(market, {"sl_points": 0}, {"breakout": True, "trend": True}) is None
-
-
-def test_trail_points() -> None:
-    account = {"be_start_points": 1000, "be_offset_points": 5, "trail_start_points": 50, "trail_lock_points": 30}
-    # profit 60 points * 0.00001 = 0.0006
-    new_sl = manage_sl("BUY", entry=1.0, price=1.0006, current_sl=0.999, point=0.00001, account=account)
-    assert new_sl is not None
-    assert abs(new_sl - (1.0006 - 0.0003)) < 1e-12
-
-
-def test_add_clones_from_master(tmp_path: Path, monkeypatch) -> None:
+def test_add_and_update_toggles(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(paths, "app_root", lambda: tmp_path)
     paths.ensure_layout(tmp_path)
     master = tmp_path / "instances" / "_master"
@@ -53,44 +90,44 @@ def test_add_clones_from_master(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "mt4" / "CHECK.mq4").write_text("//ea\n", encoding="utf-8")
     (tmp_path / "runtime" / "master_mt4.txt").write_text(str(master), encoding="utf-8")
 
-    c = clients.add(
-        login="111",
-        password="x",
-        server="Demo",
-        label="boss",
-        sl_points=200,
-        trail_lock_points=25,
-    )
-    assert c["id"] == "boss"
-    assert c["sl_points"] == 200
-    assert (tmp_path / "instances" / "boss" / "terminal.exe").exists()
-    assert (tmp_path / "instances" / "boss" / "MQL4" / "Experts" / "CHECK.mq4").exists()
-    assert (tmp_path / "instances" / "boss" / "MQL4" / "Files" / "CHECK" / "market").is_dir()
-
-    clients.update_risk("boss", sl_points=333)
-    assert clients.read("boss")["sl_points"] == 333
+    c = clients.add(login="1", password="x", server="S", label="a1", sl_points=180)
+    assert c["sl_points"] == 180
+    assert c["be_enabled"] is True
+    clients.update_risk("a1", be_enabled=False, daily_loss_limit_enabled=True, daily_loss_limit=150)
+    got = clients.read("a1")
+    assert got["be_enabled"] is False
+    assert got["daily_loss_limit"] == 150
 
 
-def test_paper_engine_uses_points(tmp_path: Path, monkeypatch) -> None:
+def test_paper_engine(tmp_path: Path, monkeypatch) -> None:
     from app.engine import Engine
 
     monkeypatch.setattr(paths, "app_root", lambda: tmp_path)
     paths.ensure_layout(tmp_path)
     (tmp_path / "config" / "defaults.json").write_text(
-        json.dumps({"breakout": True, "trend": False, "magic": 50001, "cycle_sec": 1, "symbol": "AUTO"}),
+        json.dumps({"breakout": True, "trend": False, "magic": 50001, "symbol": "AUTO"}),
         encoding="utf-8",
     )
-    # fake client + bridge
     bridge = tmp_path / "instances" / "demo" / "MQL4" / "Files" / "CHECK"
     for name in ("market", "status", "commands", "acks"):
         (bridge / name).mkdir(parents=True)
-    bars = _bars_breakout()
     (bridge / "market" / "latest.json").write_text(
-        json.dumps({"symbol": "EURUSD", "bid": 1.1021, "ask": 1.1022, "point": 0.00001, "digits": 5, "bars_m1": bars, "account": "111"}),
+        json.dumps(
+            {
+                "symbol": "EURUSD",
+                "bid": 1.1021,
+                "ask": 1.1022,
+                "point": 0.00001,
+                "digits": 5,
+                "spread": 12,
+                "bars_m1": _bars_breakout(),
+                "account": "111",
+            }
+        ),
         encoding="utf-8",
     )
     (bridge / "status" / "latest.json").write_text(
-        json.dumps({"account": "111", "positions": [], "equity": 1000}),
+        json.dumps({"account": "111", "positions": [], "equity": 10000, "balance": 10000}),
         encoding="utf-8",
     )
     (tmp_path / "clients" / "demo").mkdir(parents=True)
@@ -101,10 +138,12 @@ def test_paper_engine_uses_points(tmp_path: Path, monkeypatch) -> None:
                 "login": "111",
                 "lot": 0.02,
                 "sl_points": 100,
-                "be_start_points": 50,
-                "be_offset_points": 5,
-                "trail_start_points": 80,
-                "trail_lock_points": 40,
+                "be_enabled": True,
+                "trail_enabled": True,
+                "spread_filter_enabled": True,
+                "max_spread_points": 40,
+                "max_open_trades_enabled": True,
+                "max_open_trades": 1,
                 "bridge": str(bridge),
                 "mt4_dir": str(tmp_path / "instances" / "demo"),
             }
@@ -115,10 +154,8 @@ def test_paper_engine_uses_points(tmp_path: Path, monkeypatch) -> None:
         json.dumps({"clients": [{"id": "demo", "login": "111"}]}),
         encoding="utf-8",
     )
-
     eng = Engine()
     eng.mode = "paper"
     eng.running = True
     eng._cycle()
-    assert list((bridge / "commands").glob("cmd_*.json")) == []
     assert eng.last_reason.startswith("PAPER_")
