@@ -133,6 +133,11 @@ def atr_for_stops(
     return sanitize_atr(raw, mid=mid, specs=specs)
 
 
+def _fx_max_stop_distance(mid: float) -> float:
+    """Hard FX ceiling ≈ 25 pips on EURUSD (0.25% of mid)."""
+    return mid * 0.0025
+
+
 def stop_target_distance(
     specs: SymbolSpecs,
     strategies: StrategiesConfig,
@@ -140,9 +145,12 @@ def stop_target_distance(
     *,
     mid: float | None = None,
 ) -> float:
-    """Initial SL = force_stop_atr · sanitized ATR."""
+    """Initial SL = force_stop_atr · sanitized ATR (FX hard-capped)."""
     a = sanitize_atr(atr_value, mid=mid, specs=specs)
-    return atr_distance(a, strategies.force_stop_atr)
+    dist = atr_distance(a, strategies.force_stop_atr)
+    if mid is not None and mid > 0 and uses_pip_quotation(specs):
+        dist = min(dist, _fx_max_stop_distance(mid))
+    return dist
 
 
 def trail_lock_distance(

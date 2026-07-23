@@ -48,6 +48,39 @@ def test_eurusd_294_pip_atr_is_sanitized_to_about_10_pips() -> None:
     assert abs(pips - 10.0) < 2.0  # ~10 pips (0.1% of price × 1.0 ATR mult)
 
 
+def test_repair_pulls_in_294_pip_eurusd_sell_sl() -> None:
+    """Open SELL with SL 1.16654 must be tightened on the next manage cycle."""
+    from checktrader.management.stop_repair import repair_absurd_stop_action
+
+    cfg = load_config()
+    specs = _eu_specs()
+    entry = 1.13714
+    pos = Position(
+        "p1",
+        "EURUSD",
+        Side.SELL,
+        0.02,
+        entry,
+        1.16654,  # 294 pips — live screenshot
+        None,
+        datetime.now(UTC),
+        StrategyType.BREAKOUT,
+    )
+    action = repair_absurd_stop_action(
+        pos,
+        bid=1.13714,
+        ask=1.13724,
+        atr_value=0.0294,
+        specs=specs,
+        strategies=cfg.strategies,
+        risk=cfg.risk,
+    )
+    assert action.decision is Decision.MODIFY
+    assert action.stop_loss is not None
+    assert action.stop_loss < 1.16654
+    assert distance_pips(action.stop_loss - entry, specs) < 20.0
+
+
 def test_sane_eurusd_atr_passes_through() -> None:
     cfg = load_config()
     specs = _eu_specs()

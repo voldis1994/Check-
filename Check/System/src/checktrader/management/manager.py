@@ -5,6 +5,7 @@ from checktrader.domain.enums import Decision, ReasonCode, Side
 from checktrader.domain.models import ManagementAction, Position, RegimeSnapshot, SymbolSpecs
 from checktrader.management.breakeven import breakeven_action
 from checktrader.management.exits import regime_flip_action, stop_hit_action
+from checktrader.management.stop_repair import repair_absurd_stop_action
 from checktrader.management.take_profit import take_profit_action
 from checktrader.management.trailing import trailing_action
 
@@ -27,6 +28,18 @@ def manage_position(
     ):
         if a.decision == Decision.CLOSE:
             return a
+    # Fix insane broker SL before trail/BE (EURUSD 294-pip bug).
+    repair = repair_absurd_stop_action(
+        position,
+        bid=bid,
+        ask=ask,
+        atr_value=atr_value,
+        specs=specs,
+        strategies=config.strategies,
+        risk=config.risk,
+    )
+    if repair.decision == Decision.MODIFY:
+        return repair
     for a in (
         # Trailing first — once in profit it must keep ratcheting (BE used to starve it).
         trailing_action(position, price, atr_value, regime.regime, config.management, specs),
