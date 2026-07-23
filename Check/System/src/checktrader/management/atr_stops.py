@@ -70,10 +70,11 @@ def sanitize_atr(
     specs: SymbolSpecs,
 ) -> float | None:
     """
-    Reject absurd ATR that would place EURUSD stops at hundreds of pips.
+    Data-quality only: reject ATR that cannot be real vs mid price.
 
-    Live bug: SELL 1.13714 with SL 1.16654 → 294 pips (ATR≈0.029 treated as valid).
-    Real M15 EURUSD ATR is ~5–15 pips. Cap FX ATR at 0.3% of price; fallback ~0.1%.
+    Live bug: ATR≈0.029 on EURUSD (~2.6% of price) → SL hundreds of pips.
+    Sizing itself is always force_stop_atr · ATR — never a pip/point target.
+    If ATR/mid is absurd, replace with a price-fraction estimate (still price-native).
     """
     if atr_value is None or atr_value <= 0:
         return None
@@ -82,11 +83,11 @@ def sanitize_atr(
         return a
     ratio = a / mid
     if uses_pip_quotation(specs):
-        # >0.3% of price as ATR ⇒ garbage (≈30+ pips ATR on EURUSD)
+        # ATR > 0.3% of mid ⇒ corrupt feed / wrong scale
         if ratio > 0.003:
-            return mid * 0.001  # ~10 pips ATR → 1.0×ATR stop ≈ 10 pips
+            return mid * 0.001
         return a
-    # Commodities: >5% of price as ATR ⇒ garbage
+    # Commodities: ATR > 5% of mid ⇒ corrupt
     if ratio > 0.05:
         return mid * 0.015
     return a
@@ -133,11 +134,6 @@ def atr_for_stops(
     return sanitize_atr(raw, mid=mid, specs=specs)
 
 
-def _fx_max_stop_distance(mid: float) -> float:
-    """Hard FX ceiling ≈ 25 pips on EURUSD (0.25% of mid)."""
-    return mid * 0.0025
-
-
 def stop_target_distance(
     specs: SymbolSpecs,
     strategies: StrategiesConfig,
@@ -145,12 +141,9 @@ def stop_target_distance(
     *,
     mid: float | None = None,
 ) -> float:
-    """Initial SL = force_stop_atr · sanitized ATR (FX hard-capped)."""
+    """Initial SL = force_stop_atr · ATR (price volatility). No pip/point cap."""
     a = sanitize_atr(atr_value, mid=mid, specs=specs)
-    dist = atr_distance(a, strategies.force_stop_atr)
-    if mid is not None and mid > 0 and uses_pip_quotation(specs):
-        dist = min(dist, _fx_max_stop_distance(mid))
-    return dist
+    return atr_distance(a, strategies.force_stop_atr)
 
 
 def trail_lock_distance(

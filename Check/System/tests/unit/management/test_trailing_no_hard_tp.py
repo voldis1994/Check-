@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from checktrader.config.loader import load_config
 from checktrader.config.models import ManagementConfig
 from checktrader.domain.enums import Decision, MarketRegime, Side, StrategyType
@@ -36,16 +38,26 @@ def test_hard_take_profit_disabled_returns_none() -> None:
     assert hard_take_profit_price(entry=2.90, stop=2.88, side=Side.BUY, rr=1.5, enabled=False) is None
 
 
-def test_eurusd_294_pip_atr_is_sanitized_to_about_10_pips() -> None:
-    """Live bug: entry 1.13714 SL 1.16654 = 0.0294 = 294 pips."""
+def test_corrupt_atr_replaced_by_price_fraction_not_raw() -> None:
+    """Garbage ATR (2.6% of mid) must not size the stop; use price-native fallback."""
     cfg = load_config()
     specs = _eu_specs()
     mid = 1.13714
-    garbage_atr = 0.0294  # what produced the 294-pip SL at 1.0×ATR
+    garbage_atr = 0.0294
     dist = stop_target_distance(specs, cfg.strategies, garbage_atr, mid=mid)
-    pips = distance_pips(dist, specs)
-    assert pips < 20.0
-    assert abs(pips - 10.0) < 2.0  # ~10 pips (0.1% of price × 1.0 ATR mult)
+    assert dist == pytest.approx(mid * 0.001 * cfg.strategies.force_stop_atr)
+    assert dist < garbage_atr * 0.5
+
+
+def test_no_hard_pip_cap_on_sane_atr() -> None:
+    """SL follows ATR only — no 25-pip / 0.25% hard ceiling."""
+    cfg = load_config()
+    specs = _eu_specs()
+    mid = 1.13714
+    atr = 0.0022  # ~22 pips ATR, still < 0.3% of mid → not sanitized
+    dist = stop_target_distance(specs, cfg.strategies, atr, mid=mid)
+    assert dist == pytest.approx(atr * cfg.strategies.force_stop_atr)
+    assert distance_pips(dist, specs) > 20.0
 
 
 def test_repair_pulls_in_294_pip_eurusd_sell_sl() -> None:
