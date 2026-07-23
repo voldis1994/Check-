@@ -19,6 +19,7 @@
 - Default lot **0.02**; tighter stops (`force_stop_atr` 0.18, buffers 0.08); M1 impulse / breakout SL clamped under trigger candle (not lookback range).
 - No hard TP by default (`hard_take_profit=false`): exits via trailing from ~0.35R + breakeven; management auto-synced.
 - Symbol-aware entries: open trade on another symbol no longer freezes the new chart in perpetual `MANAGEMENT_NO_ACTION`; START LIVE auto-arms `trading_enabled`.
+- Windows/MT4: atomic command write no longer crashes on directory fsync `PermissionError` (Errno 13) under AppData `MQL4\\Files\\commands`.
 
 ## v3.0.0
 
