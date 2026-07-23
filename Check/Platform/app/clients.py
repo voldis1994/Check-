@@ -87,12 +87,68 @@ def ea_source() -> Path:
     return paths.app_root() / "mt4" / "CHECK.mq4"
 
 
-def find_metaeditor(mt4_exe: str = "", explicit: str = "") -> Path | None:
-    if explicit and Path(explicit).exists():
-        return Path(explicit)
+def find_terminal_exe(explicit: str = "") -> Path | None:
+    """Resolve terminal.exe from explicit path, then common install folders."""
     candidates: list[Path] = []
+    raw = (explicit or "").strip().strip('"')
+    if raw:
+        candidates.append(Path(os.path.expandvars(raw)))
+
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    local = os.environ.get("LOCALAPPDATA", "")
+    names = (
+        "MetaTrader 4",
+        "MetaTrader",
+        "MetaTrader 4 IC Markets",
+        "IC Markets MetaTrader 4",
+        "Pepperstone MetaTrader 4",
+        "FXCM MetaTrader 4",
+        "XM Global MT4",
+        "Admiral Markets MetaTrader 4",
+        "Exness MetaTrader 4",
+        "FTMO MetaTrader 4",
+    )
+    for base in (pf, pf86, local):
+        if not base:
+            continue
+        root = Path(base)
+        for name in names:
+            candidates.append(root / name / "terminal.exe")
+        try:
+            if root.is_dir():
+                for child in root.iterdir():
+                    if child.is_dir():
+                        candidates.append(child / "terminal.exe")
+        except OSError:
+            pass
+
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            key = str(c.resolve()) if c.exists() else str(c)
+        except OSError:
+            key = str(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if c.is_file():
+                return c.resolve()
+        except OSError:
+            continue
+    return None
+
+
+def find_metaeditor(mt4_exe: str = "", explicit: str = "") -> Path | None:
+    if explicit and Path(os.path.expandvars(explicit)).exists():
+        return Path(os.path.expandvars(explicit))
+    candidates: list[Path] = []
+    term = find_terminal_exe(mt4_exe) if mt4_exe else find_terminal_exe()
+    if term is not None:
+        candidates.append(term.parent / "metaeditor.exe")
     if mt4_exe:
-        p = Path(mt4_exe)
+        p = Path(os.path.expandvars(mt4_exe))
         candidates.append(p.parent / "metaeditor.exe")
     pf = os.environ.get("ProgramFiles", r"C:\Program Files")
     pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
@@ -102,6 +158,46 @@ def find_metaeditor(mt4_exe: str = "", explicit: str = "") -> Path | None:
         if c.exists():
             return c
     return None
+
+
+def write_launch_bat(cid: str, *, login: str, password: str, server: str, mt4_exe: str) -> Path:
+    """Write ASCII-only launch bat (Windows cmd encoding-safe)."""
+    path = client_path(cid)
+    path.mkdir(parents=True, exist_ok=True)
+    bat = path / "launch_mt4.bat"
+    exe = mt4_exe.replace('"', "")
+    lines = [
+        "@echo off",
+        "chcp 65001 >nul",
+        f'set "MT4={exe}"',
+        'if not exist "%MT4%" (',
+        "  echo Missing terminal.exe",
+        "  echo Set path in CHECK - SETTINGS - MT4 terminal.exe - SAVE",
+        "  echo Then press LAUNCH MT4 again",
+        "  pause",
+        "  exit /b 1",
+        ")",
+        f'start "" "%MT4%" /login:{login} /password:{password} /server:{server}',
+        "",
+    ]
+    bat.write_text("\n".join(lines), encoding="ascii", errors="replace")
+    return bat
+
+
+def resolve_client_mt4(client: dict[str, Any] | None = None) -> Path | None:
+    from app import settings as settings_mod
+
+    cfg = settings_mod.load()
+    for candidate in (
+        (client or {}).get("mt4_exe"),
+        cfg.get("mt4_exe"),
+        "",
+    ):
+        found = find_terminal_exe(str(candidate or ""))
+        if found is not None:
+            return found
+    return find_terminal_exe()
+
 
 
 def compile_ea(*, mt4_exe: str = "", metaeditor_exe: str = "") -> tuple[bool, str]:
@@ -200,7 +296,8 @@ def add(
     path = client_path(cid)
     path.mkdir(parents=True, exist_ok=False)
     bridge = ensure_bridge(cid)
-    exe = mt4_terminal_exe.strip() or r"%ProgramFiles%\MetaTrader 4\terminal.exe"
+    found = find_terminal_exe(mt4_terminal_exe) or find_terminal_exe()
+    exe = str(found) if found else (mt4_terminal_exe.strip() or r"%ProgramFiles%\MetaTrader 4\terminal.exe")
 
     client = {
         "id": cid,
@@ -215,30 +312,18 @@ def add(
     }
     (path / "client.json").write_text(json.dumps(client, indent=2) + "\n", encoding="utf-8")
     (path / "SETUP.txt").write_text(
-        "CHECK Platform — account ready\n"
+        "CHECK Platform - account ready\n"
         "==============================\n"
-        "1. In CHECK click DEPLOY MT4 (or it already ran)\n"
+        "1. SETTINGS: set terminal.exe path and SAVE (or DETECT)\n"
         "2. Click LAUNCH MT4\n"
-        "3. In MT4: Navigator → Experts → CHECK → drag onto M1 chart\n"
+        "3. In MT4: Navigator -> Experts -> CHECK -> drag onto M1 chart\n"
         "4. Inputs: BridgePath = EMPTY, MagicNumber = 40001\n"
         "5. Allow AutoTrading (toolbar button)\n"
-        "6. Back in CHECK → START LIVE\n"
+        "6. Back in CHECK -> START LIVE\n"
         f"\nLogin: {login}\nServer: {server}\n",
         encoding="utf-8",
     )
-    bat = path / "launch_mt4.bat"
-    bat.write_text(
-        "\n".join(
-            [
-                "@echo off",
-                f'set "MT4={exe}"',
-                'if not exist "%MT4%" (echo Missing terminal.exe — set path in CHECK Settings & pause & exit /b 1)',
-                f'start "" "%MT4%" /login:{login} /password:{password} /server:{server}',
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    write_launch_bat(cid, login=login, password=password, server=server, mt4_exe=exe)
     if ea_source().exists():
         shutil.copy2(ea_source(), path / "CHECK.mq4")
 
@@ -263,15 +348,65 @@ def delete(cid: str) -> None:
     _save_reg(reg)
 
 
+def refresh_launch_bats(mt4_exe: str = "") -> int:
+    """Rewrite all client launch bats after Settings save."""
+    n = 0
+    for row in list_clients():
+        cid = str(row.get("id") or "")
+        full = read(cid)
+        if not full:
+            continue
+        exe = find_terminal_exe(mt4_exe) or find_terminal_exe(str(full.get("mt4_exe") or "")) or find_terminal_exe()
+        if exe is None:
+            continue
+        full["mt4_exe"] = str(exe)
+        (client_path(cid) / "client.json").write_text(json.dumps(full, indent=2) + "\n", encoding="utf-8")
+        write_launch_bat(
+            cid,
+            login=str(full.get("login") or ""),
+            password=str(full.get("password") or ""),
+            server=str(full.get("server") or ""),
+            mt4_exe=str(exe),
+        )
+        n += 1
+    return n
+
+
 def launch(cid: str) -> tuple[bool, str]:
     client = read(cid)
     if not client:
         return False, "unknown client"
-    bat = client_path(cid) / "launch_mt4.bat"
-    if sys.platform.startswith("win") and bat.exists():
-        subprocess.Popen(["cmd", "/c", str(bat)], cwd=str(client_path(cid)))  # noqa: S603
-        return True, "MT4 launch started — attach CHECK to M1, then START LIVE"
-    return False, "Open launch_mt4.bat on the Windows trading PC"
+
+    exe = resolve_client_mt4(client)
+    if exe is None:
+        return (
+            False,
+            "terminal.exe not found.\n\n"
+            "Go to SETTINGS -> click ... next to MT4 terminal.exe\n"
+            "(or DETECT) -> SAVE -> LAUNCH MT4 again.\n\n"
+            "Typical path:\n"
+            "C:\\Program Files\\MetaTrader 4\\terminal.exe\n"
+            "or your broker MT4 folder.",
+        )
+
+    login = str(client.get("login") or "")
+    password = str(client.get("password") or "")
+    server = str(client.get("server") or "")
+    client["mt4_exe"] = str(exe)
+    (client_path(cid) / "client.json").write_text(json.dumps(client, indent=2) + "\n", encoding="utf-8")
+    write_launch_bat(cid, login=login, password=password, server=server, mt4_exe=str(exe))
+
+    if sys.platform.startswith("win"):
+        try:
+            subprocess.Popen(  # noqa: S603
+                [str(exe), f"/login:{login}", f"/password:{password}", f"/server:{server}"],
+                cwd=str(exe.parent),
+            )
+        except OSError as exc:
+            return False, f"Could not start MT4: {exc}"
+        return True, f"MT4 started: {exe}\n\nAttach CHECK to M1 chart, AutoTrading ON, then START LIVE"
+
+    return False, f"On Windows PC run: {client_path(cid) / 'launch_mt4.bat'}\nResolved: {exe}"
 
 
 def all_bridges() -> list[Path]:
@@ -313,6 +448,7 @@ def setup_status() -> dict[str, Any]:
     from app import settings as settings_mod
 
     cfg = settings_mod.load()
+    mt4 = find_terminal_exe(str(cfg.get("mt4_exe") or ""))
     bridges = all_bridges()
     live = []
     for b in bridges:
@@ -323,7 +459,8 @@ def setup_status() -> dict[str, Any]:
             live.append(b)
     return {
         "settings_saved": cfg_path.exists(),
-        "mt4_exe_set": bool(str(cfg.get("mt4_exe") or "").strip()),
+        "mt4_exe_set": mt4 is not None or bool(str(cfg.get("mt4_exe") or "").strip()),
+        "mt4_exe_found": mt4 is not None,
         "clients": len(list_clients()),
         "bridges": len(bridges),
         "live_bridges": len(live),

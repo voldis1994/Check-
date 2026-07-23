@@ -47,5 +47,20 @@ def test_add_client_creates_workspace(tmp_path: Path, monkeypatch) -> None:
     assert (tmp_path / "clients" / "t1" / "client.json").exists()
     assert (tmp_path / "clients" / "t1" / "bridge" / "market").is_dir()
     assert (tmp_path / "clients" / "t1" / "launch_mt4.bat").exists()
+    bat = (tmp_path / "clients" / "t1" / "launch_mt4.bat").read_text(encoding="ascii")
+    assert "Missing terminal.exe" in bat
+    assert "—" not in bat  # no unicode dash (breaks Windows cmd)
     clients.delete(c["id"])
     assert not (tmp_path / "clients" / "t1").exists()
+
+
+def test_find_terminal_exe_detects_install(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "pf"))
+    monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "pf86"))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    term = tmp_path / "pf" / "MyBroker MT4" / "terminal.exe"
+    term.parent.mkdir(parents=True)
+    term.write_bytes(b"mz")
+    found = clients.find_terminal_exe()
+    assert found is not None
+    assert found.name == "terminal.exe"
