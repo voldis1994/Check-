@@ -130,11 +130,56 @@ def add(*, login: str, password: str, server: str, label: str = "", lot: float =
     if ea_src.exists():
         shutil.copy2(ea_src, path / "CHECK.mq4")
 
+    # Push EA + Files/CHECK dirs into every installed MT4 terminal
+    deployed, deploy_msg = deploy_mt4()
+    client["deployed_terminals"] = deployed
+    client["deploy_msg"] = deploy_msg
+    (path / "client.json").write_text(json.dumps(client, indent=2) + "\n", encoding="utf-8")
+
     reg = _reg()
     reg["clients"] = [c for c in reg["clients"] if c.get("id") != cid]
     reg["clients"].append({"id": cid, "login": login, "server": server, "label": client["label"]})
     _save_reg(reg)
     return client
+
+
+def deploy_mt4() -> tuple[int, str]:
+    """Copy CHECK.mq4 into every MetaQuotes MT4 Experts folder + seed Files/CHECK."""
+    ea_src = ROOT / "mt4" / "CHECK.mq4"
+    if not ea_src.exists():
+        return 0, f"missing EA: {ea_src}"
+
+    import os
+
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return 0, "APPDATA not set (run on Windows trading PC)"
+
+    terminal_root = Path(appdata) / "MetaQuotes" / "Terminal"
+    if not terminal_root.is_dir():
+        return 0, f"no terminals under {terminal_root}"
+
+    count = 0
+    paths: list[str] = []
+    for term in terminal_root.iterdir():
+        if not term.is_dir():
+            continue
+        mql4 = term / "MQL4"
+        if not mql4.is_dir():
+            continue
+        experts = mql4 / "Experts"
+        experts.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ea_src, experts / "CHECK.mq4")
+        # Seed default bridge so empty BridgePath works immediately
+        check_files = mql4 / "Files" / "CHECK"
+        for name in ("market", "status", "commands", "acks"):
+            (check_files / name).mkdir(parents=True, exist_ok=True)
+        count += 1
+        paths.append(str(experts))
+
+    if count == 0:
+        return 0, "no MQL4 folders found — install/open MT4 once, then DEPLOY again"
+    return count, f"deployed CHECK.mq4 to {count} terminal(s). Open MetaEditor → F7 compile → attach to M1."
 
 
 def delete(cid: str) -> None:

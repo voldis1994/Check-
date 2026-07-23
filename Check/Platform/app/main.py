@@ -99,6 +99,7 @@ class App:
         right.pack(side=tk.RIGHT)
         self._btn(right, "START LIVE", C["ok"], lambda: self._start("live")).pack(side=tk.LEFT, padx=3)
         self._btn(right, "PAPER", C["sky"], lambda: self._start("paper")).pack(side=tk.LEFT, padx=3)
+        self._btn(right, "DEPLOY MT4", C["brass"], self._deploy_mt4).pack(side=tk.LEFT, padx=3)
         self._btn(right, "STOP", C["stop"], self._stop).pack(side=tk.LEFT, padx=3)
 
         nav = tk.Frame(self.root, bg=C["panel"])
