@@ -24,6 +24,7 @@
 - Fix ghost `RISK_POSITION_EXISTS`: empty broker `positions: []` no longer keeps stale `state.json` trades (`[] or local` footgun).
 - MT4 bridge: retry `MoveFileExW` + direct-write fallback when `atomic move failed` (Python sharing lock on `latest.json`); Python JSON read retries.
 - Ops Floor dashboard: full redesign — brand rail, color metric slabs (lime/cyan/coral/violet), no navy sidebar; FLOOR / BOOK / TAPE pages + motion.
+- Trailing fix: ATR lock-back `trailing_lock_atr=0.50` (≈20 NATURALGAS points when ATR≈0.04); trail ratchets past BE; live MODIFY updates local SL.
 
 ## v3.0.0
 
