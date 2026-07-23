@@ -1,13 +1,17 @@
 @echo off
 setlocal EnableExtensions
-title CHECK Platform
+title CHECK Platform v4
 cd /d "%~dp0"
 
 if not exist "clients" mkdir "clients"
 if not exist "runtime" mkdir "runtime"
-if not exist "config\settings.json" (
-  copy /Y "config\defaults.json" "config\settings.json" >nul
+if not exist "config" mkdir "config"
+if not exist "config\defaults.json" (
+  echo Missing config\defaults.json
+  pause
+  exit /b 1
 )
+if not exist "config\settings.json" copy /Y "config\defaults.json" "config\settings.json" >nul
 
 if exist "dist\CHECK\CHECK.exe" (
   start "" "dist\CHECK\CHECK.exe"

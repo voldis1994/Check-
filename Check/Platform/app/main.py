@@ -1,4 +1,4 @@
-"""CHECK Platform v4 — single EXE trading desk."""
+"""CHECK Platform v4 — complete trading desk (single EXE entry)."""
 
 from __future__ import annotations
 
@@ -7,14 +7,12 @@ import os
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
-from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
-# Ensure package root on path (source + frozen)
-if getattr(sys, "frozen", False):
-    ROOT = Path(sys.executable).resolve().parent
-else:
-    ROOT = Path(__file__).resolve().parents[1]
+from app import paths
+
+# Bootstrap path before other imports when frozen
+ROOT = paths.app_root()
 os.chdir(ROOT)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -46,26 +44,28 @@ def _font(names: list[str], size: int, weight: str = "normal") -> tuple:
 
 class App:
     def __init__(self, root: tk.Tk) -> None:
+        paths.ensure_layout()
+        settings_mod.seed_defaults()
+        if not (ROOT / "config" / "settings.json").exists():
+            settings_mod.save(settings_mod.load())
+
         self.root = root
-        self.root.title("CHECK · Platform v4")
-        self.root.geometry("1280x820")
-        self.root.minsize(1024, 700)
+        self.root.title("CHECK Platform v4")
+        self.root.geometry("1320x860")
+        self.root.minsize(1080, 720)
         self.root.configure(bg=C["bg"])
         self.f_brand = _font(["Bahnschrift", "Segoe UI"], 28, "bold")
         self.f_h = _font(["Bahnschrift", "Segoe UI"], 12, "bold")
         self.f_ui = _font(["Bahnschrift", "Segoe UI"], 10)
         self.f_mono = _font(["Cascadia Mono", "Consolas"], 9)
 
-        (ROOT / "clients").mkdir(exist_ok=True)
-        (ROOT / "runtime").mkdir(exist_ok=True)
-        if not (ROOT / "config" / "settings.json").exists():
-            settings_mod.save(settings_mod.load())
-
         self.engine = Engine(on_log=self._push_log)
         self._log_lines: list[str] = []
         self._vars: dict[str, tk.StringVar] = {}
         self._page = "floor"
         self._nav: dict[str, tk.Button] = {}
+        self.kpi: dict[str, tk.StringVar] = {}
+        self.wizard = tk.StringVar(value="")
 
         self._style()
         self._build()
@@ -77,22 +77,40 @@ class App:
         st = ttk.Style()
         with contextlib.suppress(tk.TclError):
             st.theme_use("clam")
-        st.configure("T.Treeview", background=C["panel"], foreground=C["ink"], fieldbackground=C["panel"], rowheight=26, font=self.f_mono)
+        st.configure(
+            "T.Treeview",
+            background=C["panel"],
+            foreground=C["ink"],
+            fieldbackground=C["panel"],
+            rowheight=26,
+            font=self.f_mono,
+        )
         st.configure("T.Treeview.Heading", background=C["bg"], foreground=C["brass"], font=self.f_ui)
         st.map("T.Treeview", background=[("selected", C["line"])])
 
     def _btn(self, parent, text, color, cmd, **kw) -> tk.Button:
         return tk.Button(
-            parent, text=text, command=cmd, bg=C["panel"], fg=color, activebackground=C["line"],
-            activeforeground=color, relief=tk.FLAT, highlightthickness=1, highlightbackground=color,
-            font=self.f_ui, padx=kw.get("padx", 12), pady=7, cursor="hand2",
+            parent,
+            text=text,
+            command=cmd,
+            bg=C["panel"],
+            fg=color,
+            activebackground=C["line"],
+            activeforeground=color,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=color,
+            font=self.f_ui,
+            padx=kw.get("padx", 12),
+            pady=7,
+            cursor="hand2",
         )
 
     def _build(self) -> None:
         top = tk.Frame(self.root, bg=C["bg"])
         top.pack(fill=tk.X, padx=16, pady=12)
         tk.Label(top, text="CHECK", bg=C["bg"], fg=C["brass"], font=self.f_brand).pack(side=tk.LEFT)
-        tk.Label(top, text="  PLATFORM v4", bg=C["bg"], fg=C["ink"], font=self.f_brand).pack(side=tk.LEFT)
+        tk.Label(top, text="  PLATFORM", bg=C["bg"], fg=C["ink"], font=self.f_brand).pack(side=tk.LEFT)
         self.status = tk.Label(top, text="OFFLINE", bg=C["bg"], fg=C["stop"], font=self.f_h)
         self.status.pack(side=tk.LEFT, padx=16)
         right = tk.Frame(top, bg=C["bg"])
@@ -104,10 +122,20 @@ class App:
 
         nav = tk.Frame(self.root, bg=C["panel"])
         nav.pack(fill=tk.X)
-        for key, label, col in (("floor", "FLOOR", C["brass"]), ("accounts", "ACCOUNTS", C["sky"]), ("settings", "SETTINGS", C["warn"])):
+        for key, label, col in (
+            ("floor", "FLOOR", C["brass"]),
+            ("accounts", "ACCOUNTS", C["sky"]),
+            ("settings", "SETTINGS", C["warn"]),
+        ):
             b = self._btn(nav, label, col, lambda k=key: self._show(k))
             b.pack(side=tk.LEFT, padx=6, pady=8)
             self._nav[key] = b
+
+        wiz = tk.Frame(self.root, bg=C["panel"])
+        wiz.pack(fill=tk.X, padx=0)
+        tk.Label(wiz, textvariable=self.wizard, bg=C["panel"], fg=C["mute"], font=self.f_mono, anchor="w").pack(
+            fill=tk.X, padx=14, pady=6
+        )
 
         self.body = tk.Frame(self.root, bg=C["bg"])
         self.body.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
@@ -117,7 +145,6 @@ class App:
             "settings": self._page_settings(self.body),
         }
 
-        # Footer BEFORE first _show/refresh — otherwise AttributeError: no 'foot'
         foot = tk.Frame(self.root, bg=C["panel"], height=36)
         foot.pack(fill=tk.X, side=tk.BOTTOM)
         self.foot = tk.Label(foot, text="", bg=C["panel"], fg=C["mute"], font=self.f_mono, anchor="w")
@@ -129,7 +156,6 @@ class App:
         f = tk.Frame(parent, bg=C["bg"])
         kpi = tk.Frame(f, bg=C["bg"])
         kpi.pack(fill=tk.X, pady=(0, 8))
-        self.kpi = {}
         for key, title, col in (
             ("equity", "EQUITY", C["ok"]),
             ("pos", "POSITIONS", C["brass"]),
@@ -147,8 +173,12 @@ class App:
             f, columns=("account", "equity", "symbol", "market", "pos", "conn"), show="headings", style="T.Treeview", height=8
         )
         for c, t, w in (
-            ("account", "ACCOUNT", 100), ("equity", "EQUITY", 90), ("symbol", "SYMBOL", 100),
-            ("market", "MARKET", 80), ("pos", "POS", 50), ("conn", "CONN", 60),
+            ("account", "ACCOUNT", 100),
+            ("equity", "EQUITY", 90),
+            ("symbol", "SYMBOL", 100),
+            ("market", "MARKET", 80),
+            ("pos", "POS", 50),
+            ("conn", "CONN", 60),
         ):
             self.tree.heading(c, text=t)
             self.tree.column(c, width=w, anchor="w")
@@ -159,8 +189,13 @@ class App:
             f, columns=("account", "ticket", "side", "lot", "open", "sl", "pl"), show="headings", style="T.Treeview", height=6
         )
         for c, t, w in (
-            ("account", "ACCOUNT", 90), ("ticket", "TICKET", 80), ("side", "SIDE", 50),
-            ("lot", "LOT", 50), ("open", "OPEN", 90), ("sl", "SL", 90), ("pl", "P/L", 70),
+            ("account", "ACCOUNT", 90),
+            ("ticket", "TICKET", 80),
+            ("side", "SIDE", 50),
+            ("lot", "LOT", 50),
+            ("open", "OPEN", 90),
+            ("sl", "SL", 90),
+            ("pl", "P/L", 70),
         ):
             self.pos.heading(c, text=t)
             self.pos.column(c, width=w, anchor="w")
@@ -184,32 +219,65 @@ class App:
 
     def _page_settings(self, parent) -> tk.Frame:
         f = tk.Frame(parent, bg=C["bg"])
-        tk.Label(f, text="SETTINGS (saved into EXE config)", bg=C["bg"], fg=C["brass"], font=self.f_h).pack(anchor="w")
+        tk.Label(f, text="SETTINGS — lot / SL / BE / trail / MT4 paths", bg=C["bg"], fg=C["brass"], font=self.f_h).pack(
+            anchor="w"
+        )
         form = tk.Frame(f, bg=C["panel"])
         form.pack(fill=tk.BOTH, expand=True, pady=8)
         cfg = settings_mod.load()
         fields = (
-            ("lot", "LOT"), ("sl_atr", "SL ATR ×"), ("be_start_atr", "BE START ATR ×"),
-            ("be_offset_atr", "BE OFFSET ATR ×"), ("trail_start_atr", "TRAIL START ATR ×"),
-            ("trail_lock_atr", "TRAIL LOCK ATR ×"), ("symbol", "SYMBOL"),
-            ("mt4_exe", "MT4 terminal.exe"), ("cycle_sec", "CYCLE SEC"), ("magic", "MAGIC"),
+            ("lot", "LOT"),
+            ("sl_atr", "SL ATR ×"),
+            ("be_start_atr", "BE START ATR ×"),
+            ("be_offset_atr", "BE OFFSET ATR ×"),
+            ("trail_start_atr", "TRAIL START ATR ×"),
+            ("trail_lock_atr", "TRAIL LOCK ATR ×"),
+            ("symbol", "SYMBOL"),
+            ("cycle_sec", "CYCLE SEC"),
+            ("magic", "MAGIC"),
+            ("mt4_exe", "MT4 terminal.exe"),
+            ("metaeditor_exe", "MetaEditor.exe (optional)"),
         )
         for i, (key, label) in enumerate(fields):
-            tk.Label(form, text=label, bg=C["panel"], fg=C["mute"], font=self.f_ui).grid(row=i, column=0, sticky="w", padx=12, pady=5)
+            tk.Label(form, text=label, bg=C["panel"], fg=C["mute"], font=self.f_ui).grid(
+                row=i, column=0, sticky="w", padx=12, pady=5
+            )
             var = tk.StringVar(value=str(cfg.get(key, "")))
             self._vars[key] = var
-            tk.Entry(form, textvariable=var, bg=C["bg"], fg=C["ink"], insertbackground=C["brass"], relief=tk.FLAT, width=48, font=self.f_mono).grid(
-                row=i, column=1, sticky="w", padx=8, pady=5
+            ent = tk.Entry(
+                form,
+                textvariable=var,
+                bg=C["bg"],
+                fg=C["ink"],
+                insertbackground=C["brass"],
+                relief=tk.FLAT,
+                width=52,
+                font=self.f_mono,
             )
+            ent.grid(row=i, column=1, sticky="w", padx=8, pady=5)
+            if key in {"mt4_exe", "metaeditor_exe"}:
+                self._btn(form, "…", C["sky"], lambda k=key: self._browse(k), padx=8).grid(row=i, column=2, padx=4)
+
         self.trend_v = tk.BooleanVar(value=bool(cfg.get("trend", True)))
         self.bo_v = tk.BooleanVar(value=bool(cfg.get("breakout", True)))
-        self.force_v = tk.BooleanVar(value=bool(cfg.get("force_idle", True)))
+        self.force_v = tk.BooleanVar(value=bool(cfg.get("force_idle", False)))
         row = len(fields)
-        tk.Checkbutton(form, text="TREND", variable=self.trend_v, bg=C["panel"], fg=C["ink"], selectcolor=C["bg"]).grid(row=row, column=1, sticky="w")
-        tk.Checkbutton(form, text="BREAKOUT", variable=self.bo_v, bg=C["panel"], fg=C["ink"], selectcolor=C["bg"]).grid(row=row + 1, column=1, sticky="w")
-        tk.Checkbutton(form, text="FORCE IDLE", variable=self.force_v, bg=C["panel"], fg=C["ink"], selectcolor=C["bg"]).grid(row=row + 2, column=1, sticky="w")
+        tk.Checkbutton(form, text="TREND UP/DOWN", variable=self.trend_v, bg=C["panel"], fg=C["ink"], selectcolor=C["bg"]).grid(
+            row=row, column=1, sticky="w"
+        )
+        tk.Checkbutton(form, text="BREAKOUT", variable=self.bo_v, bg=C["panel"], fg=C["ink"], selectcolor=C["bg"]).grid(
+            row=row + 1, column=1, sticky="w"
+        )
+        tk.Checkbutton(
+            form, text="FORCE IDLE (off recommended)", variable=self.force_v, bg=C["panel"], fg=C["ink"], selectcolor=C["bg"]
+        ).grid(row=row + 2, column=1, sticky="w")
         self._btn(form, "SAVE SETTINGS", C["ok"], self._save_settings).grid(row=row + 3, column=1, sticky="w", pady=12)
         return f
+
+    def _browse(self, key: str) -> None:
+        path = filedialog.askopenfilename(title="Select executable", filetypes=[("EXE", "*.exe"), ("All", "*.*")])
+        if path:
+            self._vars[key].set(path)
 
     def _show(self, key: str) -> None:
         self._page = key
@@ -227,6 +295,15 @@ class App:
         self._log_lines = self._log_lines[-200:]
 
     def _start(self, mode: str) -> None:
+        st = clients.setup_status()
+        if mode == "live" and not st["ready"]:
+            if not messagebox.askyesno(
+                "START LIVE",
+                "No live MT4 market feed yet.\n\n"
+                "Need: DEPLOY → LAUNCH MT4 → attach CHECK on M1 → AutoTrading ON.\n\n"
+                "Start anyway?",
+            ):
+                return
         self.engine.start(mode)
         self.refresh()
 
@@ -235,11 +312,12 @@ class App:
         self.refresh()
 
     def _deploy_mt4(self) -> None:
-        n, msg = clients.deploy_mt4()
-        if n > 0:
-            messagebox.showinfo("DEPLOY MT4", msg)
-        else:
-            messagebox.showwarning("DEPLOY MT4", msg)
+        cfg = settings_mod.load()
+        n, msg = clients.deploy_mt4(
+            mt4_exe=str(cfg.get("mt4_exe") or ""),
+            metaeditor_exe=str(cfg.get("metaeditor_exe") or ""),
+        )
+        (messagebox.showinfo if n > 0 else messagebox.showwarning)("DEPLOY MT4", msg)
         self.refresh()
 
     def _save_settings(self) -> None:
@@ -247,7 +325,15 @@ class App:
             data = settings_mod.load()
             for k, var in self._vars.items():
                 raw = var.get().strip()
-                if k in {"lot", "sl_atr", "be_start_atr", "be_offset_atr", "trail_start_atr", "trail_lock_atr", "cycle_sec"}:
+                if k in {
+                    "lot",
+                    "sl_atr",
+                    "be_start_atr",
+                    "be_offset_atr",
+                    "trail_start_atr",
+                    "trail_lock_atr",
+                    "cycle_sec",
+                }:
                     data[k] = float(raw.replace(",", "."))
                 elif k == "magic":
                     data[k] = int(float(raw))
@@ -258,6 +344,7 @@ class App:
             data["force_idle"] = bool(self.force_v.get())
             settings_mod.save(data)
             messagebox.showinfo("Settings", "Saved.")
+            self.refresh()
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Settings", str(exc))
 
@@ -265,8 +352,8 @@ class App:
         win = tk.Toplevel(self.root)
         win.title("Add account")
         win.configure(bg=C["panel"])
-        win.geometry("420x300")
-        fields = {}
+        win.geometry("440x320")
+        fields: dict[str, tk.StringVar] = {}
         for key, label, show in (
             ("label", "Label", ""),
             ("login", "Login", ""),
@@ -288,17 +375,17 @@ class App:
                     server=fields["server"].get(),
                     label=fields["label"].get(),
                     lot=float(fields["lot"].get().replace(",", ".") or 0.02),
-                    mt4_exe=str(cfg.get("mt4_exe") or ""),
+                    mt4_terminal_exe=str(cfg.get("mt4_exe") or ""),
+                    metaeditor_exe=str(cfg.get("metaeditor_exe") or ""),
                 )
                 win.destroy()
-                deploy_note = c.get("deploy_msg") or "Run DEPLOY MT4 from the top bar."
                 messagebox.showinfo(
-                    "Client",
-                    f"Created {c['id']}\n\n"
-                    f"{deploy_note}\n\n"
-                    f"Next: LAUNCH MT4 → compile CHECK (F7) → attach to M1 → START LIVE",
+                    "Client ready",
+                    f"Created {c['id']}\n\n{c.get('deploy_msg', '')}\n\n"
+                    "Next: LAUNCH MT4 → attach CHECK on M1 → START LIVE",
                 )
                 self._render_clients()
+                self.refresh()
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror("Add", str(exc))
 
@@ -309,7 +396,13 @@ class App:
             w.destroy()
         rows = clients.list_clients()
         if not rows:
-            tk.Label(self.clients_host, text="No clients — press + ADD ACCOUNT", bg=C["bg"], fg=C["mute"], font=self.f_ui).pack(pady=20)
+            tk.Label(
+                self.clients_host,
+                text="No clients — press + ADD ACCOUNT (login / password / server)",
+                bg=C["bg"],
+                fg=C["mute"],
+                font=self.f_ui,
+            ).pack(pady=20)
             return
         for row in rows:
             cid = str(row.get("id"))
@@ -319,7 +412,10 @@ class App:
             tk.Label(
                 line,
                 text=f"{cid}  |  {full.get('login')}  |  {full.get('server')}  |  lot={full.get('lot', '—')}",
-                bg=C["panel"], fg=C["ink"], font=self.f_mono, anchor="w",
+                bg=C["panel"],
+                fg=C["ink"],
+                font=self.f_mono,
+                anchor="w",
             ).pack(side=tk.LEFT, padx=10, pady=8)
             self._btn(line, "LAUNCH MT4", C["ok"], lambda c=cid: self._launch(c), padx=8).pack(side=tk.RIGHT, padx=4)
             self._btn(line, "DELETE", C["stop"], lambda c=cid: self._delete(c), padx=8).pack(side=tk.RIGHT, padx=4)
@@ -329,15 +425,29 @@ class App:
         (messagebox.showinfo if ok else messagebox.showwarning)("MT4", msg)
 
     def _delete(self, cid: str) -> None:
-        if messagebox.askyesno("Delete", f"Delete client {cid}?"):
+        if messagebox.askyesno("Delete", f"Delete client {cid} and its folder?"):
             clients.delete(cid)
             self._render_clients()
+            self.refresh()
+
+    def _wizard_text(self) -> str:
+        st = clients.setup_status()
+        steps = [
+            ("1.Settings/mt4_exe", st["mt4_exe_set"]),
+            ("2.Add account", st["clients"] > 0),
+            ("3.DEPLOY+attach M1", st["live_bridges"] > 0),
+            ("4.START LIVE", self.engine.running),
+        ]
+        bits = [f"{'[OK]' if ok else '[ ]'} {name}" for name, ok in steps]
+        return "  →  ".join(bits)
 
     def refresh(self) -> None:
         if not getattr(self, "foot", None) or not getattr(self, "tree", None):
             return
         online = self.engine.running
         self.status.configure(text="ONLINE" if online else "OFFLINE", fg=C["ok"] if online else C["stop"])
+        self.wizard.set(self._wizard_text())
+
         bridges = clients.all_bridges()
         eq = 0.0
         npos = 0
@@ -354,20 +464,21 @@ class App:
             age = bridge.age_s(b / "market" / "latest.json")
             age_s = f"{age:.0f}s" if age is not None else "—"
             conn = "YES" if st.get("connected") else ("—" if not st else "NO")
-            self.tree.insert("", tk.END, values=(acct, f"{equity:.2f}", mk.get("symbol") or "—", age_s, len(positions), conn))
+            self.tree.insert(
+                "",
+                tk.END,
+                values=(acct, f"{equity:.2f}", mk.get("symbol") or "—", age_s, len(positions), conn),
+            )
             for p in positions:
                 if not isinstance(p, dict):
                     continue
                 self.pos.insert(
                     "",
                     tk.END,
-                    values=(
-                        acct, p.get("ticket"), p.get("side"), p.get("lot"),
-                        p.get("open"), p.get("sl"), p.get("profit"),
-                    ),
+                    values=(acct, p.get("ticket"), p.get("side"), p.get("lot"), p.get("open"), p.get("sl"), p.get("profit")),
                 )
         if not bridges:
-            self.tree.insert("", tk.END, values=("(no clients)", "0", "—", "—", "0", "—"))
+            self.tree.insert("", tk.END, values=("(no feed)", "0", "—", "—", "0", "—"))
         if npos == 0:
             self.pos.insert("", tk.END, values=("(flat)", "—", "—", "—", "—", "—", "—"))
 
@@ -381,7 +492,10 @@ class App:
         self.log.insert("1.0", "\n".join(self._log_lines[-40:]))
         self.log.configure(state=tk.DISABLED)
         self.foot.configure(
-            text=f"root={ROOT}  |  mode={self.engine.mode}  |  clients={len(clients.list_clients())}  |  reason={self.engine.last_reason}"
+            text=(
+                f"root={ROOT}  |  mode={self.engine.mode}  |  "
+                f"clients={len(clients.list_clients())}  |  reason={self.engine.last_reason}"
+            )
         )
 
     def _tick(self) -> None:
@@ -398,6 +512,7 @@ class App:
 
 
 def main() -> None:
+    paths.ensure_layout()
     root = tk.Tk()
     with contextlib.suppress(tk.TclError):
         root.state("zoomed")
