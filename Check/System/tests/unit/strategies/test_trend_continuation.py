@@ -207,6 +207,7 @@ def test_no_armed_setup_no_pullback_returns_hold() -> None:
             ReasonCode.TREND_STRUCTURE_INVALID,
         }
 
+
 def test_creates_armed_setup_on_pullback() -> None:
     """When M5 last bar dips into EMA20 zone, an ARMED setup should be created."""
     cfg = load_config()
