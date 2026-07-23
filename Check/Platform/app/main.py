@@ -234,6 +234,14 @@ class App:
         self.engine.stop()
         self.refresh()
 
+    def _deploy_mt4(self) -> None:
+        n, msg = clients.deploy_mt4()
+        if n > 0:
+            messagebox.showinfo("DEPLOY MT4", msg)
+        else:
+            messagebox.showwarning("DEPLOY MT4", msg)
+        self.refresh()
+
     def _save_settings(self) -> None:
         try:
             data = settings_mod.load()
@@ -283,9 +291,12 @@ class App:
                     mt4_exe=str(cfg.get("mt4_exe") or ""),
                 )
                 win.destroy()
+                deploy_note = c.get("deploy_msg") or "Run DEPLOY MT4 from the top bar."
                 messagebox.showinfo(
                     "Client",
-                    f"Created {c['id']}\nBridgePath → see BRIDGE.txt\nThen LAUNCH MT4 + attach CHECK.mq4 on M1",
+                    f"Created {c['id']}\n\n"
+                    f"{deploy_note}\n\n"
+                    f"Next: LAUNCH MT4 → compile CHECK (F7) → attach to M1 → START LIVE",
                 )
                 self._render_clients()
             except Exception as exc:  # noqa: BLE001
