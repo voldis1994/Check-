@@ -222,8 +222,9 @@ class DashboardApp:
         self.pages["positions"] = self._page_positions(mid)
         self.pages["tape"] = self._page_tape(mid)
         self.pages["settings"] = self._page_settings(mid)
-        self._show_page("floor")
+        # Footer before first page show — refresh() needs foot_vars.
         self._build_footer(shell)
+        self._show_page("floor")
 
     def _btn(self, parent: tk.Misc, text: str, color: str, command, *, padx: int = 14) -> tk.Button:
         return tk.Button(
@@ -871,17 +872,18 @@ class DashboardApp:
         if self._page == "accounts":
             self._sync_account_rows(health)
 
-        uptime = int(time.time() - self._started_wall)
-        self.foot_vars["uptime"].set(f"{uptime // 60}m {uptime % 60}s")
-        self.foot_vars["engine"].set(
-            f"{'LIVE' if self.engine.mode == 'live' else (self.engine.mode or 'off').upper()} · "
-            f"{'UP' if self.engine.running else 'DOWN'}"
-        )
-        self.foot_vars["conn"].set(
-            "STABLE" if any(b.connected for b in health.bridges) else ("DEGRADED" if health.bridges else "NONE")
-        )
-        self.foot_vars["time"].set(time.strftime("%H:%M:%S"))
-        self.foot_vars["system"].set("ONLINE" if online else "OFFLINE")
+        if getattr(self, "foot_vars", None):
+            uptime = int(time.time() - self._started_wall)
+            self.foot_vars["uptime"].set(f"{uptime // 60}m {uptime % 60}s")
+            self.foot_vars["engine"].set(
+                f"{'LIVE' if self.engine.mode == 'live' else (self.engine.mode or 'off').upper()} · "
+                f"{'UP' if self.engine.running else 'DOWN'}"
+            )
+            self.foot_vars["conn"].set(
+                "STABLE" if any(b.connected for b in health.bridges) else ("DEGRADED" if health.bridges else "NONE")
+            )
+            self.foot_vars["time"].set(time.strftime("%H:%M:%S"))
+            self.foot_vars["system"].set("ONLINE" if online else "OFFLINE")
 
     def _set_text(self, widget: tk.Text, text: str) -> None:
         widget.configure(state=tk.NORMAL)
