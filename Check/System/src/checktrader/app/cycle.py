@@ -11,6 +11,7 @@ from checktrader.domain.models import (
     CycleAudit,
     IndicatorSnapshot,
     MarketSnapshot,
+    Position,
     RegimeSnapshot,
 )
 from checktrader.execution.commands import build_close, build_modify, build_open
@@ -63,6 +64,15 @@ def _ack_to_exec_result(ack: Acknowledgement) -> dict[str, object]:
         "broker_order_id": ack.broker_order_id,
         "message": ack.message,
     }
+
+
+def _norm_symbol(symbol: str | None) -> str:
+    return (symbol or "").strip().upper()
+
+
+def _positions_for_symbol(positions: list[Position], symbol: str) -> list[Position]:
+    target = _norm_symbol(symbol)
+    return [p for p in positions if _norm_symbol(p.symbol) == target]
 
 
 def _apply_broker_specs(context: AppContext, market: MarketSnapshot) -> None:
@@ -272,59 +282,75 @@ def run_cycle(
             context.state.setups.upsert(setup)
             audit.reasons.append(setup.reason)
 
-    # ── Step 8: position management — ALWAYS for broker/open positions ──────
-    if context.state.positions:
-        for pos in list(context.state.positions):
-            action = manage_position(
-                pos,
-                bid=market.bid,
-                ask=market.ask,
-                atr_value=regime.indicators.atr,
-                regime=regime,
-                specs=context.specs,
-                config=context.config,
-            )
-            audit.management = action
-            audit.reasons.append(action.reason)
+    # ── Step 8: position management — ONLY same-symbol (quotes match chart) ──
+    active_symbol = audit.symbol or context.specs.symbol
+    same_symbol_positions = _positions_for_symbol(context.state.positions, active_symbol)
+    other_symbol_count = len(context.state.positions) - len(same_symbol_positions)
+    audit.metrics["positions_symbol"] = len(same_symbol_positions)
+    audit.metrics["positions_other"] = other_symbol_count
 
-            if action.decision == Decision.CLOSE:
-                cmd = build_close(pos, action)
-                ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
-                audit.command = cmd
-                audit.execution_result = _ack_to_exec_result(ack)
-                audit.reasons.append(ack.reason)
-                audit.decision = Decision.CLOSE
-                audit.set_reason(ack.reason)
-            elif action.decision == Decision.MODIFY:
-                cmd = build_modify(pos, action)
-                ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
-                audit.command = cmd
-                audit.execution_result = _ack_to_exec_result(ack)
-                audit.reasons.append(ack.reason)
-                audit.decision = Decision.MODIFY
-                audit.set_reason(ack.reason)
+    managed_decision: Decision | None = None
+    for pos in list(same_symbol_positions):
+        action = manage_position(
+            pos,
+            bid=market.bid,
+            ask=market.ask,
+            atr_value=regime.indicators.atr,
+            regime=regime,
+            specs=context.specs,
+            config=context.config,
+        )
+        audit.management = action
+        audit.reasons.append(action.reason)
 
-            # Update mark-to-market price on surviving positions
-            if any(p.position_id == pos.position_id for p in context.state.positions):
-                pos.current_price = market.bid if pos.side == Side.BUY else market.ask
+        if action.decision == Decision.CLOSE:
+            cmd = build_close(pos, action)
+            ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
+            audit.command = cmd
+            audit.execution_result = _ack_to_exec_result(ack)
+            audit.reasons.append(ack.reason)
+            managed_decision = Decision.CLOSE
+            audit.decision = Decision.CLOSE
+            audit.set_reason(ack.reason)
+        elif action.decision == Decision.MODIFY:
+            cmd = build_modify(pos, action)
+            ack, context.state.positions = context.execution.execute(cmd, context.state.positions)
+            audit.command = cmd
+            audit.execution_result = _ack_to_exec_result(ack)
+            audit.reasons.append(ack.reason)
+            managed_decision = Decision.MODIFY
+            audit.decision = Decision.MODIFY
+            audit.set_reason(ack.reason)
 
-    elif ok_seq or (
-        shared_regime is not None
-        and shared_regime.regime != MarketRegime.UNKNOWN
-        and reason_seq != ReasonCode.BARS_NOT_SEQUENTIAL
+        # Update mark-to-market price on surviving positions
+        if any(p.position_id == pos.position_id for p in context.state.positions):
+            pos.current_price = market.bid if pos.side == Side.BUY else market.ask
+
+    # Refresh after management (closes may free a slot).
+    same_symbol_positions = _positions_for_symbol(context.state.positions, active_symbol)
+    room_for_entry = len(same_symbol_positions) < context.config.position.max_open_positions
+
+    # ── Step 9: strategy router when flat on THIS symbol (symbol change must not freeze) ─
+    if room_for_entry and (
+        ok_seq
+        or (
+            shared_regime is not None
+            and shared_regime.regime != MarketRegime.UNKNOWN
+            and reason_seq != ReasonCode.BARS_NOT_SEQUENTIAL
+        )
     ):
         # Warm-up: do not rewrite HISTORY_INSUFFICIENT into generic REGIME_UNKNOWN.
         if regime.reason == ReasonCode.HISTORY_INSUFFICIENT:
-            audit.decision = Decision.HOLD
-            need = int((regime.metadata or {}).get("need") or context.config.regimes.trend.ema50_period)
-            have = int(
-                (regime.metadata or {}).get("m15")
-                or (regime.metadata or {}).get("shared_m15")
-                or len(market.m15)
-            )
-            audit.set_reason(ReasonCode.HISTORY_INSUFFICIENT, [f"m15={have}/{need}"])
+            if managed_decision is None:
+                audit.decision = Decision.HOLD
+                need = int((regime.metadata or {}).get("need") or context.config.regimes.trend.ema50_period)
+                have = int(
+                    (regime.metadata or {}).get("m15")
+                    or (regime.metadata or {}).get("shared_m15")
+                    or len(market.m15)
+                )
+                audit.set_reason(ReasonCode.HISTORY_INSUFFICIENT, [f"m15={have}/{need}"])
         else:
-            # ── Step 9: strategy router (new entries when bars/regime usable) ─
             result = context.router.evaluate(
                 StrategyContext(
                     context.config,
@@ -332,13 +358,14 @@ def run_cycle(
                     market,
                     regime,
                     market.account,
-                    context.state.positions,
+                    same_symbol_positions,
                     context.state.setups,
                 )
             )
             audit.reasons.append(result.reason)
             audit.signal = result.signal
-            audit.decision = result.decision
+            if managed_decision is None:
+                audit.decision = result.decision
 
             if result.setup:
                 audit.setup_state = result.setup.state
@@ -381,10 +408,18 @@ def run_cycle(
                             context.state.setups.upsert(result.setup)
                 else:
                     audit.failed_conditions = [r.value for r in risk.messages if r != risk.reason]
-                    audit.set_reason(risk.reason, audit.failed_conditions or None)
-                    audit.decision = Decision.BLOCK
-            else:
+                    if managed_decision is None:
+                        audit.set_reason(risk.reason, audit.failed_conditions or None)
+                        audit.decision = Decision.BLOCK
+            elif managed_decision is None:
                 audit.set_reason(result.reason)
+    elif managed_decision is None and same_symbol_positions:
+        # Full on this symbol; management had nothing to change this cycle.
+        audit.decision = Decision.HOLD
+        audit.set_reason(
+            ReasonCode.MANAGEMENT_NO_ACTION,
+            [f"open={len(same_symbol_positions)} symbol={active_symbol}"],
+        )
 
     # ── Step 13: save history + state ───────────────────────────────────────
     save_history(context.config.paths.history_file, context.history)

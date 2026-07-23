@@ -331,11 +331,17 @@ def run_loop(context: AppContext) -> None:
                         )
                     else:
                         logger.info(
-                            "cycle ok account=%s symbol=%s regime=%s reason=%s source=%s",
+                            "cycle ok account=%s symbol=%s regime=%s decision=%s reason=%s "
+                            "pos=%s other=%s m1=%s m15=%s source=%s",
                             session.account_id,
                             audit.symbol,
                             audit.market_regime,
+                            audit.decision,
                             audit.reason_code,
+                            (audit.metrics or {}).get("positions_symbol", 0),
+                            (audit.metrics or {}).get("positions_other", 0),
+                            (audit.metrics or {}).get("m1_count", 0),
+                            (audit.metrics or {}).get("m15_count", 0),
                             (audit.metrics or {}).get("regime_source"),
                         )
         except Exception:  # noqa: BLE001

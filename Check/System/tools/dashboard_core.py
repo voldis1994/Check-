@@ -49,6 +49,23 @@ def load_config_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def save_config_json(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def arm_live_runtime(config_path: Path) -> bool:
+    """Force mode=live + trading_enabled=true so START LIVE actually sends orders."""
+    data = load_config_json(config_path)
+    runtime = dict(data.get("runtime") or {})
+    changed = runtime.get("mode") != "live" or runtime.get("trading_enabled") is not True
+    runtime["mode"] = "live"
+    runtime["trading_enabled"] = True
+    data["runtime"] = runtime
+    if changed:
+        save_config_json(config_path, data)
+    return changed
+
+
 def stop_file_path(rt: Path) -> Path:
     return rt / STOP_NAME
 
