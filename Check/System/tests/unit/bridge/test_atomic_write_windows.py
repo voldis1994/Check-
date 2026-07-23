@@ -9,7 +9,23 @@ from unittest.mock import patch
 from checktrader.bridge.atomic_files import read_json, write_json_atomic
 
 
-def test_atomic_write_succeeds_when_dir_fsync_denied(tmp_path: Path) -> None:
+def test_read_json_retries_transient_partial(tmp_path: Path) -> None:
+    path = tmp_path / "latest.json"
+    path.write_text('{"ok": true}', encoding="utf-8")
+    calls = {"n": 0}
+    real_read = Path.read_text
+
+    def flaky(self: Path, *args: object, **kwargs: object) -> str:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise OSError(32, "sharing violation")
+        return real_read(self, *args, **kwargs)
+
+    with patch.object(Path, "read_text", flaky):
+        data = read_json(path)
+    assert data == {"ok": True}
+    assert calls["n"] >= 3
+
     path = tmp_path / "commands" / "command_x.json"
     real_open = os.open
 

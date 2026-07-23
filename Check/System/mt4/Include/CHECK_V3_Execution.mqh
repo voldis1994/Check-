@@ -78,10 +78,17 @@ bool CheckV3ArchiveCommandFile(string sourcePath, string commandId, string prefi
       CHECK_V3_ARCHIVE_DIR,
       prefix + "_" + CheckV3SafeFilePart(commandId) + "_" + IntegerToString(GetTickCount()) + ".json"
    );
-   int flags = CHECK_V3_MOVEFILE_REPLACE_EXISTING |
-               CHECK_V3_MOVEFILE_COPY_ALLOWED |
-               CHECK_V3_MOVEFILE_WRITE_THROUGH;
-   return MoveFileExW(CheckV3NormalizePath(sourcePath), target, flags);
+   string src = CheckV3NormalizePath(sourcePath);
+   string dst = CheckV3NormalizePath(target);
+   int flags = CHECK_V3_MOVEFILE_REPLACE_EXISTING | CHECK_V3_MOVEFILE_COPY_ALLOWED;
+   for(int attempt = 0; attempt < 5; attempt++)
+   {
+      ResetLastError();
+      if(MoveFileExW(src, dst, flags))
+         return true;
+      Sleep(20 + attempt * 10);
+   }
+   return false;
 }
 
 bool CheckV3SelectTicket(int ticket)

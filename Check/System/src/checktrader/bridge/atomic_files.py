@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,20 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 def read_json(path: Path) -> dict[str, Any] | None:
+    """Read JSON with brief retries — MT4 may be replacing the file (sharing/partial)."""
     if not path.exists():
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return data if isinstance(data, dict) else None
+    last_exc: Exception | None = None
+    for attempt in range(5):
+        try:
+            text = path.read_text(encoding="utf-8")
+            if not text.strip():
+                return None
+            data = json.loads(text)
+            return data if isinstance(data, dict) else None
+        except (OSError, json.JSONDecodeError, UnicodeError) as exc:
+            last_exc = exc
+            time.sleep(0.02 * (attempt + 1))
+    if last_exc is not None:
+        return None
+    return None

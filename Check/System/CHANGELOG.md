@@ -22,6 +22,7 @@
 - Windows/MT4: atomic command write no longer crashes on directory fsync `PermissionError` (Errno 13) under AppData `MQL4\\Files\\commands`.
 - Clearer `RISK_POSITION_EXISTS`: already-in-trade cycles show ticket/lot; broker symbol suffixes match; chart symbol always updates specs.
 - Fix ghost `RISK_POSITION_EXISTS`: empty broker `positions: []` no longer keeps stale `state.json` trades (`[] or local` footgun).
+- MT4 bridge: retry `MoveFileExW` + direct-write fallback when `atomic move failed` (Python sharing lock on `latest.json`); Python JSON read retries.
 
 ## v3.0.0
 

@@ -19,6 +19,7 @@
 int  CreateDirectoryW(string lpPathName, int lpSecurityAttributes);
 int  GetFileAttributesW(string lpFileName);
 bool MoveFileExW(string lpExistingFileName, string lpNewFileName, int dwFlags);
+bool DeleteFileW(string lpFileName);
 #import
 
 string CheckV3NormalizePath(string path)
@@ -216,6 +217,50 @@ string CheckV3ToRelativeFilesPath(string path)
    return abs;
 }
 
+bool CheckV3WriteTextDirect(string relTarget, string content)
+{
+   ResetLastError();
+   int handle = FileOpen(relTarget, FILE_WRITE | FILE_BIN | FILE_ANSI);
+   if(handle == INVALID_HANDLE)
+      return false;
+   FileWriteString(handle, content);
+   FileFlush(handle);
+   FileClose(handle);
+   return true;
+}
+
+bool CheckV3MoveReplaceWithRetry(string tempAbs, string targetAbs, string relTemp, string relTarget, string content)
+{
+   // Python may hold latest.json open briefly → ERROR_SHARING_VIOLATION (32).
+   int flags = CHECK_V3_MOVEFILE_REPLACE_EXISTING |
+               CHECK_V3_MOVEFILE_COPY_ALLOWED;
+   for(int attempt = 0; attempt < 8; attempt++)
+   {
+      ResetLastError();
+      if(MoveFileExW(tempAbs, targetAbs, flags))
+         return true;
+      int err = GetLastError();
+      // Delete target then retry move (helps when replace is denied).
+      DeleteFileW(targetAbs);
+      ResetLastError();
+      if(MoveFileExW(tempAbs, targetAbs, flags))
+         return true;
+      Sleep(25 + attempt * 15);
+      if(attempt >= 6)
+         Print("CHECK v3: atomic move retry ", attempt, " from ", tempAbs, " to ", targetAbs, " error=", err);
+   }
+
+   // Last resort: direct overwrite so EXPORT still updates (better than stale bridge).
+   FileDelete(relTemp);
+   if(CheckV3WriteTextDirect(relTarget, content))
+   {
+      Print("CHECK v3: atomic move failed — wrote direct to ", relTarget);
+      return true;
+   }
+   Print("CHECK v3: atomic move failed from ", tempAbs, " to ", targetAbs, " error=", GetLastError());
+   return false;
+}
+
 bool CheckV3WriteTextAtomic(string targetPath, string content)
 {
    // MQL4 FileOpen only accepts paths relative to TerminalDataPath\MQL4\Files.
@@ -224,6 +269,13 @@ bool CheckV3WriteTextAtomic(string targetPath, string content)
    string relTarget = CheckV3ToRelativeFilesPath(targetAbs);
    string relTemp = relTarget + ".tmp." + IntegerToString(GetTickCount()) + "." + IntegerToString(MathRand());
    string tempAbs = CheckV3PathJoin(CheckV3Mql4FilesRoot(), relTemp);
+
+   // Ensure parent folder exists under Files\
+   int slash = StringLen(relTarget) - 1;
+   while(slash >= 0 && StringSubstr(relTarget, slash, 1) != "\\")
+      slash--;
+   if(slash > 0)
+      CheckV3EnsureDir(CheckV3PathJoin(CheckV3Mql4FilesRoot(), StringSubstr(relTarget, 0, slash)));
 
    ResetLastError();
    int handle = FileOpen(relTemp, FILE_WRITE | FILE_BIN | FILE_ANSI);
@@ -237,16 +289,11 @@ bool CheckV3WriteTextAtomic(string targetPath, string content)
    FileFlush(handle);
    FileClose(handle);
 
-   int flags = CHECK_V3_MOVEFILE_REPLACE_EXISTING |
-               CHECK_V3_MOVEFILE_COPY_ALLOWED |
-               CHECK_V3_MOVEFILE_WRITE_THROUGH;
-   if(!MoveFileExW(tempAbs, targetAbs, flags))
+   if(!CheckV3MoveReplaceWithRetry(tempAbs, targetAbs, relTemp, relTarget, content))
    {
-      Print("CHECK v3: atomic move failed from ", tempAbs, " to ", targetAbs, " error=", GetLastError());
       FileDelete(relTemp);
       return false;
    }
-
    return true;
 }
 
