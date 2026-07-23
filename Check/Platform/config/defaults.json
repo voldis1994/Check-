@@ -10,7 +10,8 @@
   "cycle_sec": 3.0,
   "trend": true,
   "breakout": true,
-  "force_idle": true,
+  "force_idle": false,
   "mt4_exe": "",
+  "metaeditor_exe": "",
   "max_bars": 300
 }

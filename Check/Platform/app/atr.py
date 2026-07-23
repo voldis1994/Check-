@@ -9,9 +9,9 @@ def atr(bars: list[dict], period: int = 14) -> float | None:
     trs: list[float] = []
     for i in range(1, len(bars)):
         h = float(bars[i]["h"])
-        l = float(bars[i]["l"])
+        lo = float(bars[i]["l"])
         pc = float(bars[i - 1]["c"])
-        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        trs.append(max(h - lo, abs(h - pc), abs(lo - pc)))
     if len(trs) < period:
         return None
     # Wilder smooth

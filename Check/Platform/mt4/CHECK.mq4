@@ -240,12 +240,14 @@ bool DoOpen(string json, string id)
    double sl  = JsonGetNum(json, "sl");
    double tp  = JsonGetNum(json, "tp");
    string sym = JsonGetStr(json, "symbol");
+   int magic = (int)JsonGetNum(json, "magic");
+   if(magic <= 0) magic = MagicNumber;
    if(StringLen(sym) == 0) sym = Symbol();
    if(lot <= 0) lot = 0.01;
 
    int cmd = (side == "SELL" ? OP_SELL : OP_BUY);
    double price = (cmd == OP_BUY ? Ask : Bid);
-   int ticket = OrderSend(sym, cmd, lot, price, 30, sl, tp, "CHECK", MagicNumber, 0, (cmd==OP_BUY?clrLime:clrRed));
+   int ticket = OrderSend(sym, cmd, lot, price, 30, sl, tp, "CHECK", magic, 0, (cmd==OP_BUY?clrLime:clrRed));
    if(ticket < 0)
    {
       Ack(id, false, 0, "OrderSend " + IntegerToString(GetLastError()));
@@ -323,12 +325,14 @@ int OnInit()
    if(Period() != PERIOD_M1)
       Alert("CHECK EA: attach to M1 chart");
    BootDirs();
+   EventSetTimer(MathMax(1, ExportSec));
    Comment("CHECK v4 | bridge=", g_root);
    return(INIT_SUCCEEDED);
 }
 
 void OnDeinit(const int reason)
 {
+   EventKillTimer();
    Comment("");
 }
 

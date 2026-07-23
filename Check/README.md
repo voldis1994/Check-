@@ -1,25 +1,28 @@
 # CHECK
 
-Clean trading platform (v4). Old `Check/System` removed.
+Complete trading platform (v4). Old `Check/System` removed.
 
-## Start
+## Start (Windows)
 
 ```
-Check/Platform/START.bat
+Check\Platform\START.bat
 ```
 
 Or build one EXE:
 
 ```
-Check/Platform/BUILD_EXE.bat
-→ dist/CHECK/CHECK.exe
+Check\Platform\BUILD_EXE.bat
+→ dist\CHECK\CHECK.exe
 ```
 
-## Flow
+## One flow
 
-1. Settings → lot / SL / BE / trail / `terminal.exe` path → Save  
-2. Accounts → Add (login, password, server) → Launch MT4  
-3. Compile `mt4/CHECK.mq4`, attach to **M1**, set `BridgePath` from client `BRIDGE.txt`  
-4. START LIVE  
+1. **SETTINGS** → set `terminal.exe` path → Save  
+2. **ACCOUNTS** → Add (login / password / server) — DEPLOY runs automatically  
+3. **LAUNCH MT4** → Navigator → **CHECK** onto **M1** → AutoTrading ON  
+   (`BridgePath` = empty)  
+4. FLOOR shows fresh MARKET → **START LIVE**
 
-Strategies: **trend** + **breakout** only · all on **M1**.
+**PAPER** = signals only, no broker orders.
+
+Strategies: **trend** + **breakout** only · all on **M1** · SL/BE/trail = ATR × settings.

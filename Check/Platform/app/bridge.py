@@ -40,7 +40,9 @@ def write_command(bridge: Path, payload: dict[str, Any]) -> str:
     folder = bridge / "commands"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"cmd_{cmd_id}.json"
-    path.write_text(json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8")
+    tmp = folder / f"cmd_{cmd_id}.tmp"
+    tmp.write_text(json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8")
+    tmp.replace(path)
     return cmd_id
 
 
@@ -49,3 +51,19 @@ def pending_commands(bridge: Path) -> int:
     if not folder.is_dir():
         return 0
     return len(list(folder.glob("cmd_*.json")))
+
+
+def latest_ack(bridge: Path, cmd_id: str) -> dict[str, Any] | None:
+    return read_json(bridge / "acks" / f"ack_{cmd_id}.json")
+
+
+def clear_old_acks(bridge: Path, keep: int = 40) -> None:
+    folder = bridge / "acks"
+    if not folder.is_dir():
+        return
+    files = sorted(folder.glob("ack_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in files[keep:]:
+        try:
+            path.unlink()
+        except OSError:
+            pass

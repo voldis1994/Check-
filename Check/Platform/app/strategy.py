@@ -1,4 +1,4 @@
-"""M1 strategies — trend + breakout only."""
+"""M1 strategies — trend + breakout (force_idle optional, off by default)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from app.atr import atr, sanitize
 
 @dataclass
 class Signal:
-    side: str  # BUY | SELL
+    side: str
     entry: float
     sl: float
     reason: str
@@ -34,10 +34,7 @@ def evaluate(market: dict[str, Any], settings: dict[str, Any]) -> Signal | None:
     bars = market.get("bars_m1") or []
     if len(bars) < 30:
         return None
-    # chronological oldest→newest (EA sends oldest first)
     closes = [float(b["c"]) for b in bars]
-    highs = [float(b["h"]) for b in bars]
-    lows = [float(b["l"]) for b in bars]
     bid = float(market.get("bid") or closes[-1])
     ask = float(market.get("ask") or closes[-1])
     mid = (bid + ask) / 2 if bid and ask else closes[-1]
@@ -46,14 +43,12 @@ def evaluate(market: dict[str, Any], settings: dict[str, Any]) -> Signal | None:
     if raw is None:
         return None
     a = sanitize(raw, mid)
-    sl_mult = float(settings.get("sl_atr") or 1.0)
-    stop_d = a * sl_mult
+    stop_d = a * float(settings.get("sl_atr") or 1.0)
 
     last = bars[-1]
     prev = bars[-2]
     body = abs(float(last["c"]) - float(last["o"]))
 
-    # --- Breakout: M1 range break of last 20 bars ---
     if settings.get("breakout", True):
         look = bars[-21:-1]
         if len(look) >= 15:
@@ -69,7 +64,6 @@ def evaluate(market: dict[str, Any], settings: dict[str, Any]) -> Signal | None:
                     entry = bid
                     return Signal("SELL", entry, entry + stop_d, "BREAKOUT_DOWN")
 
-    # --- Trend: EMA20 vs EMA50 on M1 ---
     if settings.get("trend", True):
         e20 = _ema(closes, 20)
         e50 = _ema(closes, 50)
@@ -85,8 +79,7 @@ def evaluate(market: dict[str, Any], settings: dict[str, Any]) -> Signal | None:
                 entry = bid
                 return Signal("SELL", entry, entry + stop_d, "TREND_DOWN")
 
-    # --- Force idle momentum ---
-    if settings.get("force_idle", True) and body >= a * 0.05:
+    if settings.get("force_idle", False) and body >= a * 0.05:
         if float(last["c"]) > float(prev["c"]):
             entry = ask
             return Signal("BUY", entry, entry - stop_d, "FORCE_UP")
@@ -105,7 +98,7 @@ def manage_sl(
     atr_v: float,
     settings: dict[str, Any],
 ) -> float | None:
-    """Return new SL if trail/BE should tighten, else None."""
+    """Trail after trail_start; lock distance = trail_lock. BE after be_start."""
     a = atr_v
     if a <= 0:
         return None
@@ -119,21 +112,19 @@ def manage_sl(
         candidate = current_sl
         if profit >= be_trig:
             candidate = max(candidate, entry + be_off)
-        if profit >= max(trail_start, trail_lock):
+        if profit >= trail_start:
             candidate = max(candidate, price - trail_lock)
         if candidate > current_sl + 1e-12:
             return candidate
         return None
 
     profit = entry - price
-    candidate = current_sl if current_sl > 0 else entry + 1000 * a
-    # for sell, SL above price; missing SL → treat as wide
     if current_sl <= 0:
         current_sl = entry + 10 * a
-        candidate = current_sl
+    candidate = current_sl
     if profit >= be_trig:
         candidate = min(candidate, entry - be_off)
-    if profit >= max(trail_start, trail_lock):
+    if profit >= trail_start:
         candidate = min(candidate, price + trail_lock)
     if candidate < current_sl - 1e-12:
         return candidate
