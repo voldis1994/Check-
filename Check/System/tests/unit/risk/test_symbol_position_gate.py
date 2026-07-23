@@ -52,6 +52,47 @@ def test_other_symbol_position_does_not_block_entry() -> None:
     assert ReasonCode.RISK_POSITION_EXISTS not in result.messages
 
 
+def test_suffix_position_still_blocks_same_root_symbol() -> None:
+    cfg = load_config()
+    specs = SymbolSpecs("EURUSD", 5, 0.00001, 0.00001, 0.0001, 0.01, 100.0, 0.01, 100000.0, 0.0, 0.0)
+    signal = StrategySignal(
+        StrategyType.BREAKOUT,
+        Side.BUY,
+        "EURUSD",
+        1.1000,
+        1.0990,
+        None,
+        ReasonCode.FORCE_MOMENTUM_BUY,
+    )
+    positions = [
+        Position(
+            "99",
+            "EURUSD.r",
+            Side.BUY,
+            0.02,
+            1.0980,
+            1.0970,
+            None,
+            datetime.now(UTC),
+            StrategyType.BREAKOUT,
+        )
+    ]
+    result = validate_order(
+        signal,
+        config=cfg,
+        specs=specs,
+        account=None,
+        positions=positions,
+        limit_state=LimitState(trade_date=""),
+        bid=1.0999,
+        ask=1.1001,
+        atr_value=0.001,
+        now=datetime.now(UTC),
+    )
+    assert result.decision is Decision.BLOCK
+    assert ReasonCode.RISK_POSITION_EXISTS in result.messages
+
+
 def test_same_symbol_position_still_blocks() -> None:
     cfg = load_config()
     specs = SymbolSpecs("NATURALGAS", 3, 0.001, 0.001, 0.01, 0.01, 100.0, 0.01, 100.0, 0.0, 0.0)

@@ -5,6 +5,7 @@ from datetime import datetime
 from checktrader.config.models import SystemConfig
 from checktrader.domain.enums import Decision, ReasonCode
 from checktrader.domain.models import AccountStatus, LimitState, Position, RiskResult, StrategySignal, SymbolSpecs
+from checktrader.market_data.symbols import symbols_match
 from checktrader.risk.limits import validate_limits
 from checktrader.risk.sizing import fixed_lot
 from checktrader.risk.spread import validate_spread
@@ -38,7 +39,7 @@ def validate_order(
             failures.append(ReasonCode.RISK_ACCOUNT_NOT_OK)
 
     # Only same-symbol positions count toward max_open (chart/symbol changes must not freeze forever).
-    same_symbol = [p for p in positions if p.symbol.upper() == signal.symbol.upper()]
+    same_symbol = [p for p in positions if symbols_match(p.symbol, signal.symbol)]
     if len(same_symbol) >= config.position.max_open_positions:
         failures.append(ReasonCode.RISK_POSITION_EXISTS)
     if lot_reason != ReasonCode.RISK_ACCEPTED:

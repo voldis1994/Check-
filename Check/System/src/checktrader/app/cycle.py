@@ -20,6 +20,7 @@ from checktrader.management.manager import manage_position
 from checktrader.market_data.aggregation import aggregate_standard
 from checktrader.market_data.bars import last_closed
 from checktrader.market_data.history import save_history
+from checktrader.market_data.symbols import normalize_symbol, symbols_match
 from checktrader.market_data.validation import heartbeat_fresh, sequential_bars
 from checktrader.risk.limits import record_trade_open
 from checktrader.risk.validator import validate_order
@@ -67,12 +68,11 @@ def _ack_to_exec_result(ack: Acknowledgement) -> dict[str, object]:
 
 
 def _norm_symbol(symbol: str | None) -> str:
-    return (symbol or "").strip().upper()
+    return normalize_symbol(symbol)
 
 
 def _positions_for_symbol(positions: list[Position], symbol: str) -> list[Position]:
-    target = _norm_symbol(symbol)
-    return [p for p in positions if _norm_symbol(p.symbol) == target]
+    return [p for p in positions if symbols_match(p.symbol, symbol)]
 
 
 def _apply_broker_specs(context: AppContext, market: MarketSnapshot) -> None:
@@ -124,8 +124,8 @@ def merge_market_history(context: AppContext, market: MarketSnapshot) -> None:
     market.m15 = context.history.get("M15")
 
     if market.symbol and market.symbol.upper() not in {"", "AUTO"}:
-        if context.specs.symbol.upper() in {"AUTO", ""}:
-            context.specs.symbol = market.symbol
+        # Always follow the chart symbol — stale specs.symbol caused entry/position mismatches.
+        context.specs.symbol = market.symbol
         _apply_broker_specs(context, market)
 
     save_history(context.config.paths.history_file, context.history)
@@ -407,16 +407,33 @@ def run_cycle(
                 else:
                     audit.failed_conditions = [r.value for r in risk.messages if r != risk.reason]
                     if managed_decision is None:
-                        audit.set_reason(risk.reason, audit.failed_conditions or None)
+                        detail = list(audit.failed_conditions or [])
+                        if risk.reason == ReasonCode.RISK_POSITION_EXISTS and same_symbol_positions:
+                            p0 = same_symbol_positions[0]
+                            detail = [
+                                f"ticket={p0.position_id}",
+                                f"lot={p0.lot}",
+                                "close in MT4 or wait trailing/SL",
+                                *detail,
+                            ]
+                        audit.set_reason(risk.reason, detail or None)
                         audit.decision = Decision.BLOCK
             elif managed_decision is None:
                 audit.set_reason(result.reason)
     elif managed_decision is None and same_symbol_positions:
-        # Full on this symbol; management had nothing to change this cycle.
+        # Already in a trade on this chart — do not spam new OPEN attempts.
+        pos = same_symbol_positions[0]
         audit.decision = Decision.HOLD
+        audit.selected_strategy = pos.strategy
         audit.set_reason(
-            ReasonCode.MANAGEMENT_NO_ACTION,
-            [f"open={len(same_symbol_positions)} symbol={active_symbol}"],
+            ReasonCode.RISK_POSITION_EXISTS,
+            [
+                f"ticket={pos.position_id}",
+                f"side={pos.side.value}",
+                f"lot={pos.lot}",
+                f"symbol={active_symbol}",
+                "close in MT4 or wait trailing/SL",
+            ],
         )
 
     # ── Step 13: save history + state ───────────────────────────────────────

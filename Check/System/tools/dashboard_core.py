@@ -526,8 +526,15 @@ def format_audit_line(entry: dict[str, Any]) -> str:
     account = entry.get("account_number") or "-"
     metrics = entry.get("metrics") or {}
     counts = ""
-    if isinstance(metrics, dict) and ("m1_count" in metrics or "m15_count" in metrics):
-        counts = f"  m1={metrics.get('m1_count', '-')} m15={metrics.get('m15_count', '-')}"
+    if isinstance(metrics, dict):
+        parts: list[str] = []
+        if "m1_count" in metrics or "m15_count" in metrics:
+            parts.append(f"m1={metrics.get('m1_count', '-')}")
+            parts.append(f"m15={metrics.get('m15_count', '-')}")
+        if "positions_symbol" in metrics:
+            parts.append(f"pos={metrics.get('positions_symbol', 0)}")
+        if parts:
+            counts = "  " + " ".join(parts)
     return (
         f"{stamp}  {symbol}  acct={account}  decision={decision}  "
         f"reason={reason}  regime={regime}  strategy={strategy}{counts}"
