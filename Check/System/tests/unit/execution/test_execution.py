@@ -47,3 +47,26 @@ def test_broker_positions_win() -> None:
     result = reconcile(local, broker)
     assert result.positions[0].position_id == "broker"
     assert result.reason is ReasonCode.RECONCILED_WITH_BROKER
+
+
+def test_empty_broker_clears_local_ghosts() -> None:
+    """Flat MT4 (`positions: []`) must wipe stale state.json ghosts — not keep them via `[] or local`."""
+    from checktrader.execution.reconciliation import broker_positions_or_empty
+
+    local = [
+        Position(
+            "ghost",
+            "EURUSD",
+            Side.BUY,
+            0.02,
+            1.1,
+            1.09,
+            None,
+            datetime(2026, 1, 1, tzinfo=UTC),
+            StrategyType.BREAKOUT,
+        )
+    ]
+    assert broker_positions_or_empty([]) == []
+    result = reconcile(local, broker_positions_or_empty([]))
+    assert result.positions == []
+    assert result.closed_position_ids == ["ghost"]

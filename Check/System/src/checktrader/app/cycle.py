@@ -15,7 +15,7 @@ from checktrader.domain.models import (
     RegimeSnapshot,
 )
 from checktrader.execution.commands import build_close, build_modify, build_open
-from checktrader.execution.reconciliation import reconcile
+from checktrader.execution.reconciliation import broker_positions_or_empty, reconcile
 from checktrader.management.manager import manage_position
 from checktrader.market_data.aggregation import aggregate_standard
 from checktrader.market_data.bars import last_closed
@@ -166,7 +166,7 @@ def run_cycle(
         )
         if not ok_fresh:
             # Still sync/manage open broker positions on a stale heartbeat.
-            reconciled = reconcile(context.state.positions, market.positions or context.state.positions)
+            reconciled = reconcile(context.state.positions, broker_positions_or_empty(market.positions))
             context.state.positions = reconciled.positions
             audit.reasons.append(reconciled.reason)
             if market.account:
@@ -223,9 +223,12 @@ def run_cycle(
 
     # Always sync broker positions first — open trades must be managed even when
     # history/regime is not ready for new entries.
-    reconciled = reconcile(context.state.positions, market.positions or context.state.positions)
+    # CRITICAL: use broker_positions_or_empty — `[] or local` kept ghost flat-account blocks.
+    reconciled = reconcile(context.state.positions, broker_positions_or_empty(market.positions))
     context.state.positions = reconciled.positions
     audit.reasons.append(reconciled.reason)
+    if reconciled.closed_position_ids:
+        audit.metrics["closed_reconciled"] = len(reconciled.closed_position_ids)
     if market.account:
         audit.account_number = market.account.account_id
 
