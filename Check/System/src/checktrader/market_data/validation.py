@@ -30,7 +30,6 @@ def sequential_bars(candles: list[Candle], timeframe: str) -> tuple[bool, Reason
     return True, ReasonCode.DATA_VALID
 
 
-
 def fresh_enough(last_bar: Candle | None, now: datetime, max_age_seconds: float) -> tuple[bool, ReasonCode]:
     if last_bar is None:
         return False, ReasonCode.MARKET_DATA_MISSING
@@ -49,4 +48,3 @@ def heartbeat_fresh(heartbeat_at: datetime | None, now: datetime, max_age_second
     if age > max_age_seconds:
         return False, ReasonCode.MARKET_DATA_STALE
     return True, ReasonCode.DATA_VALID
-

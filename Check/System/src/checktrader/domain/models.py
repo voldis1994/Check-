@@ -46,12 +46,7 @@ class Candle(Serializable):
     @classmethod
     def from_dict(cls, d: dict[str, Any], timeframe: str | None = None) -> Candle:
         raw = (
-            d.get("time")
-            or d.get("timestamp")
-            or d.get("t")
-            or d.get("datetime")
-            or d.get("bar_time")
-            or d.get("Time")
+            d.get("time") or d.get("timestamp") or d.get("t") or d.get("datetime") or d.get("bar_time") or d.get("Time")
         )
         if isinstance(raw, datetime):
             t = raw

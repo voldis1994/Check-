@@ -345,9 +345,7 @@ def run_cycle(
                 audit.decision = Decision.HOLD
                 need = int((regime.metadata or {}).get("need") or context.config.regimes.trend.ema50_period)
                 have = int(
-                    (regime.metadata or {}).get("m15")
-                    or (regime.metadata or {}).get("shared_m15")
-                    or len(market.m15)
+                    (regime.metadata or {}).get("m15") or (regime.metadata or {}).get("shared_m15") or len(market.m15)
                 )
                 audit.set_reason(ReasonCode.HISTORY_INSUFFICIENT, [f"m15={have}/{need}"])
         else:
