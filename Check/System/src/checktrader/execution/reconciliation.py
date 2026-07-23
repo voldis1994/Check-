@@ -14,7 +14,14 @@ class ReconciliationResult:
 
 
 def reconcile(local_positions: list[Position], broker_positions: list[Position]) -> ReconciliationResult:
+    """Broker list is source of truth — including an empty flat account."""
     ids = {p.position_id for p in broker_positions}
     return ReconciliationResult(
-        list(broker_positions), closed_position_ids=[p.position_id for p in local_positions if p.position_id not in ids]
+        list(broker_positions),
+        closed_position_ids=[p.position_id for p in local_positions if p.position_id not in ids],
     )
+
+
+def broker_positions_or_empty(market_positions: list[Position] | None) -> list[Position]:
+    """Never treat [] as missing — empty means flat (Python `[] or x` is a footgun)."""
+    return list(market_positions) if market_positions is not None else []

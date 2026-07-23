@@ -171,10 +171,15 @@ def read_positions(bridge_dir: Path) -> list[Position]:
         entry_raw = r.get("entry_price", r.get("open_price", 0.0))
         lot = float(lot_raw if lot_raw is not None else 0.0)
         entry = float(entry_raw if entry_raw is not None else 0.0)
+        position_id = str(r.get("position_id", r.get("ticket", ""))).strip()
+        symbol = str(r.get("symbol", "")).strip()
+        # Skip junk/ghost rows (empty ticket or zero lot) that block live entries.
+        if not position_id or not symbol or lot <= 0.0:
+            continue
         out.append(
             Position(
-                str(r.get("position_id", r.get("ticket", ""))),
-                str(r.get("symbol", "")),
+                position_id,
+                symbol,
                 side,
                 lot,
                 entry,

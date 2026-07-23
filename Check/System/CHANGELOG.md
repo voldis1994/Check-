@@ -21,6 +21,7 @@
 - Symbol-aware entries: open trade on another symbol no longer freezes the new chart in perpetual `MANAGEMENT_NO_ACTION`; START LIVE auto-arms `trading_enabled`.
 - Windows/MT4: atomic command write no longer crashes on directory fsync `PermissionError` (Errno 13) under AppData `MQL4\\Files\\commands`.
 - Clearer `RISK_POSITION_EXISTS`: already-in-trade cycles show ticket/lot; broker symbol suffixes match; chart symbol always updates specs.
+- Fix ghost `RISK_POSITION_EXISTS`: empty broker `positions: []` no longer keeps stale `state.json` trades (`[] or local` footgun).
 
 ## v3.0.0
 
