@@ -37,7 +37,9 @@ def validate_order(
         if (not account.connected) or (not account.trading_allowed) or (min_eq > 0 and account.equity < min_eq):
             failures.append(ReasonCode.RISK_ACCOUNT_NOT_OK)
 
-    if len(positions) >= config.position.max_open_positions:
+    # Only same-symbol positions count toward max_open (chart/symbol changes must not freeze forever).
+    same_symbol = [p for p in positions if p.symbol.upper() == signal.symbol.upper()]
+    if len(same_symbol) >= config.position.max_open_positions:
         failures.append(ReasonCode.RISK_POSITION_EXISTS)
     if lot_reason != ReasonCode.RISK_ACCEPTED:
         failures.append(lot_reason)

@@ -22,6 +22,7 @@ if str(ROOT / "tools") not in sys.path:
 
 from dashboard_core import (  # noqa: E402
     EngineProcess,
+    arm_live_runtime,
     audit_activity,
     audit_day_stats,
     audit_file,
@@ -789,15 +790,21 @@ class DashboardApp:
         self.btn_stop.configure(state=tk.NORMAL)
 
     def start_paper(self) -> None:
+        self._append_activity("WARN   PAPER fills locally — use START LIVE for MT4 orders")
         self._start_mode("paper")
 
     def start_live(self) -> None:
+        try:
+            armed = arm_live_runtime(self.config_path)
+            if armed:
+                self._append_activity("CTRL   armed system.json mode=live trading_enabled=true")
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Live arm failed", str(exc))
+            self._append_activity(f"ERROR  {exc}")
+            return
         ok, detail = validate_live_config(self.config_path)
         if not ok:
-            messagebox.showerror(
-                "Live config invalid",
-                "Set config/system.json:\n  mode=live\n  trading_enabled=true\n\n" + detail,
-            )
+            messagebox.showerror("Live config invalid", detail)
             self._append_activity(f"ERROR  {detail}")
             return
         if not messagebox.askyesno("Confirm LIVE", "Start LIVE on all discovered MT4 accounts?"):

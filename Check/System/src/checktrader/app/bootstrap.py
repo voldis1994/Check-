@@ -53,7 +53,11 @@ def bootstrap(
     schema = Path("config/system.schema.json")
     config = load_config(config_path, schema if schema.exists() else None, validate_live=False)
     if mode_override is not None:
-        config = config.model_copy(update={"runtime": config.runtime.model_copy(update={"mode": mode_override})})
+        runtime_update: dict[str, object] = {"mode": mode_override}
+        # START LIVE must actually trade — do not leave trading_enabled=false observe mode.
+        if mode_override == "live":
+            runtime_update["trading_enabled"] = True
+        config = config.model_copy(update={"runtime": config.runtime.model_copy(update=runtime_update)})
     validate_runtime_safety(config)
     config.paths.runtime_dir.mkdir(parents=True, exist_ok=True)
     history = load_history(
