@@ -80,16 +80,17 @@ LEVEL_BASE = {"ok": C["mint"], "warn": C["amber"], "error": C["red"], "idle": C[
 LEVEL_HOT = {"ok": C["green"], "warn": C["orange"], "error": C["magenta"], "idle": C["cyan"]}
 
 # Normalized positions on the brain image (side-view silhouette).
+# Mapped to a natural (non-squashed) cerebrum layout.
 HUB_LAYOUT = {
-    "core": (0.50, 0.46),
-    "engine": (0.34, 0.30),
-    "bridge": (0.68, 0.34),
-    "connections": (0.74, 0.52),
-    "trading": (0.28, 0.50),
-    "data_flow": (0.52, 0.22),
-    "risk": (0.40, 0.70),
-    "trail": (0.62, 0.68),
-    "accounts": (0.24, 0.38),
+    "core": (0.48, 0.48),
+    "engine": (0.30, 0.34),
+    "bridge": (0.70, 0.36),
+    "connections": (0.78, 0.52),
+    "trading": (0.26, 0.52),
+    "data_flow": (0.50, 0.26),
+    "risk": (0.38, 0.70),
+    "trail": (0.64, 0.68),
+    "accounts": (0.22, 0.42),
 }
 
 # Lobe regions → parent hub (every mesh point maps to a real action via parent).
@@ -124,6 +125,44 @@ def _lerp_hex(a: str, b: str, t: float) -> str:
     ar, ag, ab = ch(a)
     br, bg, bb = ch(b)
     return f"#{int(ar + (br - ar) * t):02x}{int(ag + (bg - ag) * t):02x}{int(ab + (bb - ab) * t):02x}"
+
+
+class SpinLogo:
+    """Ivan-core mark — green diamond that rotates about its axis."""
+
+    def __init__(self, canvas: tk.Canvas) -> None:
+        self.canvas = canvas
+        self.angle = 0.0
+        self._cx = 36
+        self._cy = 36
+
+    def tick(self, dt: float = 0.08) -> None:
+        self.angle = (self.angle + dt) % math.tau
+        self.draw()
+
+    def draw(self) -> None:
+        c = self.canvas
+        c.delete("logo")
+        cx, cy = self._cx, self._cy
+        # Outer ring
+        c.create_oval(6, 6, 66, 66, outline=C["amber"], width=2, tags="logo")
+        # Spinning diamond (perspective squash on X to imply 3D axis spin)
+        spin = self.angle
+        # Horizontal scale oscillates → looks like rotation around vertical axis
+        sx = math.cos(spin)
+        points = [
+            (0, -16),
+            (14, 0),
+            (0, 16),
+            (-14, 0),
+        ]
+        flat = []
+        for px, py in points:
+            flat.extend([cx + px * sx, cy + py])
+        fill = C["mint"] if sx >= 0 else C["green"]
+        c.create_polygon(*flat, fill=fill, outline=C["amber"], width=1, tags="logo")
+        # Inner core pip
+        c.create_oval(cx - 3, cy - 3, cx + 3, cy + 3, fill=C["void"], outline=C["cyan"], tags="logo")
 
 
 class BrainMesh:
@@ -163,8 +202,9 @@ class BrainMesh:
         self._layout(w, h)
 
     def _load_backdrop(self, w: int, h: int) -> None:
+        """Load brain art letterboxed — never stretch (avoids squashed silhouette)."""
         self._bg_img = None
-        for name in ("account_brain_mesh_hud.png", "account_brain_mesh.png"):
+        for name in ("account_brain_mesh_hud.png", "account_brain_natural.png", "account_brain_mesh.png"):
             path = ASSETS / name
             if not path.exists():
                 continue
@@ -172,26 +212,34 @@ class BrainMesh:
                 img = tk.PhotoImage(file=str(path))
             except tk.TclError:
                 continue
-            iw, ih = img.width(), img.height()
-            # Integer subsample to fit canvas while keeping brain dominant.
-            factor = max(1, math.ceil(max(iw / max(w * 0.98, 1), ih / max(h * 0.98, 1))))
+            iw, ih = max(img.width(), 1), max(img.height(), 1)
+            # Fit inside canvas with margin; preserve aspect via integer subsample only.
+            max_w, max_h = max(int(w * 0.96), 80), max(int(h * 0.90), 80)
+            factor = 1
+            while iw / factor > max_w or ih / factor > max_h:
+                factor += 1
+                if factor > 32:
+                    break
             if factor > 1:
                 img = img.subsample(factor, factor)
                 iw, ih = img.width(), img.height()
-            # Optional integer zoom if much smaller than canvas.
-            zx = max(1, int(w * 0.92 / max(iw, 1)))
-            zy = max(1, int(h * 0.92 / max(ih, 1)))
-            z = min(zx, zy)
+            # If still much smaller, integer zoom (same X/Y — never anisotropic).
+            z = 1
+            while iw * (z + 1) <= max_w and ih * (z + 1) <= max_h:
+                z += 1
+                if z > 8:
+                    break
             if z > 1:
                 img = img.zoom(z, z)
                 iw, ih = img.width(), img.height()
             self._bg_img = img
+            # Center with letterboxing so brain keeps natural proportions.
             x0 = (w - iw) // 2
-            y0 = (h - ih) // 2
+            y0 = max(4, (h - ih) // 2 - 8)
             self._bg_box = (x0, y0, iw, ih)
             return
-        # Fallback box if image missing
-        bw, bh = int(w * 0.78), int(h * 0.82)
+        # Fallback oval — wider than tall like a real side-view brain
+        bw, bh = int(w * 0.82), int(h * 0.62)
         self._bg_box = ((w - bw) // 2, (h - bh) // 2, bw, bh)
 
     def _map(self, nx: float, ny: float) -> tuple[float, float]:
@@ -334,12 +382,12 @@ class BrainMesh:
         if self._bg_img is not None:
             c.create_image(x0 + bw // 2, y0 + bh // 2, image=self._bg_img, tags="brain")
         else:
-            # Procedural fallback silhouette
-            c.create_oval(x0, y0, x0 + bw, y0 + bh, fill="#081018", outline="#123050", width=2, tags="brain")
+            # Procedural fallback silhouette — wide natural side-view ratio
+            c.create_oval(x0, y0 + bh * 0.08, x0 + bw, y0 + bh * 0.92, fill="#081018", outline="#123050", width=2, tags="brain")
             c.create_oval(
                 x0 + bw * 0.35,
-                y0 + bh * 0.35,
-                x0 + bw * 0.65,
+                y0 + bh * 0.38,
+                x0 + bw * 0.62,
                 y0 + bh * 0.62,
                 fill="#1A0A28",
                 outline="",
@@ -441,6 +489,10 @@ class DashboardApp:
         self._nav_btns: dict[str, tk.Button] = {}
         self._health = None
         self._lot_vars: dict[str, tk.StringVar] = {}
+        self._lot_dirty: dict[str, bool] = {}
+        self._lot_meta: dict[str, dict] = {}
+        self._accounts_built: tuple[str, ...] = ()
+        self._suppress_lot_trace = False
         self._started_wall = time.time()
         self._selected_node = tk.StringVar(value="Hover a node · click to run its function")
         self._focus_account: str | None = None
@@ -617,16 +669,16 @@ class DashboardApp:
         self.brain = BrainMesh(self.brain_canvas, on_click=self._on_brain_click, on_hover=self._on_brain_hover)
         self.brain_canvas.bind("<Configure>", lambda _e: self.brain.draw())
 
-        mark = tk.Canvas(left, width=72, height=72, bg=C["void"], highlightthickness=0)
-        mark.place(x=8, y=-80, rely=1.0)
-        mark.create_oval(6, 6, 66, 66, outline=C["amber"], width=2)
-        mark.create_polygon(36, 16, 50, 40, 36, 56, 22, 40, fill=C["mint"], outline="")
+        self.logo_canvas = tk.Canvas(left, width=72, height=72, bg=C["void"], highlightthickness=0)
+        self.logo_canvas.place(x=8, y=-80, rely=1.0)
+        self.spin_logo = SpinLogo(self.logo_canvas)
+        self.spin_logo.draw()
         tk.Label(left, text="IVAN-CORE DATA STREAM", bg=C["void"], fg=C["mute"], font=self.f_ui).place(
             x=88, rely=1.0, y=-36
         )
 
-        side = tk.Frame(frame, bg=C["panel"], width=340)
-        side.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        side = tk.Frame(frame, bg=C["panel"], width=300)
+        side.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
         side.pack_propagate(False)
         tk.Label(side, text="NODE STATUS", bg=C["panel"], fg=C["cyan"], font=self.f_h1).pack(
             anchor="w", padx=14, pady=(14, 6)
@@ -926,23 +978,106 @@ class DashboardApp:
             messagebox.showerror("Lot", f"Lot must be between {mn} and {mx}")
             return
         write_account_lot_override(self._rt(), account_id, lot)
+        self._set_lot_var(account_id, f"{lot:.2f}")
+        self._lot_dirty[account_id] = False
         messagebox.showinfo("Lot", f"{account_id} → fixed_lot={lot:.2f}")
+        if account_id in self._lot_meta:
+            self._lot_meta[account_id]["source"].configure(text="override", fg=C["violet"])
         self.refresh()
 
     def _reset_lot(self, account_id: str) -> None:
         clear_account_lot_override(self._rt(), account_id)
+        default_lot = default_fixed_lot(self._cfg_data())
+        self._set_lot_var(account_id, f"{default_lot:.2f}")
+        self._lot_dirty[account_id] = False
+        if account_id in self._lot_meta:
+            self._lot_meta[account_id]["source"].configure(text="config", fg=C["mute"])
         self.refresh()
 
-    def _rebuild_account_rows(self, health) -> None:
+    def _mark_lot_dirty(self, account_id: str, *_args) -> None:
+        if self._suppress_lot_trace:
+            return
+        self._lot_dirty[account_id] = True
+
+    def _set_lot_var(self, account_id: str, value: str) -> None:
+        var = self._lot_vars.get(account_id)
+        if var is None:
+            return
+        self._suppress_lot_trace = True
+        try:
+            var.set(value)
+        finally:
+            self._suppress_lot_trace = False
+
+    def _entry_focused(self, account_id: str) -> bool:
+        meta = self._lot_meta.get(account_id)
+        if not meta:
+            return False
+        focused = self.root.focus_get()
+        return focused is meta.get("entry")
+
+    def _sync_account_rows(self, health) -> None:
+        """Update account rows without destroying Entry widgets (fixes lot typing reset)."""
         cfg = self._cfg_data()
         rt = self._rt()
         default_lot = default_fixed_lot(cfg)
-        accounts = list_known_accounts(health, rt)
+        accounts = tuple(list_known_accounts(health, rt))
+        if accounts != self._accounts_built:
+            self._rebuild_account_rows(health, accounts, default_lot, rt)
+            return
+
+        bridge_by = {b.account_id: b for b in health.bridges}
+        for acct in accounts:
+            meta = self._lot_meta.get(acct)
+            if not meta:
+                continue
+            br = bridge_by.get(acct)
+            bal = f"{br.balance:,.2f}" if br else "—"
+            sym = br.symbol if br else "—"
+            meta["balance"].configure(text=bal)
+            meta["symbol"].configure(text=sym)
+            override = read_account_lot_override(rt, acct)
+            source = "override" if override is not None else "config"
+            meta["source"].configure(
+                text=source,
+                fg=C["violet"] if source == "override" else C["mute"],
+            )
+            focused = self._focus_account == acct
+            bg = C["line"] if focused else C["panel2"]
+            meta["row"].configure(bg=bg)
+            for key in ("account", "balance", "symbol", "source"):
+                meta[key].configure(bg=bg)
+            # Never clobber lot field while typing / dirty
+            if self._lot_dirty.get(acct) or self._entry_focused(acct):
+                continue
+            effective = override if override is not None else default_lot
+            current = self._lot_vars[acct].get().strip()
+            target = f"{effective:.2f}"
+            if current != target:
+                self._set_lot_var(acct, target)
+
+    def _rebuild_account_rows(
+        self,
+        health,
+        accounts: tuple[str, ...] | None = None,
+        default_lot: float | None = None,
+        rt: Path | None = None,
+    ) -> None:
+        cfg = self._cfg_data()
+        rt = rt or self._rt()
+        default_lot = default_fixed_lot(cfg) if default_lot is None else default_lot
+        accounts = accounts if accounts is not None else tuple(list_known_accounts(health, rt))
+
         for child in list(self.accounts_host.winfo_children()):
             if child is self.accounts_empty:
                 continue
             child.destroy()
         self._lot_vars.clear()
+        self._lot_meta.clear()
+        # Keep dirty flags only for accounts that still exist
+        self._lot_dirty = {k: v for k, v in self._lot_dirty.items() if k in accounts}
+        self._accounts_built = accounts
+
         if not accounts:
             self.accounts_empty.pack(pady=40)
             return
@@ -965,14 +1100,16 @@ class DashboardApp:
             effective = override if override is not None else default_lot
             source = "override" if override is not None else "config"
             bg = C["line"] if focused else C["panel2"]
-            tk.Label(row, text=acct, bg=bg, fg=C["ink"], font=self.f_ui_b, width=16, anchor="w").pack(
-                side=tk.LEFT, padx=6, pady=10
-            )
-            tk.Label(row, text=bal, bg=bg, fg=C["mint"], font=self.f_mono, width=12, anchor="w").pack(side=tk.LEFT, padx=6)
-            tk.Label(row, text=sym, bg=bg, fg=C["cyan"], font=self.f_ui, width=12, anchor="w").pack(side=tk.LEFT, padx=6)
+            lbl_acct = tk.Label(row, text=acct, bg=bg, fg=C["ink"], font=self.f_ui_b, width=16, anchor="w")
+            lbl_acct.pack(side=tk.LEFT, padx=6, pady=10)
+            lbl_bal = tk.Label(row, text=bal, bg=bg, fg=C["mint"], font=self.f_mono, width=12, anchor="w")
+            lbl_bal.pack(side=tk.LEFT, padx=6)
+            lbl_sym = tk.Label(row, text=sym, bg=bg, fg=C["cyan"], font=self.f_ui, width=12, anchor="w")
+            lbl_sym.pack(side=tk.LEFT, padx=6)
             var = tk.StringVar(value=f"{effective:.2f}")
             self._lot_vars[acct] = var
-            tk.Entry(
+            var.trace_add("write", lambda *_a, a=acct: self._mark_lot_dirty(a))
+            ent = tk.Entry(
                 row,
                 textvariable=var,
                 bg=C["void"],
@@ -983,8 +1120,9 @@ class DashboardApp:
                 font=self.f_mono,
                 highlightthickness=1,
                 highlightbackground=C["amber"] if focused else C["line"],
-            ).pack(side=tk.LEFT, padx=6)
-            tk.Label(
+            )
+            ent.pack(side=tk.LEFT, padx=6)
+            lbl_src = tk.Label(
                 row,
                 text=source,
                 bg=bg,
@@ -992,13 +1130,39 @@ class DashboardApp:
                 font=self.f_ui,
                 width=12,
                 anchor="w",
-            ).pack(side=tk.LEFT, padx=6)
+            )
+            lbl_src.pack(side=tk.LEFT, padx=6)
             tk.Button(
-                row, text="SAVE", command=lambda a=acct: self._save_lot(a), bg=C["panel"], fg=C["green"], relief=tk.FLAT, font=self.f_ui_b, padx=10, cursor="hand2"
+                row,
+                text="SAVE",
+                command=lambda a=acct: self._save_lot(a),
+                bg=C["panel"],
+                fg=C["green"],
+                relief=tk.FLAT,
+                font=self.f_ui_b,
+                padx=10,
+                cursor="hand2",
             ).pack(side=tk.LEFT, padx=4)
             tk.Button(
-                row, text="RESET", command=lambda a=acct: self._reset_lot(a), bg=C["panel"], fg=C["mute"], relief=tk.FLAT, font=self.f_ui_b, padx=8, cursor="hand2"
+                row,
+                text="RESET",
+                command=lambda a=acct: self._reset_lot(a),
+                bg=C["panel"],
+                fg=C["mute"],
+                relief=tk.FLAT,
+                font=self.f_ui_b,
+                padx=8,
+                cursor="hand2",
             ).pack(side=tk.LEFT, padx=2)
+            self._lot_meta[acct] = {
+                "row": row,
+                "account": lbl_acct,
+                "balance": lbl_bal,
+                "symbol": lbl_sym,
+                "source": lbl_src,
+                "entry": ent,
+            }
+            self._lot_dirty.setdefault(acct, False)
 
     def refresh(self) -> None:
         try:
@@ -1071,7 +1235,7 @@ class DashboardApp:
         )
 
         if self._page == "accounts":
-            self._rebuild_account_rows(health)
+            self._sync_account_rows(health)
 
         if self.engine.running and self.engine.started_at:
             self.foot_vars["uptime"].set(f"READY  {int(time.time() - self.engine.started_at)}s")
@@ -1095,6 +1259,8 @@ class DashboardApp:
         self.brain.phase += 0.14
         if self._page == "main":
             self.brain.draw()
+            if hasattr(self, "spin_logo"):
+                self.spin_logo.tick(0.10)
         drained = 0
         while drained < 20:
             try:
