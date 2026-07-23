@@ -36,6 +36,8 @@ GLOBAL_RISK_DEFAULTS: dict[str, Any] = {
     "cycle_sec": 3.0,
     "trend": True,
     "breakout": True,
+    "range": False,
+    "scalping": False,
     "symbol": "AUTO",
     "max_bars": 300,
     # portfolio-level hard caps

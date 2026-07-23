@@ -1,4 +1,4 @@
-"""M1 trend + breakout. SL = hard points. BE/trail respect On/Off toggles."""
+"""M1 strategies: TREND / RANGE / BREAKOUT / SCALPING. Hard-point SL."""
 
 from __future__ import annotations
 
@@ -50,11 +50,12 @@ def evaluate(market: dict[str, Any], account: dict[str, Any], global_cfg: dict[s
     if sl_pts <= 0:
         return None
     stop_d = points_to_price(sl_pts, point)
-
     last = bars[-1]
     prev = bars[-2]
+    body = abs(float(last["c"]) - float(last["o"]))
 
-    if global_cfg.get("breakout", True):
+    # BREAKOUT
+    if as_bool(global_cfg.get("breakout"), True):
         look = bars[-21:-1]
         if len(look) >= 15:
             box_hi = max(float(b["h"]) for b in look)
@@ -63,13 +64,12 @@ def evaluate(market: dict[str, Any], account: dict[str, Any], global_cfg: dict[s
             if width > points_to_price(20, point):
                 c = float(last["c"])
                 if c > box_hi and c >= float(last["o"]):
-                    entry = ask
-                    return Signal("BUY", entry, entry - stop_d, "BREAKOUT_UP")
+                    return Signal("BUY", ask, ask - stop_d, "BREAKOUT_UP")
                 if c < box_lo and c <= float(last["o"]):
-                    entry = bid
-                    return Signal("SELL", entry, entry + stop_d, "BREAKOUT_DOWN")
+                    return Signal("SELL", bid, bid + stop_d, "BREAKOUT_DOWN")
 
-    if global_cfg.get("trend", True):
+    # TREND
+    if as_bool(global_cfg.get("trend"), True):
         e20 = _ema(closes, 20)
         e50 = _ema(closes, 50)
         if e20[-1] is not None and e50[-1] is not None and e20[-2] is not None and e50[-2] is not None:
@@ -78,11 +78,34 @@ def evaluate(market: dict[str, Any], account: dict[str, Any], global_cfg: dict[s
             bull = float(last["c"]) >= float(last["o"]) and float(last["c"]) >= float(prev["c"])
             bear = float(last["c"]) <= float(last["o"]) and float(last["c"]) <= float(prev["c"])
             if up and bull:
-                entry = ask
-                return Signal("BUY", entry, entry - stop_d, "TREND_UP")
+                return Signal("BUY", ask, ask - stop_d, "TREND_UP")
             if down and bear:
-                entry = bid
-                return Signal("SELL", entry, entry + stop_d, "TREND_DOWN")
+                return Signal("SELL", bid, bid + stop_d, "TREND_DOWN")
+
+    # RANGE — fade extremes of last 30-bar box
+    if as_bool(global_cfg.get("range"), False):
+        look = bars[-31:-1]
+        if len(look) >= 20:
+            hi = max(float(b["h"]) for b in look)
+            lo = min(float(b["l"]) for b in look)
+            mid = (hi + lo) / 2
+            width = hi - lo
+            if width > points_to_price(30, point):
+                c = float(last["c"])
+                if c >= hi - points_to_price(5, point) and c <= float(last["o"]):
+                    return Signal("SELL", bid, bid + stop_d, "RANGE_FADE_HIGH")
+                if c <= lo + points_to_price(5, point) and c >= float(last["o"]):
+                    return Signal("BUY", ask, ask - stop_d, "RANGE_FADE_LOW")
+                if abs(c - mid) < points_to_price(3, point):
+                    pass
+
+    # SCALPING — small impulse body continuation
+    if as_bool(global_cfg.get("scalping"), False):
+        if body >= points_to_price(8, point) and body <= points_to_price(40, point):
+            if float(last["c"]) > float(last["o"]) and float(last["c"]) > float(prev["c"]):
+                return Signal("BUY", ask, ask - stop_d, "SCALP_UP")
+            if float(last["c"]) < float(last["o"]) and float(last["c"]) < float(prev["c"]):
+                return Signal("SELL", bid, bid + stop_d, "SCALP_DOWN")
 
     return None
 
@@ -95,7 +118,6 @@ def manage_sl(
     point: float,
     account: dict[str, Any],
 ) -> float | None:
-    """BE + trail hard POINTS; skipped when toggle Off."""
     if point <= 0:
         return None
     acc = merge_account_risk(account)

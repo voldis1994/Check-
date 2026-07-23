@@ -3,6 +3,8 @@
   "cycle_sec": 3.0,
   "trend": true,
   "breakout": true,
+  "range": false,
+  "scalping": false,
   "symbol": "AUTO",
   "max_bars": 300,
   "max_total_open_enabled": false,
