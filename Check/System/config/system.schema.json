@@ -321,9 +321,15 @@
       "additionalProperties": false,
       "properties": {
         "breakeven_trigger_rr": {
-          "default": 0.4,
+          "default": 10.0,
           "exclusiveMinimum": 0.0,
           "title": "Breakeven Trigger Rr",
+          "type": "number"
+        },
+        "breakeven_trigger_atr": {
+          "default": 1.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Breakeven Trigger Atr",
           "type": "number"
         },
         "breakeven_offset_atr": {
@@ -344,8 +350,14 @@
           "title": "Trailing Start Rr",
           "type": "number"
         },
+        "trailing_start_atr": {
+          "default": 0.75,
+          "exclusiveMinimum": 0.0,
+          "title": "Trailing Start Atr",
+          "type": "number"
+        },
         "trailing_lock_atr": {
-          "default": 0.5,
+          "default": 1.0,
           "exclusiveMinimum": 0.0,
           "title": "Trailing Lock Atr",
           "type": "number"
@@ -789,7 +801,7 @@
           "type": "number"
         },
         "max_stop_atr": {
-          "default": 1.5,
+          "default": 3.5,
           "exclusiveMinimum": 0.0,
           "title": "Max Stop Atr",
           "type": "number"
@@ -894,9 +906,15 @@
           "type": "boolean"
         },
         "force_stop_atr": {
-          "default": 0.18,
+          "default": 2.5,
           "exclusiveMinimum": 0.0,
           "title": "Force Stop Atr",
+          "type": "number"
+        },
+        "min_stop_atr": {
+          "default": 1.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Min Stop Atr",
           "type": "number"
         },
         "force_tp_rr": {

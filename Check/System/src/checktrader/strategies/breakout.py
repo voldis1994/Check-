@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from checktrader.domain.enums import Decision, ReasonCode, SetupState, Side, StrategyType
 from checktrader.domain.models import Candle, Setup, StrategyResult, StrategySignal
+from checktrader.management.atr_stops import clamp_stop_price
 from checktrader.market_data.aggregation import timeframe_minutes
 from checktrader.market_data.bars import closed_bars
 from checktrader.market_data.indicators import atr
@@ -19,14 +20,8 @@ def _count_touches(bars: list[Candle], level: float, tol: float) -> int:
     return sum(1 for b in bars if abs(b.high - level) <= tol or abs(b.low - level) <= tol)
 
 
-def _clamp_buy_stop(entry: float, stop: float, atr_value: float, max_stop_atr: float) -> float:
-    """Keep buy SL near entry — never beyond max_stop_atr * ATR."""
-    return max(stop, entry - max_stop_atr * atr_value)
-
-
-def _clamp_sell_stop(entry: float, stop: float, atr_value: float, max_stop_atr: float) -> float:
-    """Keep sell SL near entry — never beyond max_stop_atr * ATR."""
-    return min(stop, entry + max_stop_atr * atr_value)
+def _stop_bounds(context: StrategyContext) -> tuple[float, float]:
+    return context.config.strategies.min_stop_atr, context.config.strategies.force_stop_atr
 
 
 class BreakoutStrategy:
@@ -197,8 +192,15 @@ class BreakoutStrategy:
 
         if last_m5.close > hi + buffer:
             entry = context.market.ask
-            max_dist_atr = context.config.strategies.force_stop_atr
-            stop = _clamp_buy_stop(entry, lo - cfg.stop_buffer_atr * a, a, max_dist_atr)
+            min_atr, max_atr = _stop_bounds(context)
+            stop = clamp_stop_price(
+                entry=entry,
+                stop=lo - cfg.stop_buffer_atr * a,
+                side=Side.BUY,
+                atr_value=a,
+                min_atr=min_atr,
+                max_atr=max_atr,
+            )
             tp = hard_take_profit_price(
                 entry=entry,
                 stop=stop,
@@ -245,8 +247,15 @@ class BreakoutStrategy:
 
         if last_m5.close < lo - buffer:
             entry = context.market.bid
-            max_dist_atr = context.config.strategies.force_stop_atr
-            stop = _clamp_sell_stop(entry, hi + cfg.stop_buffer_atr * a, a, max_dist_atr)
+            min_atr, max_atr = _stop_bounds(context)
+            stop = clamp_stop_price(
+                entry=entry,
+                stop=hi + cfg.stop_buffer_atr * a,
+                side=Side.SELL,
+                atr_value=a,
+                min_atr=min_atr,
+                max_atr=max_atr,
+            )
             tp = hard_take_profit_price(
                 entry=entry,
                 stop=stop,
@@ -330,9 +339,12 @@ class BreakoutStrategy:
 
         if last.close > hi + buffer and last.close > last.open:
             entry = context.market.ask
-            # Tight SL: under trigger candle, not the whole lookback range low.
+            # Tight SL: under trigger candle, then ATR min/max clamp (~100pts / ~10 pips band).
             raw_stop = last.low - cfg.stop_buffer_atr * a
-            stop = _clamp_buy_stop(entry, raw_stop, a, context.config.strategies.force_stop_atr)
+            min_atr, max_atr = _stop_bounds(context)
+            stop = clamp_stop_price(
+                entry=entry, stop=raw_stop, side=Side.BUY, atr_value=a, min_atr=min_atr, max_atr=max_atr
+            )
             risk = entry - stop
             if risk <= 0:
                 return None
@@ -367,7 +379,10 @@ class BreakoutStrategy:
         if last.close < lo - buffer and last.close < last.open:
             entry = context.market.bid
             raw_stop = last.high + cfg.stop_buffer_atr * a
-            stop = _clamp_sell_stop(entry, raw_stop, a, context.config.strategies.force_stop_atr)
+            min_atr, max_atr = _stop_bounds(context)
+            stop = clamp_stop_price(
+                entry=entry, stop=raw_stop, side=Side.SELL, atr_value=a, min_atr=min_atr, max_atr=max_atr
+            )
             risk = stop - entry
             if risk <= 0:
                 return None

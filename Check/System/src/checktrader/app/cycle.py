@@ -309,6 +309,11 @@ def run_cycle(
     managed_decision: Decision | None = None
     mgmt_atr = _management_atr(regime, market)
     audit.metrics["mgmt_atr"] = mgmt_atr
+    if mgmt_atr is not None and context.specs.point > 0:
+        mcfg = context.config.management
+        audit.metrics["trail_lock_points"] = (mgmt_atr * mcfg.trailing_lock_atr) / context.specs.point
+        audit.metrics["trail_start_points"] = (mgmt_atr * mcfg.trailing_start_atr) / context.specs.point
+        audit.metrics["stop_target_points"] = (mgmt_atr * context.config.strategies.force_stop_atr) / context.specs.point
     for pos in list(same_symbol_positions):
         action = manage_position(
             pos,

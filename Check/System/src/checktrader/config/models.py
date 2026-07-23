@@ -157,7 +157,12 @@ class StrategiesConfig(StrictModel):
     breakout: BreakoutConfig = Field(default_factory=BreakoutConfig)
     # If strategies would idle-HOLD, still open on M1 momentum (no pointless HOLD loops)
     force_entry_when_idle: bool = True
-    force_stop_atr: float = Field(0.18, gt=0.0)
+    # Initial SL = force_stop_atr · ATR (also max clamp for structure stops).
+    # Ref: NATURALGAS ATR≈0.04 point≈0.001 → 2.5·ATR ≈ 100 points.
+    # Ref: EURUSD ATR≈0.0008 → ~1–2.5·ATR ≈ 8–20 pips (ATR scales).
+    force_stop_atr: float = Field(2.5, gt=0.0)
+    # Do not allow structure stops tighter than this (ATR).
+    min_stop_atr: float = Field(1.0, gt=0.0)
     force_tp_rr: float = Field(1.20, gt=0.0)
 
 
@@ -166,7 +171,7 @@ class RiskConfig(StrictModel):
     daily_loss_limit_r: float = Field(0.0, ge=0.0)
     # 0 = disabled (no minimum RR gate)
     min_reward_risk: float = Field(0.0, ge=0.0)
-    max_stop_atr: float = Field(1.50, gt=0.0)
+    max_stop_atr: float = Field(3.5, gt=0.0)
     min_stop_points: float = Field(1.0, gt=0.0)
     max_stop_points: float = Field(10000.0, gt=0.0)
     # When false (default): ignore broker connected/trade_allowed/min_equity for entries
@@ -174,20 +179,24 @@ class RiskConfig(StrictModel):
 
 
 class ManagementConfig(StrictModel):
-    breakeven_trigger_rr: float = Field(0.40, gt=0.0)
-    # ATR offset past entry for BE (not broker points — those break across symbols).
+    # Legacy RR fallback when ATR missing.
+    breakeven_trigger_rr: float = Field(10.0, gt=0.0)
+    # ATR profit before moving SL to BE (+ offset).
+    breakeven_trigger_atr: float = Field(1.0, gt=0.0)
+    # ATR offset past entry for BE.
     breakeven_offset_atr: float = Field(0.05, ge=0.0)
     # Legacy field kept for schema compat; unused when breakeven_offset_atr > 0.
     breakeven_offset_points: float = Field(0.0, ge=0.0)
-    # Deprecated RR gate — trailing now starts when profit > lock distance.
+    # Legacy RR gate — unused when trailing_start_atr > 0.
     trailing_start_rr: float = Field(0.01, gt=0.0)
-    # Lock-back behind price in ATR units.
-    # NATURALGAS ref: point≈0.001 → 20 points = 0.02; with ATR≈0.04 → 0.50 ATR.
-    trailing_lock_atr: float = Field(0.50, gt=0.0)
+    # Start trailing after this much ATR profit.
+    trailing_start_atr: float = Field(0.75, gt=0.0)
+    # Lock-back behind price in ATR units (~1.0 ATR ≈ 40 NG pts @ ATR0.04 / ~8 FX pips).
+    trailing_lock_atr: float = Field(1.0, gt=0.0)
     # Kept for backward-compatible configs; trailing uses trailing_lock_atr only.
-    trend_trailing_atr_multiplier: float = Field(0.50, gt=0.0)
-    breakout_trailing_atr_multiplier: float = Field(0.50, gt=0.0)
-    range_trailing_atr_multiplier: float = Field(0.50, gt=0.0)
+    trend_trailing_atr_multiplier: float = Field(1.0, gt=0.0)
+    breakout_trailing_atr_multiplier: float = Field(1.0, gt=0.0)
+    range_trailing_atr_multiplier: float = Field(1.0, gt=0.0)
     take_profit_rr: float = Field(2.0, gt=0.0)
     # False = open with no broker TP; exit via trailing / breakeven / regime flip
     hard_take_profit: bool = False
