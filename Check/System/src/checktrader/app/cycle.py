@@ -13,6 +13,7 @@ from checktrader.domain.models import (
     MarketSnapshot,
     Position,
     RegimeSnapshot,
+    SymbolSpecs,
 )
 from checktrader.execution.commands import build_close, build_modify, build_open
 from checktrader.execution.reconciliation import broker_positions_or_empty, reconcile
@@ -75,20 +76,27 @@ def _positions_for_symbol(positions: list[Position], symbol: str) -> list[Positi
     return [p for p in positions if symbols_match(p.symbol, symbol)]
 
 
-def _management_atr(regime: RegimeSnapshot, market: MarketSnapshot, period: int = 14) -> float | None:
-    """Prefer robust M15 ATR; fall back M5/M1 — never raw mean range (spike → 300pt SL)."""
-    from checktrader.management.atr_stops import atr_for_stops, robust_atr
+def _management_atr(
+    regime: RegimeSnapshot,
+    market: MarketSnapshot,
+    specs: SymbolSpecs,
+    period: int = 14,
+) -> float | None:
+    """Prefer robust M15 ATR; sanitize so EURUSD never gets a 294-pip stop."""
+    from checktrader.management.atr_stops import atr_for_stops, sanitize_atr
 
-    value = atr_for_stops(m15=market.m15, m5=market.m5, m1=market.m1, period=period)
-    if value is not None:
-        return value
-    if regime.indicators.atr is not None and regime.indicators.atr > 0:
-        # Still spike-guard regime ATR against M15 history when possible
-        guarded = robust_atr(market.m15, period) if market.m15 else None
-        if guarded is not None:
-            return min(float(regime.indicators.atr), guarded * 1.35)
-        return float(regime.indicators.atr)
-    return None
+    mid = market.mid if market.bid > 0 else None
+    value = atr_for_stops(
+        m15=market.m15,
+        m5=market.m5,
+        m1=market.m1,
+        period=period,
+        mid=mid,
+        specs=specs,
+    )
+    if value is None and regime.indicators.atr is not None and regime.indicators.atr > 0:
+        value = sanitize_atr(float(regime.indicators.atr), mid=mid, specs=specs)
+    return value
 
 
 def _apply_broker_specs(context: AppContext, market: MarketSnapshot) -> None:
@@ -311,7 +319,7 @@ def run_cycle(
     audit.metrics["positions_other"] = other_symbol_count
 
     managed_decision: Decision | None = None
-    mgmt_atr = _management_atr(regime, market)
+    mgmt_atr = _management_atr(regime, market, context.specs)
     audit.metrics["mgmt_atr"] = mgmt_atr
     from checktrader.management.atr_stops import (
         distance_pips,
@@ -325,9 +333,10 @@ def run_cycle(
     if context.specs.point > 0:
         mcfg = context.config.management
         scfg = context.config.strategies
-        stop_d = stop_target_distance(context.specs, scfg, mgmt_atr)
-        lock_d = trail_lock_distance(context.specs, mcfg, mgmt_atr)
-        start_d = trail_start_distance(context.specs, mcfg, mgmt_atr)
+        mid = market.mid
+        stop_d = stop_target_distance(context.specs, scfg, mgmt_atr, mid=mid)
+        lock_d = trail_lock_distance(context.specs, mcfg, mgmt_atr, mid=mid)
+        start_d = trail_start_distance(context.specs, mcfg, mgmt_atr, mid=mid)
         audit.metrics["quote_mode"] = "pips" if uses_pip_quotation(context.specs) else "points"
         audit.metrics["digits"] = context.specs.digits
         audit.metrics["point"] = context.specs.point
@@ -419,6 +428,32 @@ def run_cycle(
             if result.signal:
                 audit.selected_strategy = result.signal.strategy
 
+                # Hard enforce ATR stop distance (fixes EURUSD 294-pip SL bugs).
+                from checktrader.management.atr_stops import distance_pips, sanitize_atr, stop_target_distance
+
+                stop_atr = mgmt_atr
+                if stop_atr is None:
+                    stop_atr = sanitize_atr(
+                        regime.indicators.atr,
+                        mid=result.signal.entry_price,
+                        specs=context.specs,
+                    )
+                dist = stop_target_distance(
+                    context.specs,
+                    context.config.strategies,
+                    stop_atr,
+                    mid=result.signal.entry_price,
+                )
+                if dist > 0:
+                    if result.signal.side == Side.BUY:
+                        result.signal.stop_loss = result.signal.entry_price - dist
+                    else:
+                        result.signal.stop_loss = result.signal.entry_price + dist
+                    audit.metrics["entry_stop_dist"] = dist
+                    if context.specs.point > 0:
+                        audit.metrics["entry_stop_points"] = dist / context.specs.point
+                    audit.metrics["entry_stop_pips"] = distance_pips(dist, context.specs)
+
                 # ── Step 10: risk validate ───────────────────────────────────
                 risk = validate_order(
                     result.signal,
@@ -429,7 +464,7 @@ def run_cycle(
                     limit_state=context.state.limits,
                     bid=market.bid,
                     ask=market.ask,
-                    atr_value=regime.indicators.atr,
+                    atr_value=stop_atr if stop_atr is not None else regime.indicators.atr,
                     now=now,
                 )
                 audit.risk_result = risk

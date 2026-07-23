@@ -1,6 +1,7 @@
 """ATR-adaptive stop / trail distances (volatility-native).
 
-Hard points/pips are NOT used for sizing. ATR adapts per symbol.
+Hard points/pips are NOT the sizing source. ATR adapts per symbol.
+If ATR is corrupt (e.g. EURUSD SL at ~294 pips), sanitize against price.
 Points/pips helpers are display-only for the audit tape.
 """
 
@@ -17,7 +18,7 @@ _FX_MARKERS = ("EUR", "USD", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "XAU", "X
 
 
 def uses_pip_quotation(specs: SymbolSpecs) -> bool:
-    """Display helper: show pips for FX, points for commodities."""
+    """FX (5-digit / JPY 3-digit) vs commodities (points)."""
     if specs.digits >= 5:
         return True
     if 0 < specs.point <= 0.0001:
@@ -62,12 +63,37 @@ def distance_pips(price_distance: float, specs: SymbolSpecs) -> float:
     return abs(price_distance) / ps
 
 
-def robust_atr(candles: list[Candle], period: int = 14) -> float | None:
+def sanitize_atr(
+    atr_value: float | None,
+    *,
+    mid: float | None,
+    specs: SymbolSpecs,
+) -> float | None:
     """
-    Wilder ATR with spike guard: never use a one-bar blow-up that makes SL 300pts.
+    Reject absurd ATR that would place EURUSD stops at hundreds of pips.
 
-    last_atr is capped at 1.35 × median of the last up-to-20 ATR values.
+    Live bug: SELL 1.13714 with SL 1.16654 → 294 pips (ATR≈0.029 treated as valid).
+    Real M15 EURUSD ATR is ~5–15 pips. Cap FX ATR at 0.3% of price; fallback ~0.1%.
     """
+    if atr_value is None or atr_value <= 0:
+        return None
+    a = float(atr_value)
+    if mid is None or mid <= 0:
+        return a
+    ratio = a / mid
+    if uses_pip_quotation(specs):
+        # >0.3% of price as ATR ⇒ garbage (≈30+ pips ATR on EURUSD)
+        if ratio > 0.003:
+            return mid * 0.001  # ~10 pips ATR → 1.0×ATR stop ≈ 10 pips
+        return a
+    # Commodities: >5% of price as ATR ⇒ garbage
+    if ratio > 0.05:
+        return mid * 0.015
+    return a
+
+
+def robust_atr(candles: list[Candle], period: int = 14) -> float | None:
+    """Wilder ATR with spike guard vs recent median."""
     bars = closed_bars(candles)
     if len(bars) < period + 1:
         return None
@@ -88,52 +114,68 @@ def atr_for_stops(
     m5: list[Candle] | None = None,
     m1: list[Candle] | None = None,
     period: int = 14,
+    mid: float | None = None,
+    specs: SymbolSpecs | None = None,
 ) -> float | None:
-    """Prefer M15 ATR, then M5, then M1 — never raw mean candle range."""
+    """Prefer M15 ATR, then M5, then M1 — sanitized for the symbol."""
+    raw: float | None = None
     for series in (m15, m5, m1):
         if not series:
             continue
         value = robust_atr(series, period)
         if value is not None and value > 0:
-            return value
-    return None
+            raw = value
+            break
+    if raw is None:
+        return None
+    if specs is None:
+        return raw
+    return sanitize_atr(raw, mid=mid, specs=specs)
 
 
 def stop_target_distance(
     specs: SymbolSpecs,
     strategies: StrategiesConfig,
     atr_value: float | None,
+    *,
+    mid: float | None = None,
 ) -> float:
-    """Initial SL = force_stop_atr · robust ATR."""
-    del specs
-    return atr_distance(atr_value, strategies.force_stop_atr)
+    """Initial SL = force_stop_atr · sanitized ATR."""
+    a = sanitize_atr(atr_value, mid=mid, specs=specs)
+    return atr_distance(a, strategies.force_stop_atr)
 
 
 def trail_lock_distance(
     specs: SymbolSpecs,
     config: ManagementConfig,
     atr_value: float | None,
+    *,
+    mid: float | None = None,
 ) -> float:
-    del specs
-    return atr_distance(atr_value, config.trailing_lock_atr)
+    a = sanitize_atr(atr_value, mid=mid, specs=specs)
+    return atr_distance(a, config.trailing_lock_atr)
 
 
 def trail_start_distance(
     specs: SymbolSpecs,
     config: ManagementConfig,
     atr_value: float | None,
+    *,
+    mid: float | None = None,
 ) -> float:
-    del specs
-    return atr_distance(atr_value, config.trailing_start_atr)
+    a = sanitize_atr(atr_value, mid=mid, specs=specs)
+    return atr_distance(a, config.trailing_start_atr)
 
 
 def breakeven_trigger_distance(
     specs: SymbolSpecs,
     config: ManagementConfig,
     atr_value: float | None,
+    *,
+    mid: float | None = None,
 ) -> float:
-    del specs
-    return atr_distance(atr_value, config.breakeven_trigger_atr)
+    a = sanitize_atr(atr_value, mid=mid, specs=specs)
+    return atr_distance(a, config.breakeven_trigger_atr)
 
 
 def clamp_stop_price(
@@ -147,14 +189,18 @@ def clamp_stop_price(
     specs: SymbolSpecs | None = None,
     strategies: StrategiesConfig | None = None,
 ) -> float:
-    """Clamp structure stop into [min_atr, max_atr] · ATR band."""
-    del specs, strategies
-    if atr_value <= 0:
+    """Clamp structure stop into [min_atr, max_atr] · sanitized ATR band."""
+    a = float(atr_value)
+    if specs is not None:
+        cleaned = sanitize_atr(a, mid=entry, specs=specs)
+        a = float(cleaned) if cleaned is not None else a
+    if a <= 0:
         return stop
-    lo = atr_distance(atr_value, min_atr)
-    hi = atr_distance(atr_value, max_atr)
+    lo = atr_distance(a, min_atr)
+    hi = atr_distance(a, max_atr)
     if hi < lo:
         lo, hi = hi, lo
+    # Absolute safety rail: never wider than max_atr band after sanitize
     dist = abs(entry - stop)
     dist = min(max(dist, lo), hi)
     if side == Side.BUY:

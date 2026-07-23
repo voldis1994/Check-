@@ -33,7 +33,7 @@ def breakeven_action(
     position: Position, price: float, config: ManagementConfig, specs: SymbolSpecs, atr_value: float | None = None
 ) -> ManagementAction:
     profit = _side_profit(position, price)
-    need = breakeven_trigger_distance(specs, config, atr_value)
+    need = breakeven_trigger_distance(specs, config, atr_value, mid=price)
     if need > 0:
         if profit < need:
             return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)

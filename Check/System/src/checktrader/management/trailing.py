@@ -19,8 +19,8 @@ def trailing_action(
     del regime
     if atr_value is None or atr_value <= 0:
         return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
-    lock = trail_lock_distance(specs, config, atr_value)
-    start = trail_start_distance(specs, config, atr_value)
+    lock = trail_lock_distance(specs, config, atr_value, mid=price)
+    start = trail_start_distance(specs, config, atr_value, mid=price)
     if lock <= 0:
         return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
     need = max(start, lock)

@@ -80,19 +80,30 @@ def _force_m1_entry(context: StrategyContext) -> StrategyResult | None:
     if len(m1) < 2:
         return None
 
-    a = atr_for_stops(m15=context.m15, m5=context.m5, m1=context.m1, period=14)
+    a = atr_for_stops(
+        m15=context.m15,
+        m5=context.m5,
+        m1=context.m1,
+        period=14,
+        mid=context.market.mid,
+        specs=context.specs,
+    )
     if a is None or a <= 0:
         ra = context.regime.indicators.atr
         if ra is not None and ra > 0:
-            a = float(ra)
+            from checktrader.management.atr_stops import sanitize_atr
+
+            a = sanitize_atr(float(ra), mid=context.market.mid, specs=context.specs)
     if a is None or a <= 0:
-        # Last resort: short M1 TR mean, capped to 1% of price (blocks insane SL).
+        # Last resort: short M1 TR mean, capped to 0.1% of price for FX / 1.5% commodity.
         window = m1[-min(15, len(m1)) :]
         if not window:
             return None
         raw = sum(b.high - b.low for b in window) / len(window)
         mid = context.market.mid or window[-1].close
-        a = min(raw, mid * 0.01) if mid > 0 else raw
+        from checktrader.management.atr_stops import sanitize_atr
+
+        a = sanitize_atr(raw, mid=mid, specs=context.specs)
     if a is None or a <= 0:
         return None
 
@@ -105,7 +116,7 @@ def _force_m1_entry(context: StrategyContext) -> StrategyResult | None:
         bullish = last.close >= prev.close
         bearish = not bullish
 
-    stop_dist = stop_target_distance(context.specs, scfg, a)
+    stop_dist = stop_target_distance(context.specs, scfg, a, mid=context.market.mid)
     if bullish:
         entry = context.market.ask
         stop = entry - stop_dist
