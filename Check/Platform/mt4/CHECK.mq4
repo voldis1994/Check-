@@ -1,0 +1,349 @@
+//+------------------------------------------------------------------+
+//| CHECK.mq4 — CHECK Platform v4 EA (M1 bridge)                     |
+//| Brand-new file protocol. Attach to M1 chart.                     |
+//+------------------------------------------------------------------+
+#property copyright "CHECK Platform"
+#property version   "4.00"
+#property strict
+
+extern string BridgePath = "";   // empty = MQL4/Files/CHECK ; or full path to bridge root
+extern int    MagicNumber = 40001;
+extern int    MaxBarsM1   = 300;
+extern int    ExportSec   = 1;
+
+string g_root;
+datetime g_last_export = 0;
+
+//--- paths ----------------------------------------------------------------
+string JoinPath(string a, string b)
+{
+   if(StringLen(a) == 0) return(b);
+   int n = StringLen(a);
+   string sep = "\\";
+   if(StringGetCharacter(a, n - 1) == '\\' || StringGetCharacter(a, n - 1) == '/')
+      return(a + b);
+   return(a + sep + b);
+}
+
+void EnsureDir(string path)
+{
+   // FILE_COMMON / terminal Files — CreateDirectory works for relative under Files
+   if(StringFind(path, ":") >= 0 || StringFind(path, "\\\\") == 0)
+   {
+      // absolute — best effort
+      CreateDirectory(path);
+      return;
+   }
+   CreateDirectory(path);
+}
+
+string BridgeRoot()
+{
+   if(StringLen(BridgePath) > 0)
+      return(BridgePath);
+   return("CHECK");
+}
+
+void BootDirs()
+{
+   g_root = BridgeRoot();
+   EnsureDir(g_root);
+   EnsureDir(JoinPath(g_root, "market"));
+   EnsureDir(JoinPath(g_root, "status"));
+   EnsureDir(JoinPath(g_root, "commands"));
+   EnsureDir(JoinPath(g_root, "acks"));
+}
+
+//--- JSON helpers (minimal) ----------------------------------------------
+string JNum(double v, int dig)
+{
+   return(DoubleToStr(v, dig));
+}
+
+string JStr(string s)
+{
+   string o = s;
+   StringReplace(o, "\\", "\\\\");
+   StringReplace(o, "\"", "\\\"");
+   return("\"" + o + "\"");
+}
+
+string IsoNow()
+{
+   return(TimeToStr(TimeCurrent(), TIME_DATE|TIME_SECONDS));
+}
+
+int FileWriteText(string rel, string body)
+{
+   int h = FileOpen(rel, FILE_WRITE|FILE_TXT|FILE_ANSI);
+   if(h < 0) return(-1);
+   FileWriteString(h, body);
+   FileClose(h);
+   return(0);
+}
+
+string FileReadText(string rel)
+{
+   int h = FileOpen(rel, FILE_READ|FILE_TXT|FILE_ANSI);
+   if(h < 0) return("");
+   string out = "";
+   while(!FileIsEnding(h))
+      out = out + FileReadString(h) + "\n";
+   FileClose(h);
+   return(out);
+}
+
+string JsonGetStr(string json, string key)
+{
+   string pat = "\"" + key + "\"";
+   int p = StringFind(json, pat);
+   if(p < 0) return("");
+   p = StringFind(json, ":", p);
+   if(p < 0) return("");
+   int q1 = StringFind(json, "\"", p + 1);
+   if(q1 < 0) return("");
+   int q2 = StringFind(json, "\"", q1 + 1);
+   if(q2 < 0) return("");
+   return(StringSubstr(json, q1 + 1, q2 - q1 - 1));
+}
+
+double JsonGetNum(string json, string key)
+{
+   string pat = "\"" + key + "\"";
+   int p = StringFind(json, pat);
+   if(p < 0) return(0);
+   p = StringFind(json, ":", p);
+   if(p < 0) return(0);
+   int i = p + 1;
+   while(i < StringLen(json))
+   {
+      int ch = StringGetCharacter(json, i);
+      if(ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') { i++; continue; }
+      break;
+   }
+   string num = "";
+   while(i < StringLen(json))
+   {
+      int ch = StringGetCharacter(json, i);
+      if((ch >= '0' && ch <= '9') || ch == '.' || ch == '-' || ch == '+')
+      {
+         num = num + CharToStr(ch);
+         i++;
+         continue;
+      }
+      break;
+   }
+   return(StrToDouble(num));
+}
+
+//--- market export -------------------------------------------------------
+string BuildBarsM1()
+{
+   int n = MathMin(MaxBarsM1, Bars);
+   if(n < 2) n = Bars;
+   string body = "[";
+   // oldest → newest among last n closed+forming; send closed preference i=n-1..1 then 0
+   bool first = true;
+   for(int i = n - 1; i >= 0; i--)
+   {
+      if(!first) body = body + ",";
+      first = false;
+      body = body + "{"
+         + "\"t\":" + IntegerToString((int)Time[i]) + ","
+         + "\"o\":" + JNum(Open[i], Digits) + ","
+         + "\"h\":" + JNum(High[i], Digits) + ","
+         + "\"l\":" + JNum(Low[i], Digits) + ","
+         + "\"c\":" + JNum(Close[i], Digits) + ","
+         + "\"v\":" + JNum(Volume[i], 0)
+         + "}";
+   }
+   body = body + "]";
+   return(body);
+}
+
+void ExportMarket()
+{
+   string path = JoinPath(JoinPath(g_root, "market"), "latest.json");
+   string body = "{"
+      + "\"ts\":" + JStr(IsoNow()) + ","
+      + "\"account\":" + JStr(IntegerToString(AccountNumber())) + ","
+      + "\"server\":" + JStr(AccountServer()) + ","
+      + "\"symbol\":" + JStr(Symbol()) + ","
+      + "\"bid\":" + JNum(Bid, Digits) + ","
+      + "\"ask\":" + JNum(Ask, Digits) + ","
+      + "\"digits\":" + IntegerToString(Digits) + ","
+      + "\"point\":" + JNum(Point, Digits) + ","
+      + "\"spread\":" + IntegerToString(MarketInfo(Symbol(), MODE_SPREAD)) + ","
+      + "\"bars_m1\":" + BuildBarsM1()
+      + "}";
+   FileWriteText(path, body);
+}
+
+void ExportStatus()
+{
+   string pos = "[";
+   bool first = true;
+   for(int i = OrdersTotal() - 1; i >= 0; i--)
+   {
+      if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
+      if(OrderMagicNumber() != MagicNumber) continue;
+      if(OrderSymbol() != Symbol()) continue;
+      if(OrderType() > OP_SELL) continue;
+      if(!first) pos = pos + ",";
+      first = false;
+      string side = (OrderType() == OP_BUY ? "BUY" : "SELL");
+      pos = pos + "{"
+         + "\"ticket\":" + IntegerToString(OrderTicket()) + ","
+         + "\"symbol\":" + JStr(OrderSymbol()) + ","
+         + "\"side\":" + JStr(side) + ","
+         + "\"lot\":" + JNum(OrderLots(), 2) + ","
+         + "\"open\":" + JNum(OrderOpenPrice(), Digits) + ","
+         + "\"sl\":" + JNum(OrderStopLoss(), Digits) + ","
+         + "\"tp\":" + JNum(OrderTakeProfit(), Digits) + ","
+         + "\"profit\":" + JNum(OrderProfit() + OrderSwap() + OrderCommission(), 2) + ","
+         + "\"price\":" + JNum((OrderType()==OP_BUY?Bid:Ask), Digits)
+         + "}";
+   }
+   pos = pos + "]";
+
+   string path = JoinPath(JoinPath(g_root, "status"), "latest.json");
+   string body = "{"
+      + "\"ts\":" + JStr(IsoNow()) + ","
+      + "\"account\":" + JStr(IntegerToString(AccountNumber())) + ","
+      + "\"balance\":" + JNum(AccountBalance(), 2) + ","
+      + "\"equity\":" + JNum(AccountEquity(), 2) + ","
+      + "\"margin\":" + JNum(AccountMargin(), 2) + ","
+      + "\"connected\":true,"
+      + "\"trading_allowed\":" + (IsTradeAllowed() ? "true" : "false") + ","
+      + "\"positions\":" + pos
+      + "}";
+   FileWriteText(path, body);
+}
+
+//--- commands ------------------------------------------------------------
+void Ack(string id, bool ok, int ticket, string err)
+{
+   string path = JoinPath(JoinPath(g_root, "acks"), "ack_" + id + ".json");
+   string body = "{"
+      + "\"id\":" + JStr(id) + ","
+      + "\"ok\":" + (ok ? "true" : "false") + ","
+      + "\"ticket\":" + IntegerToString(ticket) + ","
+      + "\"error\":" + JStr(err)
+      + "}";
+   FileWriteText(path, body);
+}
+
+bool DoOpen(string json, string id)
+{
+   string side = JsonGetStr(json, "side");
+   double lot = JsonGetNum(json, "lot");
+   double sl  = JsonGetNum(json, "sl");
+   double tp  = JsonGetNum(json, "tp");
+   string sym = JsonGetStr(json, "symbol");
+   if(StringLen(sym) == 0) sym = Symbol();
+   if(lot <= 0) lot = 0.01;
+
+   int cmd = (side == "SELL" ? OP_SELL : OP_BUY);
+   double price = (cmd == OP_BUY ? Ask : Bid);
+   int ticket = OrderSend(sym, cmd, lot, price, 30, sl, tp, "CHECK", MagicNumber, 0, (cmd==OP_BUY?clrLime:clrRed));
+   if(ticket < 0)
+   {
+      Ack(id, false, 0, "OrderSend " + IntegerToString(GetLastError()));
+      return(false);
+   }
+   Ack(id, true, ticket, "");
+   return(true);
+}
+
+bool DoModify(string json, string id)
+{
+   int ticket = (int)JsonGetNum(json, "ticket");
+   double sl  = JsonGetNum(json, "sl");
+   double tp  = JsonGetNum(json, "tp");
+   if(!OrderSelect(ticket, SELECT_BY_TICKET))
+   {
+      Ack(id, false, ticket, "select");
+      return(false);
+   }
+   if(!OrderModify(ticket, OrderOpenPrice(), sl, tp, 0, clrYellow))
+   {
+      Ack(id, false, ticket, "modify " + IntegerToString(GetLastError()));
+      return(false);
+   }
+   Ack(id, true, ticket, "");
+   return(true);
+}
+
+bool DoClose(string json, string id)
+{
+   int ticket = (int)JsonGetNum(json, "ticket");
+   if(!OrderSelect(ticket, SELECT_BY_TICKET))
+   {
+      Ack(id, false, ticket, "select");
+      return(false);
+   }
+   double price = (OrderType() == OP_BUY ? Bid : Ask);
+   if(!OrderClose(ticket, OrderLots(), price, 30, clrAqua))
+   {
+      Ack(id, false, ticket, "close " + IntegerToString(GetLastError()));
+      return(false);
+   }
+   Ack(id, true, ticket, "");
+   return(true);
+}
+
+void ProcessCommands()
+{
+   string dir = JoinPath(g_root, "commands");
+   // MT4 FileFind — relative under Files
+   string pattern = JoinPath(dir, "cmd_*.json");
+   string name;
+   int h = FileFindFirst(pattern, name);
+   if(h < 0) return;
+   do
+   {
+      string rel = JoinPath(dir, name);
+      string json = FileReadText(rel);
+      string id = JsonGetStr(json, "id");
+      if(StringLen(id) == 0) id = name;
+      string action = JsonGetStr(json, "action");
+      if(action == "OPEN") DoOpen(json, id);
+      else if(action == "MODIFY") DoModify(json, id);
+      else if(action == "CLOSE") DoClose(json, id);
+      else Ack(id, false, 0, "unknown action");
+      FileDelete(rel);
+   }
+   while(FileFindNext(h, name));
+   FileFindClose(h);
+}
+
+//--- lifecycle -----------------------------------------------------------
+int OnInit()
+{
+   if(Period() != PERIOD_M1)
+      Alert("CHECK EA: attach to M1 chart");
+   BootDirs();
+   Comment("CHECK v4 | bridge=", g_root);
+   return(INIT_SUCCEEDED);
+}
+
+void OnDeinit(const int reason)
+{
+   Comment("");
+}
+
+void OnTick()
+{
+   ProcessCommands();
+   if(TimeCurrent() - g_last_export >= ExportSec)
+   {
+      ExportMarket();
+      ExportStatus();
+      g_last_export = TimeCurrent();
+   }
+}
+
+void OnTimer()
+{
+   OnTick();
+}

@@ -1,0 +1,16 @@
+{
+  "lot": 0.02,
+  "sl_atr": 1.0,
+  "be_start_atr": 0.75,
+  "be_offset_atr": 0.05,
+  "trail_start_atr": 0.50,
+  "trail_lock_atr": 0.75,
+  "symbol": "AUTO",
+  "magic": 40001,
+  "cycle_sec": 3.0,
+  "trend": true,
+  "breakout": true,
+  "force_idle": true,
+  "mt4_exe": "",
+  "max_bars": 300
+}

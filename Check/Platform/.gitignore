@@ -1,0 +1,14 @@
+# CHECK Platform v4
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+config/settings.json
+clients/*/
+!clients/.gitkeep
+runtime/*
+!runtime/.gitkeep
+.DS_Store
+*.bak
