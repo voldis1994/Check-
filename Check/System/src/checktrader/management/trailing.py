@@ -1,4 +1,4 @@
-"""Trailing — digit-aware points (NG) / pips (EURUSD), ATR only clamps."""
+"""Trailing — ATR-adaptive lock/start (same on every symbol)."""
 
 from __future__ import annotations
 
@@ -17,16 +17,18 @@ def trailing_action(
     specs: SymbolSpecs,
 ) -> ManagementAction:
     del regime
+    if atr_value is None or atr_value <= 0:
+        return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
     lock = trail_lock_distance(specs, config, atr_value)
     start = trail_start_distance(specs, config, atr_value)
     if lock <= 0:
         return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
     need = max(start, lock)
-    tick = specs.point if specs.point > 0 else lock * 0.01
+    tick = specs.point if specs.point > 0 else atr_value * 0.01
 
     if position.side == Side.BUY:
         profit = price - position.entry_price
-        if profit < need:
+        if profit + 1e-12 < need:
             return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
         candidate = price - lock
         if position.stop_loss is None or candidate > position.stop_loss + tick:
@@ -34,7 +36,7 @@ def trailing_action(
         return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
 
     profit = position.entry_price - price
-    if profit < need:
+    if profit + 1e-12 < need:
         return ManagementAction(Decision.HOLD, ReasonCode.MANAGEMENT_NO_ACTION)
     candidate = price + lock
     if position.stop_loss is None or candidate < position.stop_loss - tick:

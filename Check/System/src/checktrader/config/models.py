@@ -157,14 +157,10 @@ class StrategiesConfig(StrictModel):
     breakout: BreakoutConfig = Field(default_factory=BreakoutConfig)
     # If strategies would idle-HOLD, still open on M1 momentum (no pointless HOLD loops)
     force_entry_when_idle: bool = True
-    # Digit-aware SL targets (broker point/pip from live SymbolSpecs):
-    #   2/4-digit (NATURALGAS): stop_target_points * point  → 100 pts
-    #   3/5-digit (EURUSD):     stop_target_pips * pip      → 10 pips
-    stop_target_points: float = Field(100.0, gt=0.0)
-    stop_target_pips: float = Field(10.0, gt=0.0)
-    # ATR clamps around that target (force_stop_atr = max band).
-    force_stop_atr: float = Field(3.5, gt=0.0)
-    min_stop_atr: float = Field(0.5, gt=0.0)
+    # Adaptive initial SL = force_stop_atr · live ATR (same on NG and EURUSD).
+    force_stop_atr: float = Field(1.5, gt=0.0)
+    # Structure stops may not be tighter/wider than this ATR band.
+    min_stop_atr: float = Field(0.75, gt=0.0)
     force_tp_rr: float = Field(1.20, gt=0.0)
 
 
@@ -173,7 +169,7 @@ class RiskConfig(StrictModel):
     daily_loss_limit_r: float = Field(0.0, ge=0.0)
     # 0 = disabled (no minimum RR gate)
     min_reward_risk: float = Field(0.0, ge=0.0)
-    max_stop_atr: float = Field(4.0, gt=0.0)
+    max_stop_atr: float = Field(3.0, gt=0.0)
     min_stop_points: float = Field(1.0, gt=0.0)
     max_stop_points: float = Field(10000.0, gt=0.0)
     # When false (default): ignore broker connected/trade_allowed/min_equity for entries
@@ -181,28 +177,18 @@ class RiskConfig(StrictModel):
 
 
 class ManagementConfig(StrictModel):
-    # Legacy RR fallback when ATR missing.
+    # Legacy RR fallback only when ATR is missing.
     breakeven_trigger_rr: float = Field(10.0, gt=0.0)
-    # Legacy ATR fields (still used as soft clamps via trail_min/max_atr).
-    breakeven_trigger_atr: float = Field(1.0, gt=0.0)
+    # Adaptive BE / trail — all ATR multiples of live volatility.
+    breakeven_trigger_atr: float = Field(0.75, gt=0.0)
     breakeven_offset_atr: float = Field(0.05, ge=0.0)
     breakeven_offset_points: float = Field(0.0, ge=0.0)
-    # Digit-aware BE: 50 NG points OR 8 FX pips
-    breakeven_trigger_points: float = Field(50.0, gt=0.0)
-    breakeven_trigger_pips: float = Field(8.0, gt=0.0)
     trailing_start_rr: float = Field(0.01, gt=0.0)
-    trailing_start_atr: float = Field(0.75, gt=0.0)
-    trailing_lock_atr: float = Field(1.0, gt=0.0)
-    # Digit-aware trailing
-    trailing_lock_points: float = Field(40.0, gt=0.0)
-    trailing_lock_pips: float = Field(8.0, gt=0.0)
-    trailing_start_points: float = Field(30.0, gt=0.0)
-    trailing_start_pips: float = Field(6.0, gt=0.0)
-    trail_min_atr: float = Field(0.25, ge=0.0)
-    trail_max_atr: float = Field(2.5, gt=0.0)
-    trend_trailing_atr_multiplier: float = Field(1.0, gt=0.0)
-    breakout_trailing_atr_multiplier: float = Field(1.0, gt=0.0)
-    range_trailing_atr_multiplier: float = Field(1.0, gt=0.0)
+    trailing_start_atr: float = Field(0.50, gt=0.0)
+    trailing_lock_atr: float = Field(0.75, gt=0.0)
+    trend_trailing_atr_multiplier: float = Field(0.75, gt=0.0)
+    breakout_trailing_atr_multiplier: float = Field(0.75, gt=0.0)
+    range_trailing_atr_multiplier: float = Field(0.75, gt=0.0)
     take_profit_rr: float = Field(2.0, gt=0.0)
     hard_take_profit: bool = False
     partial_close_enabled: bool = False

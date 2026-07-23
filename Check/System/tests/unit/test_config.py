@@ -17,17 +17,13 @@ def test_example_config_loads() -> None:
     assert cfg.instrument.symbol == "AUTO"
     assert cfg.position_sizing.fixed_lot == 0.02
     assert cfg.position.default_lot == 0.02
-    assert cfg.strategies.force_stop_atr == 3.5
-    assert cfg.strategies.min_stop_atr == 0.5
-    assert cfg.strategies.stop_target_points == 100.0
-    assert cfg.strategies.stop_target_pips == 10.0
-    assert cfg.risk.max_stop_atr == 4.0
+    assert cfg.strategies.force_stop_atr == 1.5
+    assert cfg.strategies.min_stop_atr == 0.75
+    assert cfg.risk.max_stop_atr == 3.0
     assert cfg.management.hard_take_profit is False
-    assert cfg.management.trailing_lock_atr == 1.0
-    assert cfg.management.trailing_lock_points == 40.0
-    assert cfg.management.trailing_lock_pips == 8.0
-    assert cfg.management.trailing_start_atr == 0.75
-    assert cfg.management.breakeven_trigger_atr == 1.0
+    assert cfg.management.trailing_lock_atr == 0.75
+    assert cfg.management.trailing_start_atr == 0.50
+    assert cfg.management.breakeven_trigger_atr == 0.75
     assert cfg.management.breakeven_offset_atr == 0.05
 
 
